@@ -1,0 +1,122 @@
+// =====================================================
+// CommercialNews — Reading Experience (V1) — Composition View
+// File: explanation/architecture/arc42/diagrams/erd/reading-composition-v1.dbml
+//
+// Purpose
+// - Show how the public read model composes data across modules via ArticleId.
+// - Reading owns no tables in V1. This is not a physical schema.
+//
+// Notes
+// - Reading must enforce Content visibility (Published + NotDeleted) even if slug resolves.
+// - Interaction view tracking is NOT shown here (non-blocking side effect).
+// =====================================================
+
+// -------- Content (truth) --------
+Table Content_Article {
+  ArticleId bigint [pk]
+  CategoryId bigint
+  AuthorUserId bigint
+
+  Title nvarchar
+  Summary nvarchar
+  Status varchar
+  PublishedAt datetime
+  IsDeleted bit
+
+  Note: "TRUTH: publication state + time sorting. Reads must filter Published + NotDeleted."
+}
+
+Table Content_Category {
+  CategoryId bigint [pk]
+  Name nvarchar
+}
+
+Table Content_Tag {
+  TagId bigint [pk]
+  Name nvarchar
+  Slug nvarchar
+}
+
+Table Content_ArticleTag {
+  ArticleId bigint
+  TagId bigint
+
+  Indexes {
+    (ArticleId, TagId) [pk]
+  }
+}
+
+// -------- SEO (routing + metadata sidecar) --------
+Table Seo_SlugRegistry {
+  SlugId bigint [pk]
+  ArticleId bigint
+  Scope varchar
+  Slug nvarchar
+  IsActive bit
+
+  Note: "HOT PATH: (Scope,Slug)->ArticleId. Reading must still validate article visibility."
+}
+
+Table Seo_SeoMetadata {
+  SeoId bigint [pk]
+  ArticleId bigint
+  CanonicalUrl nvarchar
+  MetaTitle nvarchar
+  MetaDescription nvarchar
+}
+
+// -------- Media (cover + attachments) --------
+Table Media_ArticleMedia {
+  ArticleMediaId bigint [pk]
+  ArticleId bigint
+  MediaId bigint
+  SortOrder int
+  IsPrimary bit
+  IsDeleted bit
+
+  Note: "Primary cover + ordered attachments (degrade gracefully if missing/deleted)."
+}
+
+Table Media_MediaAsset {
+  MediaId bigint [pk]
+  Url nvarchar
+  MediaType varchar
+  IsDeleted bit
+}
+
+// -------- Interaction (projection + comments) --------
+Table Interaction_Stats {
+  ArticleId bigint [pk]
+  ViewsTotal bigint
+  LikesTotal bigint
+  CommentsTotal bigint
+  PopularityScore float
+
+  Note: "Projection. Missing row => treat totals/score as 0."
+}
+
+Table Interaction_Comment {
+  CommentId bigint [pk]
+  ArticleId bigint
+  UserId bigint
+  ParentCommentId bigint [null]
+  Status varchar
+  CreatedAt datetime
+
+  Note: "Paged. Public reads only Status=Visible."
+}
+
+// -------- Relationships (composition joins) --------
+Ref: Content_Article.CategoryId > Content_Category.CategoryId
+Ref: Content_ArticleTag.ArticleId > Content_Article.ArticleId
+Ref: Content_ArticleTag.TagId > Content_Tag.TagId
+
+Ref: Seo_SlugRegistry.ArticleId > Content_Article.ArticleId
+Ref: Seo_SeoMetadata.ArticleId > Content_Article.ArticleId
+
+Ref: Media_ArticleMedia.ArticleId > Content_Article.ArticleId
+Ref: Media_ArticleMedia.MediaId > Media_MediaAsset.MediaId
+
+Ref: Interaction_Stats.ArticleId > Content_Article.ArticleId
+Ref: Interaction_Comment.ArticleId > Content_Article.ArticleId
+Ref: Interaction_Comment.ParentCommentId > Interaction_Comment.CommentId
