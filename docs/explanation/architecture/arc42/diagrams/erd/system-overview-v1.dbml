@@ -1,0 +1,265 @@
+// =====================================================
+// CommercialNews — System Overview (V1) — Module Boundary Map
+// File: explanation/architecture/arc42/diagrams/erd/system-overview-v1.dbml
+//
+// Purpose
+// - High-level module ownership + cross-module references.
+// - NOT a full physical ERD. Keep it compact and stable.
+//
+// Notes
+// - Cross-module FKs may not exist physically if modules split databases later.
+// - Treat refs as "contract-level" relationships.
+// =====================================================
+
+// -----------------------------
+// Content (owns core articles)
+// -----------------------------
+Table Content_Article {
+  ArticleId bigint [pk]
+  CategoryId bigint
+  AuthorUserId bigint
+  Status varchar
+  PublishedAt datetime
+  IsDeleted bit
+
+  Note: "TRUTH: publication state + time sorting. Full schema lives in Content module ERD."
+}
+
+Table Content_Category {
+  CategoryId bigint [pk]
+  ParentCategoryId bigint [null]
+}
+
+Table Content_Tag {
+  TagId bigint [pk]
+  Slug nvarchar
+}
+
+Table Content_ArticleTag {
+  ArticleId bigint
+  TagId bigint
+
+  Indexes {
+    (ArticleId, TagId) [pk]
+  }
+}
+
+// -----------------------------
+// SEO (read-path sidecar)
+// -----------------------------
+Table Seo_SlugRegistry {
+  SlugId bigint [pk]
+  ArticleId bigint
+  Scope varchar
+  Slug nvarchar
+  IsActive bit
+
+  Indexes {
+    (Scope, Slug) [unique, name: "UQ_SlugRegistry_Scope_Slug"]
+  }
+
+  Note: "HOT PATH: (Scope, Slug) -> ArticleId. Keep small & cache-friendly."
+}
+
+Table Seo_SeoMetadata {
+  SeoId bigint [pk]
+  ArticleId bigint
+  CanonicalUrl nvarchar [null]
+  MetaTitle nvarchar [null]
+  MetaDescription nvarchar [null]
+}
+
+// -----------------------------
+// Media (assets + attachments)
+// -----------------------------
+Table Media_MediaAsset {
+  MediaId bigint [pk]
+  Url nvarchar
+  MediaType varchar
+  IsDeleted bit
+}
+
+Table Media_ArticleMedia {
+  ArticleMediaId bigint [pk]
+  ArticleId bigint
+  MediaId bigint
+  SortOrder int
+  IsPrimary bit
+  IsDeleted bit
+}
+
+// -----------------------------
+// Interaction (signals + stats)
+// -----------------------------
+Table Interaction_Stats {
+  ArticleId bigint [pk]
+  ViewsTotal bigint
+  LikesTotal bigint
+  CommentsTotal bigint
+  PopularityScore float
+
+  Note: "Projection. Missing row => treat totals as 0."
+}
+
+Table Interaction_Comment {
+  CommentId bigint [pk]
+  ArticleId bigint
+  UserId bigint
+  ParentCommentId bigint [null]
+  Status varchar
+  CreatedAt datetime
+}
+
+// -----------------------------
+// Identity (accounts + sessions)
+// -----------------------------
+Table Identity_UserAccount {
+  UserId bigint [pk]
+  EmailNormalized nvarchar
+  Status varchar
+  IsEmailVerified bit
+}
+
+Table Identity_RefreshToken {
+  RefreshTokenId bigint [pk]
+  UserId bigint
+  TokenHash varbinary
+}
+
+// (Optional in V1) operational log
+Table Identity_LoginHistory {
+  LoginId bigint [pk]
+  UserId bigint [null]
+  Succeeded bit
+  AttemptedAt datetime
+}
+
+// -----------------------------
+// Authorization (governance)
+// -----------------------------
+Table Auth_Role {
+  RoleId bigint [pk]
+  Name nvarchar
+}
+
+Table Auth_Permission {
+  PermissionId bigint [pk]
+  Key nvarchar
+}
+
+Table Auth_UserRole {
+  UserId bigint
+  RoleId bigint
+
+  Indexes {
+    (UserId, RoleId) [pk]
+  }
+}
+
+Table Auth_RolePermission {
+  RoleId bigint
+  PermissionId bigint
+
+  Indexes {
+    (RoleId, PermissionId) [pk]
+  }
+}
+
+// -----------------------------
+// Audit (append-only governance)
+// -----------------------------
+Table Audit_AuditLog {
+  AuditId bigint [pk]
+  AuditEventId uuid
+  ActorUserId bigint [null]
+  Action nvarchar
+  ResourceType nvarchar
+  ResourceId nvarchar
+  OccurredAt datetime
+
+  Indexes {
+    (AuditEventId) [unique, name: "UQ_Audit_AuditEventId"]
+  }
+
+  Note: "Append-only. Minimal PII. Investigation-ready."
+}
+
+// -----------------------------
+// Notifications (outbox + email)
+// -----------------------------
+Table Notif_OutboxMessage {
+  OutboxId bigint [pk]
+  MessageKey uuid
+  EventType nvarchar
+  AggregateType nvarchar
+  AggregateId nvarchar
+  Status varchar
+  Priority int
+  NextRetryAt datetime [null]
+
+  Indexes {
+    (MessageKey) [unique, name: "UQ_Outbox_MessageKey"]
+  }
+
+  Note: "Durable async intent. Transport via worker/broker."
+}
+
+Table Notif_EmailDelivery {
+  EmailDeliveryId bigint [pk]
+  MessageKey uuid
+  UserId bigint [null]
+  ToEmail nvarchar
+  TemplateKey nvarchar
+  Status varchar
+  AttemptCount int
+  SentAt datetime [null]
+
+  Indexes {
+    (MessageKey) [unique, name: "UQ_EmailDelivery_MessageKey"]
+  }
+
+  Note: "Delivery workflow. One successful send per MessageKey."
+}
+
+// -----------------------------
+// Relationships (module contracts)
+// -----------------------------
+
+// Content internal
+Ref: Content_Article.CategoryId > Content_Category.CategoryId
+Ref: Content_ArticleTag.ArticleId > Content_Article.ArticleId
+Ref: Content_ArticleTag.TagId > Content_Tag.TagId
+
+// SEO -> Content
+Ref: Seo_SlugRegistry.ArticleId > Content_Article.ArticleId
+Ref: Seo_SeoMetadata.ArticleId > Content_Article.ArticleId
+
+// Media -> Content + MediaAsset
+Ref: Media_ArticleMedia.ArticleId > Content_Article.ArticleId
+Ref: Media_ArticleMedia.MediaId > Media_MediaAsset.MediaId
+
+// Interaction -> Content + Identity (comments only; views may be anonymous and omitted here)
+Ref: Interaction_Stats.ArticleId > Content_Article.ArticleId
+Ref: Interaction_Comment.ArticleId > Content_Article.ArticleId
+Ref: Interaction_Comment.ParentCommentId > Interaction_Comment.CommentId
+Ref: Interaction_Comment.UserId > Identity_UserAccount.UserId
+
+// Content -> Identity (author)
+Ref: Content_Article.AuthorUserId > Identity_UserAccount.UserId
+
+// Identity internal
+Ref: Identity_RefreshToken.UserId > Identity_UserAccount.UserId
+Ref: Identity_LoginHistory.UserId > Identity_UserAccount.UserId
+
+// Authorization -> Identity
+Ref: Auth_UserRole.UserId > Identity_UserAccount.UserId
+Ref: Auth_UserRole.RoleId > Auth_Role.RoleId
+Ref: Auth_RolePermission.RoleId > Auth_Role.RoleId
+Ref: Auth_RolePermission.PermissionId > Auth_Permission.PermissionId
+
+// Audit -> Identity
+Ref: Audit_AuditLog.ActorUserId > Identity_UserAccount.UserId
+
+// Notifications -> Outbox + Identity
+Ref: Notif_EmailDelivery.MessageKey > Notif_OutboxMessage.MessageKey
+Ref: Notif_EmailDelivery.UserId > Identity_UserAccount.UserId

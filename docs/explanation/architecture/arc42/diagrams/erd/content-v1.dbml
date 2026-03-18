@@ -1,0 +1,198 @@
+// =====================================================
+// CommercialNews — Content Module (V1) — dbdiagram.io
+// File: explanation/architecture/arc42/diagrams/erd/content-v1.dbml
+//
+// Purpose
+// - Core content lifecycle: create/edit/publish/unpublish.
+// - Taxonomy: Category/Tag and ArticleTag bridge.
+// - Audit-grade history: ArticleRevision + ArticleLifecycleEvent (append-only).
+//
+// Notes
+// - Cross-module refs (Identity/Media) are stubs for ERD readability only.
+// - Append-only enforcement and CHECK constraints are implemented in SQL Server.
+// =====================================================
+
+Enum ArticleStatusEnum {
+  Draft
+  Published
+  Archived
+}
+
+Table Category {
+  CategoryId bigint [pk, increment]
+  ParentCategoryId bigint [null] // self-FK (optional hierarchy)
+
+  Name nvarchar(200) [not null]
+  Slug nvarchar(200) [null]      // optional V1 (unique if used in routes)
+  Description nvarchar(500) [null]
+
+  IsActive bit [not null, default: 1]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  Indexes {
+    (ParentCategoryId) [name: "IX_Category_ParentCategoryId"]
+    (Slug) [unique, name: "UQ_Category_Slug"] // optional: enable only if routes rely on slug
+  }
+
+  Note: "No self-parenting in DB; no-cycles enforced in app."
+}
+
+Table Article {
+  ArticleId bigint [pk, increment]
+
+  CategoryId bigint [not null]
+  AuthorUserId bigint [not null] // cross-module ref -> Identity.UserAccount
+
+  Title nvarchar(300) [not null]
+  Summary nvarchar(1000) [null]
+  Body nvarchar(max) [not null]
+
+  Status varchar(20) [not null, default: "Draft"] // Draft/Published/Archived
+  PublishedAt datetime2(3) [null]
+  UnpublishedAt datetime2(3) [null]
+  ArchivedAt datetime2(3) [null]
+
+  CoverMediaId bigint [null] // cross-module hook -> Media.MediaAsset (optional V1)
+
+  Version int [not null, default: 1] // optimistic concurrency
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CreatedBy bigint [null]
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedBy bigint [null]
+
+  IsDeleted bit [not null, default: 0]
+  DeletedAt datetime2(3) [null]
+  DeletedBy bigint [null]
+
+  Indexes {
+    // Public feed
+    (Status, PublishedAt) [name: "IX_Article_Status_PublishedAt"]
+
+    // Filter by category
+    (CategoryId, Status, PublishedAt) [name: "IX_Article_Category_Status_PublishedAt"]
+
+    // Admin list by author
+    (AuthorUserId, CreatedAt) [name: "IX_Article_Author_CreatedAt"]
+
+    (CoverMediaId) [name: "IX_Article_CoverMediaId"]
+  }
+
+  Note: "Current state. Histories are stored in ArticleRevision and ArticleLifecycleEvent."
+}
+
+Table Tag {
+  TagId bigint [pk, increment]
+
+  Name nvarchar(100) [not null]
+  Slug nvarchar(120) [not null]
+  Description nvarchar(300) [null]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  Indexes {
+    (Slug) [unique, name: "UQ_Tag_Slug"]
+  }
+
+  Note: "Slug is a stable key for routes and filtering."
+}
+
+Table ArticleTag {
+  ArticleId bigint [not null]
+  TagId bigint [not null]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CreatedBy bigint [null]
+
+  Indexes {
+    (ArticleId, TagId) [pk] // idempotent attach
+    (TagId, ArticleId) [name: "IX_ArticleTag_TagId_ArticleId"]
+  }
+
+  Note: "N-N bridge. Composite PK ensures no duplicate attachments."
+}
+
+Table ArticleRevision {
+  RevisionId bigint [pk, increment]
+  ArticleId bigint [not null]
+
+  EditedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  EditedBy bigint [not null] // cross-module ref -> Identity.UserAccount
+  CorrelationId nvarchar(100) [null]
+  ChangeSummary nvarchar(300) [null]
+
+  OldTitle nvarchar(300) [null]
+  OldSummary nvarchar(1000) [null]
+  OldBody nvarchar(max) [null]
+
+  PatchJson nvarchar(max) [null] // V2 option
+
+  Indexes {
+    (ArticleId, EditedAt) [name: "IX_ArticleRevision_ArticleId_EditedAt"]
+    (EditedBy, EditedAt)  [name: "IX_ArticleRevision_EditedBy_EditedAt"]
+  }
+
+  Note: "Append-only edit history (audit-grade)."
+}
+
+Table ArticleLifecycleEvent {
+  EventId bigint [pk, increment]
+  ArticleId bigint [not null]
+
+  ActionType varchar(30) [not null] // Publish/Unpublish/Archive/...
+  FromStatus varchar(20) [null]
+  ToStatus varchar(20) [null]
+
+  Reason nvarchar(500) [null]       // required for Unpublish by CHECK constraint
+  ActorUserId bigint [not null]     // cross-module ref -> Identity.UserAccount
+
+  OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CorrelationId nvarchar(100) [null]
+  MetadataJson nvarchar(max) [null]
+
+  Indexes {
+    (ArticleId, OccurredAt) [name: "IX_LifecycleEvent_ArticleId_OccurredAt"]
+    (ActorUserId, OccurredAt) [name: "IX_LifecycleEvent_Actor_OccurredAt"]
+    (ActionType, OccurredAt) [name: "IX_LifecycleEvent_Action_OccurredAt"]
+  }
+
+  Note: "Append-only governance log. Unpublish requires Reason."
+}
+
+// -------------------- Relationships (Content internal) --------------------
+Ref: Article.CategoryId > Category.CategoryId
+Ref: Category.ParentCategoryId > Category.CategoryId
+
+Ref: ArticleTag.ArticleId > Article.ArticleId
+Ref: ArticleTag.TagId > Tag.TagId
+
+Ref: ArticleRevision.ArticleId > Article.ArticleId
+Ref: ArticleLifecycleEvent.ArticleId > Article.ArticleId
+
+// -------------------- External stubs (optional) --------------------
+Table IdentityUserAccount {
+  UserId bigint [pk]
+  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+}
+
+Table MediaAsset {
+  MediaId bigint [pk]
+  Note: "EXTERNAL (Media module). Stub for ERD readability only."
+}
+
+// External refs for readability
+Ref: Article.AuthorUserId > IdentityUserAccount.UserId
+Ref: ArticleRevision.EditedBy > IdentityUserAccount.UserId
+Ref: ArticleLifecycleEvent.ActorUserId > IdentityUserAccount.UserId
+Ref: Article.CoverMediaId > MediaAsset.MediaId
+
+// -------------------- SQL Server enforcement notes --------------------
+// 1) CHECK Article.Status IN ('Draft','Published','Archived')
+// 2) CHECK PublishedAt required when Status='Published'
+// 3) CHECK Category.ParentCategoryId <> CategoryId (no self-parent)
+// 4) CHECK Unpublish requires Reason in ArticleLifecycleEvent
+// 5) Append-only enforcement for ArticleRevision and ArticleLifecycleEvent via permissions/trigger.
+// 6) Consider SQL Server filtered index for published & not deleted:
+//    IX_Article_Published_NotDeleted WHERE IsDeleted=0 AND Status='Published'

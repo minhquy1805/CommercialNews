@@ -1,0 +1,12 @@
+# Module Characteristic Profiles (V1)
+
+- [Content Management](content-management.md)
+- [SEO & Discoverability](seo.md)
+- [Media (Images / Videos / Files)](media.md)
+- [Reading Experience (Public)](reading-experience.md)
+- [Interaction (Views / Likes / Comments)](interaction.md)
+- [Identity & Access](identity.md)
+- [Audit Trail](audit.md)
+- [Authorization (Roles / Permissions / Policy)](authorization.md)
+- [Audit Trail](audit.md)
+- [Notifications](notifications.md)
