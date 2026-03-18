@@ -1,0 +1,17 @@
+services:
+  cn-mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: cn-mssql
+    ports:
+      - "1433:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      SA_PASSWORD: "${SA_PASSWORD}"
+    volumes:
+      - cn_mssql_data:/var/opt/mssql
+    restart: unless-stopped
+
+volumes:
+  cn_mssql_data:
+  cn_mongo_data:
