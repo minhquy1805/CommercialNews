@@ -1,0 +1,98 @@
+// =====================================================
+// CommercialNews — Authorization Module (V1) — dbdiagram.io
+// File: explanation/architecture/arc42/diagrams/erd/authorization-v1.dbml
+//
+// Purpose
+// - RBAC foundation: roles, permissions, assignments.
+// - Idempotent grants via composite PKs.
+//
+// Notes
+// - Audit of grant/revoke is handled by Audit module (no local audit tables).
+// - Cross-module refs to Identity are contract-level (FK optional if shared DB).
+// =====================================================
+
+Table Role {
+  RoleId bigint [pk, increment]
+
+  Name nvarchar(80) [not null]           // unique: Admin/User/Moderator/Author...
+  DisplayName nvarchar(120) [null]
+  Description nvarchar(300) [null]
+
+  IsSystem bit [not null, default: 0]
+  IsActive bit [not null, default: 1]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  Indexes {
+    (Name) [unique, name: "UQ_Role_Name"]
+    (IsActive, Name) [name: "IX_Role_IsActive_Name"]
+  }
+
+  Note: "System roles may be protected by policy (IsSystem)."
+}
+
+Table Permission {
+  PermissionId bigint [pk, increment]
+
+  Key nvarchar(120) [not null]           // unique: Content:Publish
+  Module nvarchar(50) [null]             // optional grouping
+  Action nvarchar(50) [null]
+  Description nvarchar(300) [null]
+
+  IsActive bit [not null, default: 1]
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  Indexes {
+    (Key) [unique, name: "UQ_Permission_Key"]
+    (IsActive, Module, Action) [name: "IX_Permission_IsActive_Module_Action"]
+  }
+
+  Note: "Permission keys are stable identifiers. Prefer add-only evolution."
+}
+
+Table UserRole {
+  UserId bigint [not null]               // cross-module ref -> Identity.UserAccount
+  RoleId bigint [not null]
+
+  AssignedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  AssignedBy bigint [null]               // actor user (Identity)
+
+  Indexes {
+    (UserId, RoleId) [pk]                // idempotent assignment by design
+    (RoleId, UserId) [name: "IX_UserRole_RoleId_UserId"]
+  }
+
+  Note: "Composite PK ensures idempotent role assignment."
+}
+
+Table RolePermission {
+  RoleId bigint [not null]
+  PermissionId bigint [not null]
+
+  GrantedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  GrantedBy bigint [null]                // actor user (Identity)
+
+  Indexes {
+    (RoleId, PermissionId) [pk]          // idempotent grant by design
+    (PermissionId, RoleId) [name: "IX_RolePermission_PermissionId_RoleId"]
+  }
+
+  Note: "Composite PK ensures idempotent role-permission grants."
+}
+
+// ---------- External stub (optional, for ERD readability) ----------
+Table IdentityUserAccount {
+  UserId bigint [pk]
+  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+}
+
+// ---------- Relationships ----------
+Ref: UserRole.RoleId > Role.RoleId
+Ref: RolePermission.RoleId > Role.RoleId
+Ref: RolePermission.PermissionId > Permission.PermissionId
+
+// cross-module refs (visual only)
+Ref: UserRole.UserId > IdentityUserAccount.UserId
+Ref: UserRole.AssignedBy > IdentityUserAccount.UserId
+Ref: RolePermission.GrantedBy > IdentityUserAccount.UserId

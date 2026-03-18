@@ -1,0 +1,146 @@
+// =====================================================
+// CommercialNews — Notifications Module (V1) — dbdiagram.io
+// File: explanation/architecture/arc42/diagrams/erd/notifications-v1.dbml
+//
+// Purpose
+// - Reliable async emails using Outbox + delivery state machine.
+// - Core flows write to Outbox only; worker drives sending & retries.
+//
+// Design notes
+// - Idempotency via unique MessageKey.
+// - EmailDelivery is 1 workflow per MessageKey (dedup).
+// - Never store raw secrets/tokens in payloads or errors (redaction required).
+// =====================================================
+
+Enum OutboxStatusEnum {
+  Pending
+  Processing
+  Processed
+  Failed
+}
+
+Enum EmailDeliveryStatusEnum {
+  Queued
+  Sending
+  Sent
+  Failed
+}
+
+Table OutboxMessage {
+  OutboxId bigint [pk, increment]
+
+  MessageKey uniqueidentifier [not null, default: `NEWID()`] // idempotency key
+
+  EventType nvarchar(120) [not null]        // Auth.EmailVerificationRequested, Auth.PasswordResetRequested, ...
+  AggregateType nvarchar(60) [not null]     // User, Article
+  AggregateId nvarchar(100) [not null]      // string for cross-module ids
+
+  PayloadJson nvarchar(max) [not null]      // minimal + redacted (no raw tokens)
+  Priority tinyint [not null, default: 5]   // 1=highest (verify/reset)
+
+  OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  Status varchar(20) [not null, default: "Pending"] // Pending/Processing/Processed/Failed
+  RetryCount int [not null, default: 0]
+  NextRetryAt datetime2(3) [null]
+  LastError nvarchar(500) [null]            // redacted
+  ProcessedAt datetime2(3) [null]
+
+  // V2 hooks (not used in V1 but safe to add later):
+  // PartitionKey nvarchar(100) [null]
+  // ExpiresAt datetime2(3) [null]
+
+  Indexes {
+    (MessageKey) [unique, name: "UQ_Outbox_MessageKey"]
+
+    // worker pulling backlog efficiently (priority + retry time)
+    (Status, Priority, NextRetryAt) [name: "IX_Outbox_Status_Priority_NextRetryAt"]
+
+    (OccurredAt) [name: "IX_Outbox_OccurredAt"]
+    (AggregateType, AggregateId, OccurredAt) [name: "IX_Outbox_Aggregate"]
+  }
+
+  Note: "Durable async intent. Do not store raw verification/reset/refresh tokens in PayloadJson."
+}
+
+Table EmailDelivery {
+  EmailDeliveryId bigint [pk, increment]
+
+  MessageKey uniqueidentifier [not null] // link to OutboxMessage.MessageKey (dedup)
+
+  UserId bigint [null]                   // optional (cross-module ref -> Identity.UserAccount)
+  ToEmail nvarchar(320) [not null]
+
+  TemplateKey nvarchar(80) [not null]    // VerifyEmail/ResetPassword/NewArticle
+  TemplateVersion int [null]             // V2-ready
+  Subject nvarchar(200) [null]
+
+  Provider varchar(30) [not null, default: "smtp"] // smtp/sendgrid/...
+  Status varchar(20) [not null, default: "Queued"] // Queued/Sending/Sent/Failed
+
+  AttemptCount int [not null, default: 0]
+  LastAttemptAt datetime2(3) [null]
+  SentAt datetime2(3) [null]             // terminal when Sent
+  LastError nvarchar(500) [null]         // redacted
+
+  CorrelationId nvarchar(100) [null]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  // V2 hooks:
+  // ProviderMessageId nvarchar(120) [null]
+  // OpenCount int [not null, default: 0]
+  // ClickCount int [not null, default: 0]
+
+  Indexes {
+    (MessageKey) [unique, name: "UQ_EmailDelivery_MessageKey"] // one workflow per MessageKey
+
+    (Status, LastAttemptAt) [name: "IX_EmailDelivery_Status_LastAttemptAt"]
+    (UserId, CreatedAt) [name: "IX_EmailDelivery_UserId_CreatedAt"]
+    (TemplateKey, CreatedAt) [name: "IX_EmailDelivery_TemplateKey_CreatedAt"]
+    (ToEmail, CreatedAt) [name: "IX_EmailDelivery_ToEmail_CreatedAt"] // optional (PII)
+  }
+
+  Note: "Delivery state machine: Queued -> Sending -> Sent/Failed. Sent is terminal."
+}
+
+Table EmailRateLimitLog {
+  RateLogId bigint [pk, increment]
+
+  UserId bigint [null]                   // optional (cross-module ref)
+  Endpoint nvarchar(60) [not null]       // register/forgot/resend
+  ToEmail nvarchar(320) [null]
+  IpAddress nvarchar(45) [null]
+
+  Allowed bit [not null, default: 1]
+  Reason nvarchar(120) [null]            // RateLimited/Blocked/...
+  OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CorrelationId nvarchar(100) [null]
+
+  Indexes {
+    (UserId, OccurredAt) [name: "IX_RateLog_UserId_OccurredAt"]
+    (IpAddress, OccurredAt) [name: "IX_RateLog_IpAddress_OccurredAt"]
+    (Endpoint, OccurredAt) [name: "IX_RateLog_Endpoint_OccurredAt"]
+  }
+
+  Note: "Optional. Rate limiting is primarily Redis/app; DB log supports investigations."
+}
+
+// ---------- External stub (optional, for ERD readability) ----------
+Table IdentityUserAccount {
+  UserId bigint [pk]
+  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+}
+
+// ---------- Relationships ----------
+Ref: EmailDelivery.MessageKey > OutboxMessage.MessageKey
+Ref: EmailDelivery.UserId > IdentityUserAccount.UserId
+Ref: EmailRateLimitLog.UserId > IdentityUserAccount.UserId
+
+// ---------- SQL Server enforcement notes ----------
+// 1) CHECK OutboxMessage.Status IN ('Pending','Processing','Processed','Failed')
+// 2) CHECK EmailDelivery.Status IN ('Queued','Sending','Sent','Failed')
+// 3) CHECK AttemptCount >= 0 and RetryCount >= 0
+// 4) Idempotency: unique MessageKey prevents duplicate workflow / duplicate sends under retries.
+// 5) PayloadJson and LastError must be redacted (no raw tokens/secrets/PII beyond policy).

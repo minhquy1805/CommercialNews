@@ -1,0 +1,88 @@
+// =====================================================
+// CommercialNews — SEO Module (V1) — dbdiagram.io
+// File: explanation/architecture/arc42/diagrams/erd/seo-v1.dbml
+//
+// Purpose
+// - Fast slug routing: (Scope, Slug) -> ArticleId (hot path).
+// - Optional SEO metadata: canonical/meta/social fields (safe defaults if missing).
+//
+// Design notes
+// - SlugRegistry must stay small, heavily indexed, and cache-friendly.
+// - SeoMetadata is optional (0..1 per article).
+// - Visibility is owned by Content: Reading must still validate Article.Status/IsDeleted.
+// =====================================================
+
+Table SeoMetadata {
+  SeoId bigint [pk, increment]
+  ArticleId bigint [not null] // cross-module ref -> Content.Article
+
+  CanonicalUrl nvarchar(500) [null]
+  MetaTitle nvarchar(300) [null]
+  MetaDescription nvarchar(500) [null]
+
+  OgTitle nvarchar(300) [null]
+  OgDescription nvarchar(500) [null]
+  OgImageUrl nvarchar(800) [null]       // may point to Media (by URL in V1)
+
+  TwitterTitle nvarchar(300) [null]
+  TwitterDescription nvarchar(500) [null]
+  TwitterImageUrl nvarchar(800) [null]
+
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedBy bigint [null] // cross-module ref -> Identity.UserAccount
+
+  // V2 hooks:
+  // RobotsIndex bit [not null, default: 1]
+  // RobotsFollow bit [not null, default: 1]
+  // StructuredDataJson nvarchar(max) [null]
+
+  Indexes {
+    (ArticleId) [unique, name: "UQ_SeoMetadata_ArticleId"] // 0..1 per article
+    (ArticleId) [name: "IX_SeoMetadata_ArticleId"]         // may be redundant if unique index exists
+  }
+
+  Note: "Heavier metadata. Missing row must not break reads; defaults are applied by policy."
+}
+
+Table SlugRegistry {
+  SlugId bigint [pk, increment]
+  ArticleId bigint [not null] // cross-module ref -> Content.Article
+
+  Slug nvarchar(200) [not null]
+  Scope varchar(30) [not null, default: "global"] // V1 policy: global unique
+  IsActive bit [not null, default: 1]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CreatedBy bigint [null] // cross-module ref -> Identity.UserAccount
+
+  Indexes {
+    (Scope, Slug) [unique, name: "UQ_SlugRegistry_Scope_Slug"] // routing key
+    (Scope, Slug) [name: "IX_SlugRegistry_Scope_Slug"]         // often covered by unique index
+    (ArticleId)   [name: "IX_SlugRegistry_ArticleId"]          // maintenance/update/deactivate
+  }
+
+  Note: "Public entry point: (Scope,Slug)->ArticleId. Keep small & cache-friendly."
+}
+
+// ---------- Cross-module stubs (optional, for ERD readability) ----------
+Table ContentArticle {
+  ArticleId bigint [pk]
+  Note: "EXTERNAL (Content module). Stub for ERD readability only."
+}
+
+Table IdentityUserAccount {
+  UserId bigint [pk]
+  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+}
+
+// ---------- Relationships (visual only) ----------
+Ref: SeoMetadata.ArticleId > ContentArticle.ArticleId
+Ref: SlugRegistry.ArticleId > ContentArticle.ArticleId
+
+Ref: SeoMetadata.UpdatedBy > IdentityUserAccount.UserId
+Ref: SlugRegistry.CreatedBy > IdentityUserAccount.UserId
+
+// ---------- SQL Server enforcement notes ----------
+// 1) CHECK Slug not empty: LEN(LTRIM(RTRIM(Slug))) > 0
+// 2) CHECK Scope enum whitelist (global/category/locale/site) as policy.
+// 3) Routing safety: even if SlugRegistry resolves, Reading must validate Content visibility.
