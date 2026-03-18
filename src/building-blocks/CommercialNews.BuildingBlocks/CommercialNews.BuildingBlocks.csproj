@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Folder Include="Abstractions\Correlation\" />
+    <Folder Include="Abstractions\Execution\" />
+    <Folder Include="Abstractions\UserContext\" />
+    <Folder Include="Abstractions\Time\" />
+    <Folder Include="Contracts\Events\" />
+    <Folder Include="Contracts\Http\" />
+    <Folder Include="Errors\" />
+    <Folder Include="Messaging\Broker\" />
+    <Folder Include="Messaging\Idempotency\" />
+    <Folder Include="Messaging\Replay\" />
+    <Folder Include="Messaging\Outbox\" />
+    <Folder Include="Security\" />
+    <Folder Include="Observability\" />
+    <Folder Include="Paging\" />
+    <Folder Include="Persistence\Cache\" />
+    <Folder Include="Persistence\Document\" />
+    <Folder Include="Persistence\Warehouse\" />
+    <Folder Include="Persistence\Sql\" />
+    <Folder Include="Result\" />
+  </ItemGroup>
+
+</Project>
