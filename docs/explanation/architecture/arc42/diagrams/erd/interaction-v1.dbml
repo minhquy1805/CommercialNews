@@ -1,0 +1,138 @@
+// =====================================================
+// CommercialNews — Interaction Module (V1) — dbdiagram.io
+// File: explanation/architecture/arc42/diagrams/erd/interaction-v1.dbml
+//
+// Purpose
+// - Track views/likes/comments without blocking the public read path.
+// - Provide stable counters for popularity sorting (projection).
+//
+// Design notes
+// - ArticleViewEvent is a high-write append-only log -> keep indexes minimal.
+// - Likes are idempotent via UNIQUE (ArticleId, UserId) and toggle IsActive.
+// - Comments are soft-lifecycle; public reads only Visible.
+// - Stats are eventual consistency; missing row => treat as 0.
+// =====================================================
+
+Enum CommentStatusEnum {
+  Visible
+  Hidden
+  Deleted
+  Pending
+}
+
+Table ArticleViewEvent {
+  ViewId bigint [pk, increment]
+
+  ArticleId bigint [not null]     // cross-module ref -> Content.Article
+  UserId bigint [null]            // nullable for anonymous views
+
+  ViewedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  IpAddress nvarchar(45) [null]   // IPv4/IPv6 (optional PII, policy-controlled)
+  UserAgent nvarchar(300) [null]
+  SessionId nvarchar(100) [null]  // V2 unique hook
+  Referrer nvarchar(500) [null]
+  CorrelationId nvarchar(100) [null]
+
+  Indexes {
+    // Keep minimal for high-write log
+    (ArticleId, ViewedAt) [name: "IX_ViewEvent_ArticleId_ViewedAt"]
+    (ViewedAt)            [name: "IX_ViewEvent_ViewedAt"]
+    (UserId, ViewedAt)    [name: "IX_ViewEvent_UserId_ViewedAt"] // optional debugging
+  }
+
+  Note: "Append-only high-write log. Public read path must not depend on this table."
+}
+
+Table ArticleLike {
+  LikeId bigint [pk, increment]
+
+  ArticleId bigint [not null]  // cross-module ref -> Content.Article
+  UserId bigint [not null]     // cross-module ref -> Identity.UserAccount
+
+  LikedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UnlikedAt datetime2(3) [null]
+  IsActive bit [not null, default: 1] // toggle like/unlike (no delete)
+
+  Indexes {
+    (ArticleId, UserId) [unique, name: "UQ_ArticleLike_ArticleId_UserId"]
+    (ArticleId, IsActive) [name: "IX_Like_ArticleId_IsActive"]
+    (UserId, IsActive, LikedAt) [name: "IX_Like_UserId_IsActive_LikedAt"] // optional profile activity
+  }
+
+  Note: "Idempotent like by unique key. Toggle IsActive to avoid insert/delete churn."
+}
+
+Table Comment {
+  CommentId bigint [pk, increment]
+
+  ArticleId bigint [not null]       // cross-module ref -> Content.Article
+  UserId bigint [not null]          // author -> Identity.UserAccount
+  ParentCommentId bigint [null]     // self-ref (optional V1 threading)
+
+  Content nvarchar(2000) [not null]
+  Status varchar(20) [not null, default: "Visible"] // Visible/Hidden/Deleted/Pending
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAt datetime2(3) [null]
+  DeletedAt datetime2(3) [null]
+  DeletedBy bigint [null]           // moderator/admin -> Identity.UserAccount
+
+  EditCount int [not null, default: 0]
+
+  Indexes {
+    (ArticleId, Status, CreatedAt) [name: "IX_Comment_ArticleId_Status_CreatedAt"]
+    (ParentCommentId, CreatedAt)   [name: "IX_Comment_ParentCommentId_CreatedAt"]
+    (UserId, CreatedAt)            [name: "IX_Comment_UserId_CreatedAt"] // optional
+  }
+
+  Note: "Soft lifecycle. Public reads only Status=Visible. Hard delete discouraged."
+}
+
+Table ArticleInteractionStats {
+  ArticleId bigint [pk] // projection: 0..1 per article
+
+  ViewsTotal bigint [not null, default: 0]
+  LikesTotal bigint [not null, default: 0]
+  CommentsTotal bigint [not null, default: 0]
+
+  PopularityScore float [not null, default: 0]
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  Indexes {
+    (PopularityScore, ArticleId) [name: "IX_Stats_PopularityScore"]
+    (UpdatedAt)                  [name: "IX_Stats_UpdatedAt"]
+  }
+
+  Note: "Materialized counters updated async. If missing, treat totals as 0."
+}
+
+// ---------- Cross-module stubs (optional, for ERD readability) ----------
+Table ContentArticle {
+  ArticleId bigint [pk]
+  Note: "EXTERNAL (Content module). Stub for ERD readability only."
+}
+
+Table IdentityUserAccount {
+  UserId bigint [pk]
+  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+}
+
+// ---------- Relationships ----------
+Ref: ArticleViewEvent.ArticleId > ContentArticle.ArticleId
+Ref: ArticleLike.ArticleId > ContentArticle.ArticleId
+Ref: Comment.ArticleId > ContentArticle.ArticleId
+Ref: ArticleInteractionStats.ArticleId > ContentArticle.ArticleId
+
+Ref: ArticleViewEvent.UserId > IdentityUserAccount.UserId
+Ref: ArticleLike.UserId > IdentityUserAccount.UserId
+Ref: Comment.UserId > IdentityUserAccount.UserId
+Ref: Comment.DeletedBy > IdentityUserAccount.UserId
+
+Ref: Comment.ParentCommentId > Comment.CommentId
+
+// ---------- SQL Server enforcement notes ----------
+// 1) CHECK Comment.Status IN ('Visible','Hidden','Deleted','Pending')
+// 2) CHECK counters non-negative: ViewsTotal/LikesTotal/CommentsTotal >= 0
+// 3) CHECK EditCount >= 0
+// 4) Retention/purge for ArticleViewEvent by ViewedAt (e.g., 7–30 days)
+// 5) Stats are eventual consistency; never block reads on stats availability.

@@ -1,0 +1,65 @@
+// =====================================================
+// CommercialNews — Audit Module (V1) — dbdiagram.io
+// File: explanation/architecture/arc42/diagrams/erd/audit-v1.dbml
+//
+// Purpose
+// - Append-only logging for sensitive actions across modules.
+// - Investigation-ready and governance-friendly.
+//
+// Design
+// - ResourceType/ResourceId stored as strings (no hard FK).
+// - Idempotency via unique AuditEventId.
+// - ActorUserId is nullable for system actions.
+//
+// Notes
+// - dbdiagram cannot enforce triggers/permissions.
+// - Enforce append-only in SQL Server via deny UPDATE/DELETE or trigger.
+// =====================================================
+
+Table AuditLog {
+  AuditId bigint [pk, increment]
+  AuditEventId uniqueidentifier [not null, default: `NEWID()`] // idempotency key
+
+  ActorUserId bigint [null] // Identity.UserAccount (nullable for system actions)
+
+  Action nvarchar(120) [not null]        // e.g. Content.Publish, Auth.RoleGrant
+  ResourceType nvarchar(60) [not null]   // Article/User/Comment/...
+  ResourceId nvarchar(100) [not null]    // string for cross-module ids
+
+  Reason nvarchar(500) [null]            // required by policy for some actions
+
+  OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CorrelationId nvarchar(100) [null]
+
+  IpAddress nvarchar(45) [null]
+  UserAgent nvarchar(300) [null]
+
+  OldValuesJson nvarchar(max) [null]     // redacted/minimized
+  NewValuesJson nvarchar(max) [null]     // redacted/minimized
+  MetadataJson nvarchar(max) [null]      // module info, policy version...
+
+  Indexes {
+    (AuditEventId) [unique, name: "UQ_AuditLog_AuditEventId"]
+
+    (OccurredAt) [name: "IX_AuditLog_OccurredAt"]
+    (ActorUserId, OccurredAt) [name: "IX_AuditLog_ActorUserId_OccurredAt"]
+    (ResourceType, ResourceId, OccurredAt) [name: "IX_AuditLog_Resource_OccurredAt"]
+    (Action, OccurredAt) [name: "IX_AuditLog_Action_OccurredAt"]
+    (CorrelationId) [name: "IX_AuditLog_CorrelationId"]
+  }
+
+  Note: "Append-only. Never store secrets/raw tokens/password hashes in payload."
+}
+
+// ---------- External stub (optional, for ERD readability) ----------
+Table IdentityUserAccount {
+  UserId bigint [pk]
+  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+}
+
+Ref: AuditLog.ActorUserId > IdentityUserAccount.UserId
+
+// ---------- Notes for SQL Server enforcement ----------
+// 1) Append-only enforcement via DB permissions (deny UPDATE/DELETE) or trigger.
+// 2) Optional CHECK: Action/ResourceType/ResourceId not empty.
+// 3) Idempotent ingestion: unique AuditEventId prevents duplicates under retries.

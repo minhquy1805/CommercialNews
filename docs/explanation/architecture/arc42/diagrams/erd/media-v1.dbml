@@ -1,0 +1,142 @@
+// =====================================================
+// CommercialNews — Media Module (V1) — dbdiagram.io
+// File: explanation/architecture/arc42/diagrams/erd/media-v1.dbml
+//
+// Purpose
+// - Manage media assets (metadata) + attach to articles with ordering & primary.
+// - Keep reusable file metadata in MediaAsset.
+// - Keep per-article concerns (ordering/primary/caption) in ArticleMedia.
+//
+// Notes
+// - Primary-per-article is best enforced via SQL Server filtered unique index:
+//   UNIQUE (ArticleId) WHERE IsPrimary=1 AND IsDeleted=0
+// - Cross-module refs to Content/Identity are stubs for ERD readability only.
+// =====================================================
+
+Enum MediaTypeEnum {
+  Image
+  Video
+  File
+}
+
+Table MediaAsset {
+  MediaId bigint [pk, increment]
+
+  StorageProvider varchar(30) [not null, default: "local"] // local/gcs/s3...
+  Url nvarchar(800) [not null]          // public serving URL
+  StoragePath nvarchar(800) [null]      // internal key/path
+  FileName nvarchar(255) [null]
+
+  MediaType varchar(20) [not null]      // Image/Video/File (CHECK recommended)
+  MimeType nvarchar(100) [null]
+
+  FileSizeBytes bigint [null]
+  Width int [null]
+  Height int [null]
+  DurationSeconds int [null]
+
+  AltText nvarchar(300) [null]          // default alt
+  ContentHash varbinary(32) [null]      // dedup/integrity hook (V2 choice)
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CreatedBy bigint [null]               // Identity.UserAccount (external)
+
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  IsDeleted bit [not null, default: 0]
+  DeletedAt datetime2(3) [null]
+  DeletedBy bigint [null]               // Identity.UserAccount (external)
+  RestoreUntil datetime2(3) [null]      // retention window hook
+
+  Indexes {
+    (IsDeleted, CreatedAt) [name: "IX_MediaAsset_IsDeleted_CreatedAt"]
+    (MimeType)             [name: "IX_MediaAsset_MimeType"]
+    (ContentHash)          [name: "IX_MediaAsset_ContentHash"] // make UNIQUE only if enforcing dedup (V2)
+  }
+
+  Note: "Metadata only. Binary bytes live in object storage. Soft delete preferred."
+}
+
+Table ArticleMedia {
+  ArticleMediaId bigint [pk, increment]
+
+  ArticleId bigint [not null] // cross-module ref -> Content.Article
+  MediaId bigint [not null]   // FK -> MediaAsset
+
+  SortOrder int [not null, default: 0]
+  IsPrimary bit [not null, default: 0]
+
+  AltTextOverride nvarchar(300) [null]
+  Caption nvarchar(300) [null]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CreatedBy bigint [null] // Identity.UserAccount (external)
+
+  IsDeleted bit [not null, default: 0]
+  DeletedAt datetime2(3) [null]
+
+  Indexes {
+    // No duplicate attachment per article
+    (ArticleId, MediaId) [unique, name: "UQ_ArticleMedia_ArticleId_MediaId"]
+
+    // Stable ordering per article
+    (ArticleId, SortOrder) [name: "IX_ArticleMedia_ArticleId_SortOrder"]
+
+    // Fast cover lookup (filtered unique is enforced in SQL Server)
+    (ArticleId, IsPrimary) [name: "IX_ArticleMedia_ArticleId_IsPrimary"]
+
+    // Ops: find all articles using a media asset
+    (MediaId, ArticleId) [name: "IX_ArticleMedia_MediaId_ArticleId"]
+  }
+
+  Note: "Per-article attachment concerns: ordering, primary selection, per-article alt/caption."
+}
+
+// ----------- (V2) Variants -----------
+Table MediaVariant {
+  VariantId bigint [pk, increment]
+  MediaId bigint [not null] // FK -> MediaAsset
+
+  VariantType varchar(30) [not null] // thumb/medium/large/webp...
+  Url nvarchar(800) [not null]
+
+  Width int [null]
+  Height int [null]
+  FileSizeBytes bigint [null]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  Indexes {
+    (MediaId, VariantType) [unique, name: "UQ_MediaVariant_MediaId_VariantType"]
+  }
+
+  Note: "Optional V2. Store processed/derived versions."
+}
+
+// ---------- External stubs (optional, for ERD readability) ----------
+Table ContentArticle {
+  ArticleId bigint [pk]
+  Note: "EXTERNAL (Content module). Stub for ERD readability only."
+}
+
+Table IdentityUserAccount {
+  UserId bigint [pk]
+  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+}
+
+// ---------- Relationships ----------
+Ref: ArticleMedia.MediaId > MediaAsset.MediaId
+Ref: MediaVariant.MediaId > MediaAsset.MediaId
+
+// cross-module refs (visual only)
+Ref: ArticleMedia.ArticleId > ContentArticle.ArticleId
+Ref: MediaAsset.CreatedBy > IdentityUserAccount.UserId
+Ref: MediaAsset.DeletedBy > IdentityUserAccount.UserId
+Ref: ArticleMedia.CreatedBy > IdentityUserAccount.UserId
+
+// ---------- SQL Server enforcement notes ----------
+// 1) CHECK ArticleMedia.SortOrder >= 0
+// 2) CHECK MediaAsset.MediaType IN ('Image','Video','File')
+// 3) Primary-per-article (filtered unique index):
+//    UNIQUE (ArticleId) WHERE IsPrimary=1 AND IsDeleted=0
+// 4) Prefer soft delete; avoid cascading hard deletes.

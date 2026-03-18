@@ -1,0 +1,160 @@
+// =====================================================
+// CommercialNews — Identity Module (V1) — dbdiagram.io
+// File: explanation/architecture/arc42/diagrams/erd/identity-v1.dbml
+//
+// Purpose
+// - Account management (email/password), verification, reset, refresh-token sessions.
+// - Security-first: store TokenHash only (never store raw tokens).
+//
+// Notes
+// - dbdiagram cannot enforce all SQL Server checks/triggers.
+// - Enforce additional CHECKs, filtered indexes, and operational rules in T-SQL.
+// =====================================================
+
+Enum UserAccountStatusEnum {
+  Active
+  Inactive
+  Locked
+}
+
+Table UserAccount {
+  UserId bigint [pk, increment]
+  PublicId char(26) [not null] // ULID, public opaque identifier
+
+  Email nvarchar(320) [not null]
+  EmailNormalized nvarchar(320) [not null] // lower-case lookup key (unique)
+
+  PasswordHash nvarchar(500) [not null] // hash only (never log)
+
+  FullName nvarchar(200) [null]
+  AvatarUrl nvarchar(800) [null]
+
+  IsEmailVerified bit [not null, default: 0]
+  EmailVerifiedAt datetime2(3) [null]
+
+  Status varchar(20) [not null, default: "Active"] // Active/Inactive/Locked
+  LockedUntil datetime2(3) [null]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  LastLoginAt datetime2(3) [null]
+
+  Version int [not null, default: 1]
+
+  Indexes {
+    (PublicId) [unique, name: "UQ_UserAccount_PublicId"]
+    (EmailNormalized) [unique, name: "UQ_UserAccount_EmailNormalized"]
+    (Status, LockedUntil) [name: "IX_UserAccount_Status_LockedUntil"]
+    (IsEmailVerified, CreatedAt) [name: "IX_UserAccount_Verified_CreatedAt"]
+  }
+
+  Note: "Core identity + state gating. Internal PK is bigint; PublicId is stable opaque identity."
+}
+
+Table EmailVerificationToken {
+  VerificationTokenId bigint [pk, increment]
+  UserId bigint [not null]
+
+  TokenHash varbinary(32) [not null] // SHA-256 hash (recommended)
+  ExpiresAt datetime2(3) [not null]
+  UsedAt datetime2(3) [null] // one-time use marker
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CreatedIp nvarchar(45) [null]
+  CorrelationId nvarchar(100) [null]
+
+  Indexes {
+    (TokenHash) [unique, name: "UQ_EmailVerificationToken_TokenHash"]
+    (UserId, ExpiresAt) [name: "IX_EmailVerificationToken_UserId_ExpiresAt"]
+    (ExpiresAt) [name: "IX_EmailVerificationToken_ExpiresAt"]
+  }
+
+  Note: "Time-bound + one-time use. Resend is rate-limited in Redis/app."
+}
+
+Table PasswordResetToken {
+  ResetTokenId bigint [pk, increment]
+  UserId bigint [not null]
+
+  TokenHash varbinary(32) [not null] // SHA-256 hash
+  ExpiresAt datetime2(3) [not null]
+  UsedAt datetime2(3) [null]
+  RevokedAt datetime2(3) [null] // invalidate older active tokens when policy requires
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CreatedIp nvarchar(45) [null]
+  CorrelationId nvarchar(100) [null]
+
+  Indexes {
+    (TokenHash) [unique, name: "UQ_PasswordResetToken_TokenHash"]
+    (UserId, ExpiresAt) [name: "IX_PasswordResetToken_UserId_ExpiresAt"]
+    (ExpiresAt) [name: "IX_PasswordResetToken_ExpiresAt"]
+  }
+
+  Note: "Time-bound + one-time use. New issuance may revoke older active tokens."
+}
+
+Table RefreshToken {
+  RefreshTokenId bigint [pk, increment]
+  UserId bigint [not null]
+
+  TokenHash varbinary(32) [not null] // unique, never store raw token
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  ExpiresAt datetime2(3) [not null]
+
+  RevokedAt datetime2(3) [null]
+  RevokedReason nvarchar(200) [null]
+
+  ReplacedByTokenHash varbinary(32) [null] // rotation chain pointer
+
+  CreatedIp nvarchar(45) [null]
+  UserAgent nvarchar(300) [null]
+  CorrelationId nvarchar(100) [null]
+
+  Indexes {
+    (TokenHash) [unique, name: "UQ_RefreshToken_TokenHash"]
+    (UserId, RevokedAt, ExpiresAt) [name: "IX_RefreshToken_UserId_RevokedAt_ExpiresAt"]
+    (ExpiresAt) [name: "IX_RefreshToken_ExpiresAt"]
+    (ReplacedByTokenHash) [name: "IX_RefreshToken_ReplacedByTokenHash"]
+  }
+
+  Note: "Rotation + revocation. Reuse detection is a V2 hook unless fully implemented earlier."
+}
+
+Table LoginHistory {
+  LoginId bigint [pk, increment]
+
+  UserId bigint [null] // nullable if account lookup fails
+  EmailNormalizedAttempted nvarchar(320) [null]
+
+  Succeeded bit [not null, default: 0]
+  FailureReason nvarchar(100) [null] // reason code: InvalidPassword/Locked/Inactive/NotVerified/UserNotFound
+
+  AttemptedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  IpAddress nvarchar(45) [null]
+  UserAgent nvarchar(300) [null]
+  CorrelationId nvarchar(100) [null]
+
+  Indexes {
+    (AttemptedAt) [name: "IX_LoginHistory_AttemptedAt"]
+    (IpAddress, AttemptedAt) [name: "IX_LoginHistory_IpAddress_AttemptedAt"]
+    (UserId, AttemptedAt) [name: "IX_LoginHistory_UserId_AttemptedAt"]
+    (Succeeded, AttemptedAt) [name: "IX_LoginHistory_Succeeded_AttemptedAt"]
+  }
+
+  Note: "Recommended for abuse detection and investigations. Store minimum necessary data only."
+}
+
+// ---------- Relationships ----------
+Ref: EmailVerificationToken.UserId > UserAccount.UserId
+Ref: PasswordResetToken.UserId > UserAccount.UserId
+Ref: RefreshToken.UserId > UserAccount.UserId
+Ref: LoginHistory.UserId > UserAccount.UserId
+
+// ---------- SQL Server enforcement notes ----------
+// 1) CHECK UserAccount.Status IN ('Active','Inactive','Locked')
+// 2) Optional CHECK token sanity: ExpiresAt > CreatedAt
+// 3) Never store or log raw tokens; store TokenHash only
+// 4) Password reset issuance may revoke older active reset tokens (app/SQL policy)
+// 5) PublicId is immutable and never reused
