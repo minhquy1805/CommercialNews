@@ -1,0 +1,119 @@
+# --------------------------------------------------
+# OS / Editor
+# --------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Visual Studio / VS Code / Rider
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# --------------------------------------------------
+# Build outputs
+# --------------------------------------------------
+**/bin/
+**/obj/
+out/
+artifacts/
+
+# --------------------------------------------------
+# .NET
+# --------------------------------------------------
+*.cache
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+TestResults/
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+
+# Generated files
+Generated/
+*.generated.cs
+
+# --------------------------------------------------
+# Logs / temp
+# --------------------------------------------------
+*.log
+logs/
+tmp/
+temp/
+
+# --------------------------------------------------
+# Coverage / test reports
+# --------------------------------------------------
+coverage/
+coverage-report/
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
+
+# --------------------------------------------------
+# Local app settings / secrets
+# Keep templates, ignore local secret overrides
+# --------------------------------------------------
+appsettings.Local.json
+appsettings.*.local.json
+appsettings.Secrets.json
+secrets.json
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# --------------------------------------------------
+# Docker / containers
+# --------------------------------------------------
+docker-data/
+*.pid
+
+# --------------------------------------------------
+# Database local artifacts
+# --------------------------------------------------
+*.mdf
+*.ldf
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+
+# --------------------------------------------------
+# Node (if frontend/tooling appears later)
+# --------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --------------------------------------------------
+# Terraform / infra (future-safe)
+# --------------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# --------------------------------------------------
+# Misc
+# --------------------------------------------------
+*.orig
+*.rej
+
+# Local SQL bootstrap secrets
+db/00_bootstrap/020_create_logins_users.local.sql
