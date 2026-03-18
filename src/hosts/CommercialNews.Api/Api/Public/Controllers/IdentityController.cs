@@ -1,0 +1,126 @@
+﻿using Identity.Application.Contracts.Dtos;
+using Identity.Application.UseCases.ForgotPassword;
+using Identity.Application.UseCases.LoginUser;
+using Identity.Application.UseCases.RegisterUser;
+using Identity.Application.UseCases.VerifyEmail;
+using Microsoft.AspNetCore.Mvc;
+
+namespace CommercialNews.Api.Api.Public.Controllers
+{
+    [ApiController]
+    [Route("api/v1/identity")]
+    public sealed class IdentityController : ControllerBase
+    {
+        [HttpPost("register")]
+        [ProducesResponseType(typeof(RegisterUserResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> Register(
+            [FromBody] RegisterUserRequestDto request,
+            [FromServices] IRegisterUserUseCase useCase,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await useCase.ExecuteAsync(request, cancellationToken);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new
+                {
+                    message = ex.Message
+                });
+            }
+        }
+
+        [HttpPost("verify-email")]
+        [ProducesResponseType(typeof(VerifyEmailResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> VerifyEmail(
+            [FromBody] VerifyEmailRequestDto request,
+            [FromServices] IVerifyEmailUseCase useCase,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await useCase.ExecuteAsync(request, cancellationToken);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new
+                {
+                    message = ex.Message
+                });
+            }
+        }
+
+        [HttpPost("login")]
+        [ProducesResponseType(typeof(LoginUserResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> Login(
+            [FromBody] LoginUserRequestDto request,
+            [FromServices] ILoginUserUseCase useCase,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await useCase.ExecuteAsync(request, cancellationToken);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new
+                {
+                    message = ex.Message
+                });
+            }
+        }
+
+        [HttpPost("forgot-password")]
+        [ProducesResponseType(typeof(ForgotPasswordResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> ForgotPassword(
+            [FromBody] ForgotPasswordRequestDto request,
+            [FromServices] IForgotPasswordUseCase useCase,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await useCase.ExecuteAsync(request, cancellationToken);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
+        }
+    }
+}
