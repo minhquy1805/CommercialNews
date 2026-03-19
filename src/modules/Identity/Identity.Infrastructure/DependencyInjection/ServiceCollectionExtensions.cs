@@ -3,6 +3,7 @@ using Identity.Application.Contracts.Ports;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.RegisterUser;
+using Identity.Application.UseCases.ResetPassword;
 using Identity.Application.UseCases.VerifyEmail;
 using Identity.Infrastructure.Messaging;
 using Identity.Infrastructure.Persistence.Sql;
@@ -53,6 +54,9 @@ namespace Identity.Infrastructure.DependencyInjection
             services.AddScoped<IForgotPasswordUseCase, ForgotPasswordUseCase>();
             
             services.AddScoped<IOutboxWriter, SqlOutboxWriter>();
+
+            services.AddScoped<IPasswordResetService, PasswordResetService>();
+            services.AddScoped<IResetPasswordUseCase, ResetPasswordUseCase>();
 
             return services;
         }
