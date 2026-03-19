@@ -1,4 +1,6 @@
-﻿using Identity.Application.Contracts.Dtos;
+﻿using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Identity.Application.Contracts;
+using Identity.Application.Contracts.Dtos;
 using Identity.Application.Contracts.Ports;
 using Identity.Domain.Entities;
 using Identity.Domain.Enums;
@@ -14,7 +16,8 @@ namespace Identity.Application.UseCases.RegisterUser
         private readonly IRawTokenGenerator _rawTokenGenerator;
         private readonly ITokenHashProvider _tokenHashProvider;
         private readonly IDateTimeProvider _dateTimeProvider;
-        private readonly IIdentityEmailSender _identityEmailSender;
+        // private readonly IIdentityEmailSender _identityEmailSender;
+        private readonly IOutboxWriter _outboxWriter;
         private readonly IIdentityUnitOfWork _unitOfWork;
 
         public RegisterUserUseCase(
@@ -25,7 +28,7 @@ namespace Identity.Application.UseCases.RegisterUser
             IRawTokenGenerator rawTokenGenerator,
             ITokenHashProvider tokenHashProvider,
             IDateTimeProvider dateTimeProvider,
-            IIdentityEmailSender identityEmailSender,
+            IOutboxWriter outboxWriter,
             IIdentityUnitOfWork unitOfWork)
         {
             _userAccountRepository = userAccountRepository;
@@ -35,7 +38,7 @@ namespace Identity.Application.UseCases.RegisterUser
             _rawTokenGenerator = rawTokenGenerator;
             _tokenHashProvider = tokenHashProvider;
             _dateTimeProvider = dateTimeProvider;
-            _identityEmailSender = identityEmailSender;
+            _outboxWriter = outboxWriter;
             _unitOfWork = unitOfWork;
         }
 
@@ -82,6 +85,7 @@ namespace Identity.Application.UseCases.RegisterUser
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
+            
             try
             {
                 var userId = await _userAccountRepository.InsertAsync(user, cancellationToken);
@@ -100,13 +104,33 @@ namespace Identity.Application.UseCases.RegisterUser
                     verificationToken,
                     cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
+                var payload = new EmailVerificationRequestedPayloadDto
+                {
+                    UserId = userId,
+                    PublicId = user.PublicId,
+                    Email = user.Email,
+                    RawToken = rawVerificationToken
+                };
 
-                await _identityEmailSender.SendVerificationEmailAsync(
-                    user.Email,
-                    user.PublicId,
-                    rawVerificationToken,
-                    cancellationToken);
+                var payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
+
+                var outboxMessageId = _publicIdGenerator.NewId();
+
+                await _outboxWriter.WriteAsync(
+                    messageId: outboxMessageId,
+                    eventType: IdentityOutboxEventTypes.EmailVerificationRequested,
+                    aggregateType: "UserAccount",
+                    aggregateId: userId.ToString(),
+                    aggregatePublicId: user.PublicId,
+                    aggregateVersion: 1,
+                    payload: payloadJson,
+                    headers: null,
+                    correlationId: null,
+                    initiatorUserId: userId,
+                    occurredAtUtc: nowUtc,
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
 
                 return new RegisterUserResponseDto
                 {
