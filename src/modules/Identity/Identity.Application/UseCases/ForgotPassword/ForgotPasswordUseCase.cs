@@ -1,4 +1,6 @@
-﻿using Identity.Application.Contracts.Dtos;
+﻿using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Identity.Application.Contracts;
+using Identity.Application.Contracts.Dtos;
 using Identity.Application.Contracts.Ports;
 using Identity.Domain.Entities;
 
@@ -11,8 +13,9 @@ namespace Identity.Application.UseCases.ForgotPassword
         private readonly IRawTokenGenerator _rawTokenGenerator;
         private readonly ITokenHashProvider _tokenHashProvider;
         private readonly IDateTimeProvider _dateTimeProvider;
-        private readonly IIdentityEmailSender _identityEmailSender;
+        private readonly IOutboxWriter _outboxWriter;
         private readonly IIdentityUnitOfWork _unitOfWork;
+        private readonly IPublicIdGenerator _publicIdGenerator;
 
         public ForgotPasswordUseCase(
             IUserAccountRepository userAccountRepository,
@@ -20,16 +23,18 @@ namespace Identity.Application.UseCases.ForgotPassword
             IRawTokenGenerator rawTokenGenerator,
             ITokenHashProvider tokenHashProvider,
             IDateTimeProvider dateTimeProvider,
-            IIdentityEmailSender identityEmailSender,
-            IIdentityUnitOfWork unitOfWork)
+            IOutboxWriter outboxWriter,
+            IIdentityUnitOfWork unitOfWork,
+            IPublicIdGenerator publicIdGenerator)
         {
             _userAccountRepository = userAccountRepository;
             _passwordResetTokenRepository = passwordResetTokenRepository;
             _rawTokenGenerator = rawTokenGenerator;
             _tokenHashProvider = tokenHashProvider;
             _dateTimeProvider = dateTimeProvider;
-            _identityEmailSender = identityEmailSender;
+            _outboxWriter = outboxWriter;
             _unitOfWork = unitOfWork;
+            _publicIdGenerator = publicIdGenerator;
         }
 
         public async Task<ForgotPasswordResponseDto> ExecuteAsync(
@@ -75,6 +80,32 @@ namespace Identity.Application.UseCases.ForgotPassword
                     resetToken,
                     cancellationToken);
 
+                var payload = new PasswordResetRequestedPayloadDto
+                {
+                    UserId = user.UserId,
+                    PublicId = user.PublicId,
+                    Email = user.Email,
+                    RawToken = rawResetToken
+                };
+
+                var payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
+
+                var outboxMessageId = _publicIdGenerator.NewId();
+
+                await _outboxWriter.WriteAsync(
+                    messageId: outboxMessageId,
+                    eventType: IdentityOutboxEventTypes.PasswordResetRequested,
+                    aggregateType: "UserAccount",
+                    aggregateId: user.UserId.ToString(),
+                    aggregatePublicId: user.PublicId,
+                    aggregateVersion: user.Version,
+                    payload: payloadJson,
+                    headers: null,
+                    correlationId: null,
+                    initiatorUserId: user.UserId,
+                    occurredAtUtc: nowUtc,
+                    cancellationToken: cancellationToken);
+
                 await _unitOfWork.CommitAsync(cancellationToken);
             }
             catch
@@ -82,12 +113,6 @@ namespace Identity.Application.UseCases.ForgotPassword
                 await _unitOfWork.RollbackAsync(cancellationToken);
                 throw;
             }
-
-            await _identityEmailSender.SendResetPasswordEmailAsync(
-                user.Email,
-                user.PublicId,
-                rawResetToken,
-                cancellationToken);
 
             return BuildGenericResponse();
         }

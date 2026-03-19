@@ -1,4 +1,5 @@
-﻿using Identity.Application.Contracts.Ports;
+﻿using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Identity.Application.Contracts.Ports;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.RegisterUser;
@@ -50,6 +51,8 @@ namespace Identity.Infrastructure.DependencyInjection
 
             services.AddScoped<IPasswordResetTokenRepository, PasswordResetTokenRepository>();
             services.AddScoped<IForgotPasswordUseCase, ForgotPasswordUseCase>();
+            
+            services.AddScoped<IOutboxWriter, SqlOutboxWriter>();
 
             return services;
         }
