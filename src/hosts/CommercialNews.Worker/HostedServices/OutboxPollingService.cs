@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CommercialNews.Worker.Messaging.Email.Ports;
 using CommercialNews.Worker.Messaging.Outbox.Models;
 using CommercialNews.Worker.Messaging.Outbox.Ports;
 
@@ -29,6 +30,7 @@ namespace CommercialNews.Worker.HostedServices
 
                     var reader = scope.ServiceProvider.GetRequiredService<IOutboxMessageReader>();
                     var stateRepository = scope.ServiceProvider.GetRequiredService<IOutboxMessageStateRepository>();
+                    var dispatcher = scope.ServiceProvider.GetRequiredService<IOutboxEventEmailDispatcher>();
 
                     var messages = await reader.SelectPendingAsync(
                         topN: 20,
@@ -37,7 +39,7 @@ namespace CommercialNews.Worker.HostedServices
 
                     foreach (var message in messages)
                     {
-                        await ProcessMessageAsync(message, stateRepository, stoppingToken);
+                        await ProcessMessageAsync(message, stateRepository, dispatcher, stoppingToken);
                     }
                 }
                 catch (Exception ex)
@@ -52,6 +54,7 @@ namespace CommercialNews.Worker.HostedServices
         private async Task ProcessMessageAsync(
             OutboxMessageRecord message,
             IOutboxMessageStateRepository stateRepository,
+            IOutboxEventEmailDispatcher dispatcher,
             CancellationToken cancellationToken)
         {
             try
@@ -59,16 +62,12 @@ namespace CommercialNews.Worker.HostedServices
                 await stateRepository.MarkProcessingAsync(message.OutboxMessageId, cancellationToken);
 
                 _logger.LogInformation(
-                    "Processing outbox message. OutboxMessageId={OutboxMessageId}, MessageId={MessageId}, EventType={EventType}, Payload={Payload}",
+                    "Processing outbox message. OutboxMessageId={OutboxMessageId}, MessageId={MessageId}, EventType={EventType}",
                     message.OutboxMessageId,
                     message.MessageId,
-                    message.EventType,
-                    message.Payload);
+                    message.EventType);
 
-                // Phase A:
-                // Chưa gửi email thật.
-                // Chỉ chứng minh worker đọc được payload và mark Published.
-                using var jsonDocument = JsonDocument.Parse(message.Payload);
+                await dispatcher.DispatchAsync(message, cancellationToken);
 
                 await stateRepository.MarkPublishedAsync(message.OutboxMessageId, cancellationToken);
 
