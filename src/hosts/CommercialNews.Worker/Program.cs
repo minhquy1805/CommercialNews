@@ -1,4 +1,8 @@
 using CommercialNews.Worker.HostedServices;
+using CommercialNews.Worker.Messaging.Email.Dispatching;
+using CommercialNews.Worker.Messaging.Email.Ports;
+using CommercialNews.Worker.Messaging.Email.Sending;
+using CommercialNews.Worker.Messaging.Email.Sql;
 using CommercialNews.Worker.Messaging.Outbox.Ports;
 using CommercialNews.Worker.Messaging.Outbox.Sql;
 
@@ -8,6 +12,10 @@ builder.Services.AddSingleton<WorkerSqlConnectionFactory>();
 
 builder.Services.AddScoped<IOutboxMessageReader, SqlOutboxMessageReader>();
 builder.Services.AddScoped<IOutboxMessageStateRepository, SqlOutboxMessageStateRepository>();
+
+builder.Services.AddScoped<IEmailDeliveryRepository, SqlEmailDeliveryRepository>();
+builder.Services.AddScoped<IWorkerEmailSender, WorkerEmailSender>();
+builder.Services.AddScoped<IOutboxEventEmailDispatcher, OutboxEventEmailDispatcher>();
 
 builder.Services.AddHostedService<OutboxPollingService>();
 
