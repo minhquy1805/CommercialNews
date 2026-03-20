@@ -1,6 +1,7 @@
 ﻿using Identity.Application.Contracts.Dtos;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.LoginUser;
+using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResetPassword;
 using Identity.Application.UseCases.VerifyEmail;
@@ -131,6 +132,36 @@ namespace CommercialNews.Api.Api.Public.Controllers
         public async Task<IActionResult> ResetPassword(
             [FromBody] ResetPasswordRequestDto request,
             [FromServices] IResetPasswordUseCase useCase,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await useCase.ExecuteAsync(request, cancellationToken);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new
+                {
+                    message = ex.Message
+                });
+            }
+        }
+
+        [HttpPost("refresh-token")]
+        [ProducesResponseType(typeof(RefreshTokenResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> RefreshToken(
+            [FromBody] RefreshTokenRequestDto request,
+            [FromServices] IRefreshTokenUseCase useCase,
             CancellationToken cancellationToken)
         {
             try

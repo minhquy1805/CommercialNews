@@ -2,6 +2,7 @@
 using Identity.Application.Contracts.Ports;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.LoginUser;
+using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResetPassword;
 using Identity.Application.UseCases.VerifyEmail;
@@ -57,6 +58,9 @@ namespace Identity.Infrastructure.DependencyInjection
 
             services.AddScoped<IPasswordResetService, PasswordResetService>();
             services.AddScoped<IResetPasswordUseCase, ResetPasswordUseCase>();
+
+            services.AddScoped<IRefreshTokenRotationService, RefreshTokenRotationService>();
+            services.AddScoped<IRefreshTokenUseCase, RefreshTokenUseCase>();
 
             return services;
         }
