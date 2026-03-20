@@ -123,6 +123,34 @@ namespace Identity.Infrastructure.Persistence.Sql.Repositories
 
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        public async Task<UserAccount?> GetByIdAsync(
+            long userId,
+            CancellationToken cancellationToken)
+        {
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand("[identity].[UserAccount_SelectById]", connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.Add(new SqlParameter("@UserId", SqlDbType.BigInt)
+            {
+                Value = userId
+            });
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return MapUserAccount(reader);
+        }
+
         private static UserAccount MapUserAccount(SqlDataReader reader)
         {
             return new UserAccount(
