@@ -1,4 +1,5 @@
-﻿using Identity.Application.Contracts.Ports;
+﻿using System.Security.Claims;
+using Identity.Application.Contracts.Ports;
 using Microsoft.AspNetCore.Http;
 
 namespace Identity.Infrastructure.Requesting
@@ -12,6 +13,32 @@ namespace Identity.Infrastructure.Requesting
             _httpContextAccessor = httpContextAccessor;
         }
 
+        public long? CurrentUserId
+        {
+            get
+            {
+                var httpContext = _httpContextAccessor.HttpContext;
+                if (httpContext is null)
+                {
+                    return null;
+                }
+
+                var claimValue = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (long.TryParse(claimValue, out var claimUserId))
+                {
+                    return claimUserId;
+                }
+
+                var headerValue = httpContext.Request.Headers["X-User-Id"].ToString();
+                if (long.TryParse(headerValue, out var headerUserId))
+                {
+                    return headerUserId;
+                }
+
+                return null;
+            }
+        }
+
         public string? IpAddress
             => _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
@@ -22,3 +49,4 @@ namespace Identity.Infrastructure.Requesting
             => _httpContextAccessor.HttpContext?.TraceIdentifier;
     }
 }
+
