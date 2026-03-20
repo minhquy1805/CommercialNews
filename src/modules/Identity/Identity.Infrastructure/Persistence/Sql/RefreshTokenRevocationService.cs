@@ -13,6 +13,38 @@ namespace Identity.Infrastructure.Persistence.Sql
             _unitOfWork = unitOfWork;
         }
 
+        public async Task RevokeAsync(
+            long refreshTokenId,
+            string? revokedReason,
+            byte[]? replacedByTokenHash,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(
+                "[identity].[RefreshToken_Revoke]",
+                _unitOfWork.Connection,
+                _unitOfWork.Transaction)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.Add(new SqlParameter("@RefreshTokenId", SqlDbType.BigInt)
+            {
+                Value = refreshTokenId
+            });
+
+            command.Parameters.Add(new SqlParameter("@RevokedReason", SqlDbType.NVarChar, 200)
+            {
+                Value = (object?)revokedReason ?? DBNull.Value
+            });
+
+            command.Parameters.Add(new SqlParameter("@ReplacedByTokenHash", SqlDbType.VarBinary, 32)
+            {
+                Value = (object?)replacedByTokenHash ?? DBNull.Value
+            });
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         public async Task RevokeAllActiveByUserIdAsync(
             long userId,
             string? revokedReason,
@@ -38,6 +70,8 @@ namespace Identity.Infrastructure.Persistence.Sql
 
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+
+
     }
 }
 
