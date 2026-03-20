@@ -4,6 +4,7 @@ using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
+using Identity.Application.UseCases.ResendVerificationEmail;
 using Identity.Application.UseCases.ResetPassword;
 using Identity.Application.UseCases.VerifyEmail;
 using Identity.Infrastructure.Messaging;
@@ -61,6 +62,8 @@ namespace Identity.Infrastructure.DependencyInjection
 
             services.AddScoped<IRefreshTokenRotationService, RefreshTokenRotationService>();
             services.AddScoped<IRefreshTokenUseCase, RefreshTokenUseCase>();
+
+            services.AddScoped<IResendVerificationEmailUseCase, ResendVerificationEmailUseCase>();
 
             return services;
         }
