@@ -2,6 +2,7 @@
 using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.LoginUser;
+using Identity.Application.UseCases.Logout;
 using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResendVerificationEmail;
@@ -224,6 +225,36 @@ namespace CommercialNews.Api.Api.Public.Controllers
         public async Task<IActionResult> ChangePassword(
             [FromBody] ChangePasswordRequestDto request,
             [FromServices] IChangePasswordUseCase useCase,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await useCase.ExecuteAsync(request, cancellationToken);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new
+                {
+                    message = ex.Message
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new
+                {
+                    message = ex.Message
+                });
+            }
+        }
+
+        [HttpPost("logout")]
+        [ProducesResponseType(typeof(LogoutResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> Logout(
+            [FromBody] LogoutRequestDto request,
+            [FromServices] ILogoutUseCase useCase,
             CancellationToken cancellationToken)
         {
             try
