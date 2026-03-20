@@ -1,5 +1,6 @@
 ﻿using CommercialNews.BuildingBlocks.Messaging.Outbox;
 using Identity.Application.Contracts.Ports;
+using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.RefreshToken;
@@ -64,6 +65,10 @@ namespace Identity.Infrastructure.DependencyInjection
             services.AddScoped<IRefreshTokenUseCase, RefreshTokenUseCase>();
 
             services.AddScoped<IResendVerificationEmailUseCase, ResendVerificationEmailUseCase>();
+
+            services.AddScoped<IUserPasswordService, UserPasswordService>();
+            services.AddScoped<IRefreshTokenRevocationService, RefreshTokenRevocationService>();
+            services.AddScoped<IChangePasswordUseCase, ChangePasswordUseCase>();
 
             return services;
         }
