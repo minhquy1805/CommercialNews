@@ -2,6 +2,7 @@
 using Identity.Application.Contracts.Ports;
 using Identity.Domain.Entities;
 using Identity.Domain.Enums;
+using RefreshTokenEntity = Identity.Domain.Entities.RefreshToken;
 
 namespace Identity.Application.UseCases.LoginUser
 {
@@ -125,7 +126,7 @@ namespace Identity.Application.UseCases.LoginUser
             var refreshTokenHash = _tokenHashProvider.Hash(rawRefreshToken);
             var refreshTokenExpiresAtUtc = nowUtc.AddDays(7);
 
-            var refreshToken = new RefreshToken(
+            var refreshToken = new RefreshTokenEntity(
                 refreshTokenId: 0,
                 userId: user.UserId,
                 tokenHash: refreshTokenHash,

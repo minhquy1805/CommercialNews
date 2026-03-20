@@ -4,6 +4,10 @@ namespace Identity.Application.Contracts.Ports
 {
     public interface IUserAccountRepository
     {
+        Task<UserAccount?> GetByIdAsync(
+            long userId,
+            CancellationToken cancellationToken);
+
         Task<UserAccount?> GetByEmailNormalizedAsync(
             string emailNormalized,
             CancellationToken cancellationToken);
