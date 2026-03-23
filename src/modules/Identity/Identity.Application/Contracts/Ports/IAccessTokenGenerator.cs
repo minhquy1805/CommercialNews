@@ -1,4 +1,4 @@
-﻿using Identity.Application.Contracts.Dtos;
+﻿using Identity.Application.Contracts.Responses;
 using Identity.Domain.Entities;
 
 namespace Identity.Application.Contracts.Ports
