@@ -9,6 +9,7 @@ using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResendVerificationEmail;
 using Identity.Application.UseCases.ResetPassword;
+using Identity.Application.UseCases.UpdateMyProfile;
 using Identity.Application.UseCases.VerifyEmail;
 using Identity.Infrastructure.Messaging;
 using Identity.Infrastructure.Persistence.Sql;
@@ -76,6 +77,9 @@ namespace Identity.Infrastructure.DependencyInjection
             services.AddScoped<ILogoutUseCase, LogoutUseCase>();
 
             services.AddScoped<IGetMyProfileUseCase, GetMyProfileUseCase>();
+
+            services.AddScoped<IUserProfileService, UserProfileService>();
+            services.AddScoped<IUpdateMyProfileUseCase, UpdateMyProfileUseCase>();
 
             return services;
         }
