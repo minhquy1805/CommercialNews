@@ -1,6 +1,6 @@
-namespace Identity.Application.Contracts.Dtos
+namespace Identity.Application.Contracts.Responses
 {
-    public sealed class GetMyProfileResponseDto
+    public sealed class UpdateMyProfileResponseDto
     {
         public long UserId { get; init; }
         public string PublicId { get; init; } = string.Empty;
@@ -9,8 +9,6 @@ namespace Identity.Application.Contracts.Dtos
         public string? AvatarUrl { get; init; }
         public bool IsEmailVerified { get; init; }
         public string Status { get; init; } = string.Empty;
-        public DateTime CreatedAt { get; init; }
         public DateTime UpdatedAt { get; init; }
-        public DateTime? LastLoginAt { get; init; }
     }
 }

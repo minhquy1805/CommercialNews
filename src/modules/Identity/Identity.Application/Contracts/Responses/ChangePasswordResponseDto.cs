@@ -1,4 +1,4 @@
-namespace Identity.Application.Contracts.Dtos
+namespace Identity.Application.Contracts.Responses
 {
     public sealed class ChangePasswordResponseDto
     {

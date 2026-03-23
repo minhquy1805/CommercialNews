@@ -1,4 +1,4 @@
-﻿namespace Identity.Application.Contracts.Dtos
+﻿namespace Identity.Application.Contracts.Requests
 {
     public sealed class VerifyEmailRequestDto
     {

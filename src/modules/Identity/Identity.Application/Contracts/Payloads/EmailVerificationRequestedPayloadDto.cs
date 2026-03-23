@@ -1,6 +1,6 @@
-namespace Identity.Application.Contracts.Dtos
+namespace Identity.Application.Contracts.Payloads
 {
-    public sealed class PasswordResetRequestedPayloadDto
+    public sealed class EmailVerificationRequestedPayloadDto
     {
         public long UserId { get; init; }
         public string PublicId { get; init; } = string.Empty;
