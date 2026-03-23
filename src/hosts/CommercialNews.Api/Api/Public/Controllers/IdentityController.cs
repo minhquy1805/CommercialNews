@@ -4,6 +4,7 @@ using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.GetMyProfile;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.Logout;
+using Identity.Application.UseCases.LogoutAllSessions;
 using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResendVerificationEmail;
@@ -321,6 +322,27 @@ namespace CommercialNews.Api.Api.Public.Controllers
                 {
                     message = ex.Message
                 });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new
+                {
+                    message = ex.Message
+                });
+            }
+        }
+
+        [HttpPost("logout-all-sessions")]
+        [ProducesResponseType(typeof(LogoutAllSessionsResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> LogoutAllSessions(
+            [FromServices] ILogoutAllSessionsUseCase useCase,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await useCase.ExecuteAsync(cancellationToken);
+                return Ok(result);
             }
             catch (InvalidOperationException ex)
             {
