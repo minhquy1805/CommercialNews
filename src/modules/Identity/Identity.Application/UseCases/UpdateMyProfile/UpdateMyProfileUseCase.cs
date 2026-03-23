@@ -1,5 +1,6 @@
-using Identity.Application.Contracts.Dtos;
 using Identity.Application.Contracts.Ports;
+using Identity.Application.Contracts.Requests;
+using Identity.Application.Contracts.Responses;
 using Identity.Domain.Enums;
 
 namespace Identity.Application.UseCases.UpdateMyProfile
