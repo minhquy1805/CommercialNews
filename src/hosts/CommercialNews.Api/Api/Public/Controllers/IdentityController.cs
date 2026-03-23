@@ -1,6 +1,7 @@
 ﻿using Identity.Application.Contracts.Dtos;
 using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
+using Identity.Application.UseCases.GetMyProfile;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.Logout;
 using Identity.Application.UseCases.RefreshToken;
@@ -268,6 +269,27 @@ namespace CommercialNews.Api.Api.Public.Controllers
                 {
                     message = ex.Message
                 });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new
+                {
+                    message = ex.Message
+                });
+            }
+        }
+
+        [HttpGet("me")]
+        [ProducesResponseType(typeof(GetMyProfileResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<IActionResult> GetMyProfile(
+            [FromServices] IGetMyProfileUseCase useCase,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await useCase.ExecuteAsync(cancellationToken);
+                return Ok(result);
             }
             catch (InvalidOperationException ex)
             {
