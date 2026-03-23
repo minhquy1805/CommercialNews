@@ -1,4 +1,5 @@
-﻿using Identity.Application.Contracts.Dtos;
+﻿using Identity.Application.Contracts.Requests;
+using Identity.Application.Contracts.Responses;
 using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.GetMyProfile;

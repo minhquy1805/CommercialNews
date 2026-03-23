@@ -1,4 +1,4 @@
-using Identity.Application.Contracts.Dtos;
+using Identity.Application.Contracts.Responses;
 
 namespace Identity.Application.UseCases.GetMyProfile
 {
