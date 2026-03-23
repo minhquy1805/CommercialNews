@@ -1,8 +1,10 @@
 using System.Text.Json;
 using CommercialNews.BuildingBlocks.Messaging.Outbox;
 using Identity.Application.Contracts;
-using Identity.Application.Contracts.Dtos;
+using Identity.Application.Contracts.Payloads;
 using Identity.Application.Contracts.Ports;
+using Identity.Application.Contracts.Requests;
+using Identity.Application.Contracts.Responses;
 using Identity.Domain.Entities;
 
 namespace Identity.Application.UseCases.ResendVerificationEmail
