@@ -5,6 +5,7 @@ using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.GetMyProfile;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.Logout;
+using Identity.Application.UseCases.LogoutAllSessions;
 using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResendVerificationEmail;
@@ -80,6 +81,8 @@ namespace Identity.Infrastructure.DependencyInjection
 
             services.AddScoped<IUserProfileService, UserProfileService>();
             services.AddScoped<IUpdateMyProfileUseCase, UpdateMyProfileUseCase>();
+
+            services.AddScoped<ILogoutAllSessionsUseCase, LogoutAllSessionsUseCase>();
 
             return services;
         }
