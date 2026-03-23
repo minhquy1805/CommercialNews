@@ -2,6 +2,7 @@
 using Identity.Application.Contracts.Ports;
 using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
+using Identity.Application.UseCases.GetMyProfile;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.Logout;
 using Identity.Application.UseCases.RefreshToken;
@@ -73,6 +74,8 @@ namespace Identity.Infrastructure.DependencyInjection
 
             services.AddScoped<IRefreshTokenLookupService, RefreshTokenLookupService>();
             services.AddScoped<ILogoutUseCase, LogoutUseCase>();
+
+            services.AddScoped<IGetMyProfileUseCase, GetMyProfileUseCase>();
 
             return services;
         }
