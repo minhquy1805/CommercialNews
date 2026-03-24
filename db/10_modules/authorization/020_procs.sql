@@ -845,3 +845,34 @@ BEGIN
     WHERE [PermissionId] = @PermissionId;
 END;
 GO
+
+CREATE OR ALTER PROCEDURE [authorization].[Authorization_SelectEffectivePermissionsByUserId]
+    @UserId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT DISTINCT
+        p.[PermissionId],
+        p.[PublicId] AS [PermissionPublicId],
+        p.[Name] AS [PermissionName],
+        p.[NameNormalized] AS [PermissionNameNormalized],
+        p.[Description] AS [PermissionDescription],
+        p.[Module] AS [PermissionModule],
+        p.[IsSystem] AS [PermissionIsSystem],
+        p.[IsActive] AS [PermissionIsActive]
+    FROM [authorization].[UserRole] ur
+    INNER JOIN [authorization].[Role] r
+        ON ur.[RoleId] = r.[RoleId]
+    INNER JOIN [authorization].[RolePermission] rp
+        ON r.[RoleId] = rp.[RoleId]
+    INNER JOIN [authorization].[Permission] p
+        ON rp.[PermissionId] = p.[PermissionId]
+    WHERE ur.[UserId] = @UserId
+      AND ur.[RevokedAt] IS NULL
+      AND rp.[RevokedAt] IS NULL
+      AND r.[IsActive] = 1
+      AND p.[IsActive] = 1
+    ORDER BY p.[NameNormalized] ASC;
+END
+GO

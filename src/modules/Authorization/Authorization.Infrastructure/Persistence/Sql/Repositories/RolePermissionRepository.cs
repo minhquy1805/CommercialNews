@@ -1,5 +1,6 @@
 using System.Data;
 using Authorization.Application.Contracts.Ports;
+using Authorization.Application.Contracts.Queries;
 using Authorization.Domain.Entities;
 using Microsoft.Data.SqlClient;
 
@@ -109,6 +110,105 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
                 (object?)revokedByUserId ?? DBNull.Value);
 
             await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        public async Task<IReadOnlyList<RolePermissionView>> GetActivePermissionsByRoleIdAsync(
+            long roleId,
+            CancellationToken cancellationToken)
+        {
+            var result = new List<RolePermissionView>();
+
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand(
+                "[authorization].[RolePermission_SelectPermissionsByRoleId]",
+                connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.AddWithValue("@RoleId", roleId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (!reader.IsDBNull(reader.GetOrdinal("RevokedAt")))
+                {
+                    continue;
+                }
+
+                result.Add(new RolePermissionView
+                {
+                    PermissionId = reader.GetInt64(reader.GetOrdinal("PermissionId")),
+                    PublicId = reader.GetString(reader.GetOrdinal("PermissionPublicId")),
+                    Name = reader.GetString(reader.GetOrdinal("PermissionName")),
+                    NameNormalized = reader.GetString(reader.GetOrdinal("PermissionNameNormalized")),
+                    Description = reader.IsDBNull(reader.GetOrdinal("PermissionDescription"))
+                        ? null
+                        : reader.GetString(reader.GetOrdinal("PermissionDescription")),
+                    Module = reader.IsDBNull(reader.GetOrdinal("PermissionModule"))
+                        ? null
+                        : reader.GetString(reader.GetOrdinal("PermissionModule")),
+                    IsSystem = reader.GetBoolean(reader.GetOrdinal("PermissionIsSystem")),
+                    IsActive = reader.GetBoolean(reader.GetOrdinal("PermissionIsActive")),
+                    GrantedAt = reader.GetDateTime(reader.GetOrdinal("GrantedAt")),
+                    GrantedByUserId = reader.IsDBNull(reader.GetOrdinal("GrantedByUserId"))
+                        ? null
+                        : reader.GetInt64(reader.GetOrdinal("GrantedByUserId"))
+                });
+            }
+
+            return result;
+        }
+
+        public async Task<IReadOnlyList<PermissionRoleView>> GetActiveRolesByPermissionIdAsync(
+            long permissionId,
+            CancellationToken cancellationToken)
+        {
+            var result = new List<PermissionRoleView>();
+
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand(
+                "[authorization].[RolePermission_SelectRolesByPermissionId]",
+                connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.AddWithValue("@PermissionId", permissionId);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (!reader.IsDBNull(reader.GetOrdinal("RevokedAt")))
+                {
+                    continue;
+                }
+
+                result.Add(new PermissionRoleView
+                {
+                    RoleId = reader.GetInt64(reader.GetOrdinal("RoleId")),
+                    PublicId = reader.GetString(reader.GetOrdinal("RolePublicId")),
+                    Name = reader.GetString(reader.GetOrdinal("RoleName")),
+                    NameNormalized = reader.GetString(reader.GetOrdinal("RoleNameNormalized")),
+                    Description = reader.IsDBNull(reader.GetOrdinal("RoleDescription"))
+                        ? null
+                        : reader.GetString(reader.GetOrdinal("RoleDescription")),
+                    IsSystem = reader.GetBoolean(reader.GetOrdinal("RoleIsSystem")),
+                    IsActive = reader.GetBoolean(reader.GetOrdinal("RoleIsActive")),
+                    GrantedAt = reader.GetDateTime(reader.GetOrdinal("GrantedAt")),
+                    GrantedByUserId = reader.IsDBNull(reader.GetOrdinal("GrantedByUserId"))
+                        ? null
+                        : reader.GetInt64(reader.GetOrdinal("GrantedByUserId"))
+                });
+            }
+
+            return result;
         }
 
         private static RolePermission MapRolePermission(SqlDataReader reader)

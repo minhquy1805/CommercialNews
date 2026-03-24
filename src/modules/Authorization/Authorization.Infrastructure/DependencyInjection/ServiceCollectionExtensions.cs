@@ -1,9 +1,15 @@
 using Authorization.Application.Contracts.Ports;
 using Authorization.Application.UseCases.AssignRoleToUser;
+using Authorization.Application.UseCases.CheckUserHasPermission;
 using Authorization.Application.UseCases.CreatePermission;
 using Authorization.Application.UseCases.CreateRole;
 using Authorization.Application.UseCases.DeactivatePermission;
 using Authorization.Application.UseCases.DeactivateRole;
+using Authorization.Application.UseCases.GetPermissionRoles;
+using Authorization.Application.UseCases.GetRolePermissions;
+using Authorization.Application.UseCases.GetRoleUsers;
+using Authorization.Application.UseCases.GetUserEffectivePermissions;
+using Authorization.Application.UseCases.GetUserRoles;
 using Authorization.Application.UseCases.GrantPermissionToRole;
 using Authorization.Application.UseCases.RevokePermissionFromRole;
 using Authorization.Application.UseCases.RevokeRoleFromUser;
@@ -56,6 +62,16 @@ namespace Authorization.Infrastructure.DependencyInjection
 
             services.AddScoped<IDeactivateRoleUseCase, DeactivateRoleUseCase>();
             services.AddScoped<IDeactivatePermissionUseCase, DeactivatePermissionUseCase>();
+
+            services.AddScoped<IGetUserRolesUseCase, GetUserRolesUseCase>();
+            services.AddScoped<IGetRoleUsersUseCase, GetRoleUsersUseCase>();
+
+            services.AddScoped<IGetRolePermissionsUseCase, GetRolePermissionsUseCase>();
+            services.AddScoped<IGetPermissionRolesUseCase, GetPermissionRolesUseCase>();
+
+            services.AddScoped<IAuthorizationPermissionQueryRepository, AuthorizationPermissionQueryRepository>();
+            services.AddScoped<IGetUserEffectivePermissionsUseCase, GetUserEffectivePermissionsUseCase>();
+            services.AddScoped<ICheckUserHasPermissionUseCase, CheckUserHasPermissionUseCase>();
 
             return services;
         }
