@@ -7,7 +7,17 @@ namespace Authorization.Application.Contracts.Ports
         Task<Role?> GetByIdAsync(
             long roleId,
             CancellationToken cancellationToken);
-    }
-    
-}
 
+        Task<Role?> GetByNameNormalizedAsync(
+            string nameNormalized,
+            CancellationToken cancellationToken);
+
+        Task<Role> InsertAsync(
+            Role role,
+            CancellationToken cancellationToken);
+
+        Task<Role> UpdateAsync(
+            Role role,
+            CancellationToken cancellationToken);
+    }
+}

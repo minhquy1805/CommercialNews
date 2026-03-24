@@ -1,8 +1,14 @@
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.UseCases.AssignRoleToUser;
+using Authorization.Application.UseCases.CreatePermission;
+using Authorization.Application.UseCases.CreateRole;
+using Authorization.Application.UseCases.DeactivatePermission;
+using Authorization.Application.UseCases.DeactivateRole;
 using Authorization.Application.UseCases.GrantPermissionToRole;
 using Authorization.Application.UseCases.RevokePermissionFromRole;
 using Authorization.Application.UseCases.RevokeRoleFromUser;
+using Authorization.Application.UseCases.UpdatePermission;
+using Authorization.Application.UseCases.UpdateRole;
 using CommercialNews.Api.Api.Admin.Contracts.Requests;
 using Microsoft.AspNetCore.Mvc;
 
@@ -16,17 +22,80 @@ namespace CommercialNews.Api.Api.Admin.Controllers
         private readonly IRevokeRoleFromUserUseCase _revokeRoleFromUserUseCase;
         private readonly IGrantPermissionToRoleUseCase _grantPermissionToRoleUseCase;
         private readonly IRevokePermissionFromRoleUseCase _revokePermissionFromRoleUseCase;
+        private readonly ICreateRoleUseCase _createRoleUseCase;
+        private readonly ICreatePermissionUseCase _createPermissionUseCase;
+        private readonly IUpdateRoleUseCase _updateRoleUseCase;
+        private readonly IUpdatePermissionUseCase _updatePermissionUseCase;
+        private readonly IDeactivateRoleUseCase _deactivateRoleUseCase;
+        private readonly IDeactivatePermissionUseCase _deactivatePermissionUseCase;
 
         public AuthorizationAdminController(
             IAssignRoleToUserUseCase assignRoleToUserUseCase,
             IRevokeRoleFromUserUseCase revokeRoleFromUserUseCase,
             IGrantPermissionToRoleUseCase grantPermissionToRoleUseCase,
-            IRevokePermissionFromRoleUseCase revokePermissionFromRoleUseCase)
+            IRevokePermissionFromRoleUseCase revokePermissionFromRoleUseCase,
+            ICreateRoleUseCase createRoleUseCase,
+            ICreatePermissionUseCase createPermissionUseCase,
+            IUpdateRoleUseCase updateRoleUseCase,
+            IUpdatePermissionUseCase updatePermissionUseCase,
+            IDeactivateRoleUseCase deactivateRoleUseCase,
+            IDeactivatePermissionUseCase deactivatePermissionUseCase)
         {
             _assignRoleToUserUseCase = assignRoleToUserUseCase;
             _revokeRoleFromUserUseCase = revokeRoleFromUserUseCase;
             _grantPermissionToRoleUseCase = grantPermissionToRoleUseCase;
             _revokePermissionFromRoleUseCase = revokePermissionFromRoleUseCase;
+            _createRoleUseCase = createRoleUseCase;
+            _createPermissionUseCase = createPermissionUseCase;
+            _updateRoleUseCase = updateRoleUseCase;
+            _updatePermissionUseCase = updatePermissionUseCase;
+            _deactivateRoleUseCase = deactivateRoleUseCase;
+            _deactivatePermissionUseCase = deactivatePermissionUseCase;
+        }
+
+        [HttpPost("roles")]
+        public async Task<IActionResult> CreateRole(
+            [FromBody] CreateRoleHttpRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request is null)
+            {
+                return BadRequest("Request body is required.");
+            }
+
+            var response = await _createRoleUseCase.ExecuteAsync(
+                new CreateRoleRequestDto
+                {
+                    Name = request.Name,
+                    Description = request.Description,
+                    IsSystem = request.IsSystem
+                },
+                cancellationToken);
+
+            return Ok(response);
+        }
+
+        [HttpPost("permissions")]
+        public async Task<IActionResult> CreatePermission(
+            [FromBody] CreatePermissionHttpRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request is null)
+            {
+                return BadRequest("Request body is required.");
+            }
+
+            var response = await _createPermissionUseCase.ExecuteAsync(
+                new CreatePermissionRequestDto
+                {
+                    Name = request.Name,
+                    Description = request.Description,
+                    Module = request.Module,
+                    IsSystem = request.IsSystem
+                },
+                cancellationToken);
+
+            return Ok(response);
         }
 
         [HttpPost("users/{userId:long}/roles")]
@@ -100,6 +169,83 @@ namespace CommercialNews.Api.Api.Admin.Controllers
                 new RevokePermissionFromRoleRequestDto
                 {
                     RoleId = roleId,
+                    PermissionId = permissionId
+                },
+                cancellationToken);
+
+            return Ok(response);
+        }
+
+        [HttpPut("roles/{roleId:long}")]
+        public async Task<IActionResult> UpdateRole(
+            [FromRoute] long roleId,
+            [FromBody] UpdateRoleHttpRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request is null)
+            {
+                return BadRequest("Request body is required.");
+            }
+
+            var response = await _updateRoleUseCase.ExecuteAsync(
+                new UpdateRoleRequestDto
+                {
+                    RoleId = roleId,
+                    Name = request.Name,
+                    Description = request.Description
+                },
+                cancellationToken);
+
+            return Ok(response);
+        }
+
+        [HttpPut("permissions/{permissionId:long}")]
+        public async Task<IActionResult> UpdatePermission(
+            [FromRoute] long permissionId,
+            [FromBody] UpdatePermissionHttpRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request is null)
+            {
+                return BadRequest("Request body is required.");
+            }
+
+            var response = await _updatePermissionUseCase.ExecuteAsync(
+                new UpdatePermissionRequestDto
+                {
+                    PermissionId = permissionId,
+                    Name = request.Name,
+                    Description = request.Description,
+                    Module = request.Module
+                },
+                cancellationToken);
+
+            return Ok(response);
+        }
+
+        [HttpPost("roles/{roleId:long}:deactivate")]
+        public async Task<IActionResult> DeactivateRole(
+            [FromRoute] long roleId,
+            CancellationToken cancellationToken)
+        {
+            var response = await _deactivateRoleUseCase.ExecuteAsync(
+                new DeactivateRoleRequestDto
+                {
+                    RoleId = roleId
+                },
+                cancellationToken);
+
+            return Ok(response);
+        }
+
+        [HttpPost("permissions/{permissionId:long}:deactivate")]
+        public async Task<IActionResult> DeactivatePermission(
+            [FromRoute] long permissionId,
+            CancellationToken cancellationToken)
+        {
+            var response = await _deactivatePermissionUseCase.ExecuteAsync(
+                new DeactivatePermissionRequestDto
+                {
                     PermissionId = permissionId
                 },
                 cancellationToken);

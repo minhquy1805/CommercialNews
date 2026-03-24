@@ -164,6 +164,31 @@ public sealed class Permission
         UpdatedByUserId = updatedByUserId;
     }
 
+    public static Permission CreateNew(
+        string publicId,
+        string name,
+        string nameNormalized,
+        string? description,
+        string? module,
+        bool isSystem,
+        DateTime createdAt,
+        long? createdByUserId)
+    {
+        return new Permission(
+            permissionId: 0,
+            publicId: publicId,
+            name: name,
+            nameNormalized: nameNormalized,
+            description: description,
+            module: module,
+            isSystem: isSystem,
+            isActive: true,
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            createdByUserId: createdByUserId,
+            updatedByUserId: createdByUserId);
+    }
+
     private static string? NormalizeOptional(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
