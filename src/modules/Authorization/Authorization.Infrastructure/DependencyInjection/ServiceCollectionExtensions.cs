@@ -1,5 +1,8 @@
 using Authorization.Application.Contracts.Ports;
 using Authorization.Application.UseCases.AssignRoleToUser;
+using Authorization.Application.UseCases.GrantPermissionToRole;
+using Authorization.Application.UseCases.RevokePermissionFromRole;
+using Authorization.Application.UseCases.RevokeRoleFromUser;
 using Authorization.Infrastructure.Persistence.Sql;
 using Authorization.Infrastructure.Persistence.Sql.Repositories;
 using Authorization.Infrastructure.Requesting;
@@ -28,6 +31,13 @@ namespace Authorization.Infrastructure.DependencyInjection
             services.AddScoped<IAuthorizationUserLookupService, AuthorizationUserLookupService>();
 
             services.AddScoped<IAssignRoleToUserUseCase, AssignRoleToUserUseCase>();
+
+            services.AddScoped<IRevokeRoleFromUserUseCase, RevokeRoleFromUserUseCase>();
+            services.AddScoped<IGrantPermissionToRoleUseCase, GrantPermissionToRoleUseCase>();
+            services.AddScoped<IRevokePermissionFromRoleUseCase, RevokePermissionFromRoleUseCase>();
+
+            services.AddScoped<IPermissionRepository, PermissionRepository>();
+            services.AddScoped<IRolePermissionRepository, RolePermissionRepository>();
 
             return services;
         }

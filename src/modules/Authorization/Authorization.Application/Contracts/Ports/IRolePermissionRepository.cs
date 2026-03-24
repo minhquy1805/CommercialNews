@@ -2,20 +2,20 @@ using Authorization.Domain.Entities;
 
 namespace Authorization.Application.Contracts.Ports
 {
-    public interface IUserRoleRepository
+    public interface IRolePermissionRepository
     {
-        Task<UserRole?> GetActiveByUserIdAndRoleIdAsync(
-            long userId,
+        Task<RolePermission?> GetActiveByRoleIdAndPermissionIdAsync(
             long roleId,
+            long permissionId,
             CancellationToken cancellationToken);
 
-        Task<UserRole> InsertAsync(
-            UserRole userRole,
+        Task<RolePermission> InsertAsync(
+            RolePermission rolePermission,
             CancellationToken cancellationToken);
-        
+
         Task RevokeAsync(
-            long userId,
             long roleId,
+            long permissionId,
             long? revokedByUserId,
             CancellationToken cancellationToken);
     }
