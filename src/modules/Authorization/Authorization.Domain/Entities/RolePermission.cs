@@ -84,4 +84,20 @@ public sealed class RolePermission
         RevokedAt = revokedAt;
         RevokedByUserId = revokedByUserId;
     }
+
+    public static RolePermission CreateNew(
+    long roleId,
+    long permissionId,
+    DateTime grantedAt,
+    long? grantedByUserId)
+    {
+        return new RolePermission(
+            rolePermissionId: 0,
+            roleId: roleId,
+            permissionId: permissionId,
+            grantedAt: grantedAt,
+            grantedByUserId: grantedByUserId,
+            revokedAt: null,
+            revokedByUserId: null);
+    }
 }
