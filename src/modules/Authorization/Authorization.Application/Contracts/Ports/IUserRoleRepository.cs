@@ -1,3 +1,4 @@
+using Authorization.Application.Contracts.Queries;
 using Authorization.Domain.Entities;
 
 namespace Authorization.Application.Contracts.Ports
@@ -17,6 +18,14 @@ namespace Authorization.Application.Contracts.Ports
             long userId,
             long roleId,
             long? revokedByUserId,
+            CancellationToken cancellationToken);
+        
+        Task<IReadOnlyList<UserRoleView>> GetActiveRolesByUserIdAsync(
+            long userId,
+            CancellationToken cancellationToken);
+
+        Task<IReadOnlyList<RoleUserView>> GetActiveUsersByRoleIdAsync(
+            long roleId,
             CancellationToken cancellationToken);
     }
 }
