@@ -146,6 +146,29 @@ public sealed class Role
         UpdatedByUserId = updatedByUserId;
     }
 
+    public static Role CreateNew(
+        string publicId,
+        string name,
+        string nameNormalized,
+        string? description,
+        bool isSystem,
+        DateTime createdAt,
+        long? createdByUserId)
+    {
+        return new Role(
+            roleId: 0,
+            publicId: publicId,
+            name: name,
+            nameNormalized: nameNormalized,
+            description: description,
+            isSystem: isSystem,
+            isActive: true,
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            createdByUserId: createdByUserId,
+            updatedByUserId: createdByUserId);
+    }
+
     private static string? NormalizeOptional(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
