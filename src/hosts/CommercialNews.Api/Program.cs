@@ -1,4 +1,5 @@
-﻿using Identity.Infrastructure.DependencyInjection;
+﻿using Authorization.Infrastructure.DependencyInjection;
+using Identity.Infrastructure.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +12,7 @@ builder.Services.AddSwaggerGen();
 
 // Module registrations
 builder.Services.AddIdentityInfrastructure();
+builder.Services.AddAuthorizationInfrastructure();
 
 var app = builder.Build();
 
