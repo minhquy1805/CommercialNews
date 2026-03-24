@@ -1,8 +1,8 @@
+using System.Data;
 using Authorization.Application.Contracts.Ports;
 using Authorization.Domain.Entities;
 using Authorization.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
-using System.Data;
 
 namespace Authorization.Infrastructure.Persistence.Sql.Repositories
 {
@@ -22,7 +22,9 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
             await using var connection = _connectionFactory.CreateConnection();
             await connection.OpenAsync(cancellationToken);
 
-            await using var command = new SqlCommand("[authorization].[Role_SelectById]", connection)
+            await using var command = new SqlCommand(
+                "[authorization].[Role_SelectById]",
+                connection)
             {
                 CommandType = CommandType.StoredProcedure
             };
@@ -37,6 +39,119 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
             }
 
             return MapRole(reader);
+        }
+
+        public async Task<Role?> GetByNameNormalizedAsync(
+            string nameNormalized,
+            CancellationToken cancellationToken)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(nameNormalized);
+
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand(
+                "[authorization].[Role_SelectByNameNormalized]",
+                connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.AddWithValue("@NameNormalized", nameNormalized);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return MapRole(reader);
+        }
+
+        public async Task<Role> InsertAsync(
+            Role role,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(role);
+
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand(
+                "[authorization].[Role_Insert]",
+                connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.AddWithValue("@PublicId", role.PublicId);
+            command.Parameters.AddWithValue("@Name", role.Name);
+            command.Parameters.AddWithValue("@NameNormalized", role.NameNormalized);
+            command.Parameters.AddWithValue("@Description", (object?)role.Description ?? DBNull.Value);
+            command.Parameters.AddWithValue("@IsSystem", role.IsSystem);
+            command.Parameters.AddWithValue("@CreatedByUserId", (object?)role.CreatedByUserId ?? DBNull.Value);
+
+            var roleIdParameter = new SqlParameter("@RoleId", SqlDbType.BigInt)
+            {
+                Direction = ParameterDirection.Output
+            };
+            command.Parameters.Add(roleIdParameter);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            if (roleIdParameter.Value is null || roleIdParameter.Value == DBNull.Value)
+            {
+                throw new InvalidOperationException("Role_Insert did not return RoleId.");
+            }
+
+            var createdRoleId = Convert.ToInt64(roleIdParameter.Value);
+
+            var createdRole = await GetByIdAsync(createdRoleId, cancellationToken);
+
+            if (createdRole is null)
+            {
+                throw new InvalidOperationException(
+                    $"Role with id {createdRoleId} was inserted but could not be reloaded.");
+            }
+
+            return createdRole;
+        }
+
+        public async Task<Role> UpdateAsync(
+            Role role,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(role);
+
+            await using var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand(
+                "[authorization].[Role_Update]",
+                connection)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
+
+            command.Parameters.AddWithValue("@RoleId", role.RoleId);
+            command.Parameters.AddWithValue("@Name", role.Name);
+            command.Parameters.AddWithValue("@NameNormalized", role.NameNormalized);
+            command.Parameters.AddWithValue("@Description", (object?)role.Description ?? DBNull.Value);
+            command.Parameters.AddWithValue("@IsActive", role.IsActive);
+            command.Parameters.AddWithValue("@UpdatedByUserId", (object?)role.UpdatedByUserId ?? DBNull.Value);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            var updatedRole = await GetByIdAsync(role.RoleId, cancellationToken);
+
+            if (updatedRole is null)
+            {
+                throw new InvalidOperationException(
+                    $"Role with id {role.RoleId} was updated but could not be reloaded.");
+            }
+
+            return updatedRole;
         }
 
         private static Role MapRole(SqlDataReader reader)
