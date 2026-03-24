@@ -57,6 +57,22 @@ public sealed class UserRole
         RevokedByUserId = revokedByUserId;
     }
 
+    public static UserRole CreateNew(
+        long userId,
+        long roleId,
+        DateTime assignedAt,
+        long? assignedByUserId)
+    {
+        return new UserRole(
+            userRoleId: 0,
+            userId: userId,
+            roleId: roleId,
+            assignedAt: assignedAt,
+            assignedByUserId: assignedByUserId,
+            revokedAt: null,
+            revokedByUserId: null);
+    }
+
     public bool IsActiveAt(DateTime pointInTimeUtc)
     {
         return !RevokedAt.HasValue || RevokedAt.Value > pointInTimeUtc;
