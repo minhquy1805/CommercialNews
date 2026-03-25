@@ -3,12 +3,11 @@ using Authorization.Application.Contracts.Events;
 using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
-using Authorization.Domain.Entities;
 using CommercialNews.BuildingBlocks.Messaging.Outbox;
 
-namespace Authorization.Application.UseCases.GrantPermissionToRole
+namespace Authorization.Application.UseCases.RevokePermissionFromRole
 {
-    public sealed class GrantPermissionToRoleUseCase : IGrantPermissionToRoleUseCase
+    public sealed class RevokePermissionFromRoleUseCase : IRevokePermissionFromRoleUseCase
     {
         private readonly IRoleRepository _roleRepository;
         private readonly IPermissionRepository _permissionRepository;
@@ -18,7 +17,7 @@ namespace Authorization.Application.UseCases.GrantPermissionToRole
         private readonly IOutboxWriter _outboxWriter;
         private readonly IOutboxMessageIdGenerator _outboxMessageIdGenerator;
 
-        public GrantPermissionToRoleUseCase(
+        public RevokePermissionFromRoleUseCase(
             IRoleRepository roleRepository,
             IPermissionRepository permissionRepository,
             IRolePermissionRepository rolePermissionRepository,
@@ -36,8 +35,8 @@ namespace Authorization.Application.UseCases.GrantPermissionToRole
             _outboxMessageIdGenerator = outboxMessageIdGenerator;
         }
 
-        public async Task<GrantPermissionToRoleResponseDto> ExecuteAsync(
-            GrantPermissionToRoleRequestDto request,
+        public async Task<RevokePermissionFromRoleResponseDto> ExecuteAsync(
+            RevokePermissionFromRoleRequestDto request,
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
@@ -51,29 +50,24 @@ namespace Authorization.Application.UseCases.GrantPermissionToRole
             var role = await _roleRepository.GetByIdAsync(request.RoleId, cancellationToken);
             if (role is null)
                 throw new InvalidOperationException($"Role with id {request.RoleId} was not found.");
-            if (!role.IsActive)
-                throw new InvalidOperationException($"Role with id {request.RoleId} is inactive.");
 
             var permission = await _permissionRepository.GetByIdAsync(request.PermissionId, cancellationToken);
             if (permission is null)
                 throw new InvalidOperationException($"Permission with id {request.PermissionId} was not found.");
-            if (!permission.IsActive)
-                throw new InvalidOperationException($"Permission with id {request.PermissionId} is inactive.");
 
             var existingGrant = await _rolePermissionRepository.GetActiveByRoleIdAndPermissionIdAsync(
                 request.RoleId,
                 request.PermissionId,
                 cancellationToken);
 
-            if (existingGrant is not null)
+            if (existingGrant is null)
             {
-                return new GrantPermissionToRoleResponseDto
+                return new RevokePermissionFromRoleResponseDto
                 {
-                    RolePermissionId = existingGrant.RolePermissionId,
-                    RoleId = existingGrant.RoleId,
-                    PermissionId = existingGrant.PermissionId,
-                    IsGranted = true,
-                    WasAlreadyGranted = true
+                    RoleId = request.RoleId,
+                    PermissionId = request.PermissionId,
+                    IsRevoked = true,
+                    WasAlreadyRevoked = true
                 };
             }
 
@@ -84,21 +78,17 @@ namespace Authorization.Application.UseCases.GrantPermissionToRole
                 var now = DateTime.UtcNow;
                 var actorUserId = _requestContext.CurrentUserId;
 
-                var newGrant = RolePermission.CreateNew(
-                    roleId: request.RoleId,
-                    permissionId: request.PermissionId,
-                    grantedAt: now,
-                    grantedByUserId: actorUserId);
-
-                var createdGrant = await _rolePermissionRepository.InsertAsync(
-                    newGrant,
+                await _rolePermissionRepository.RevokeAsync(
+                    request.RoleId,
+                    request.PermissionId,
+                    actorUserId,
                     cancellationToken);
 
-                var integrationEvent = new RolePermissionGrantedEvent
+                var integrationEvent = new RolePermissionRevokedEvent
                 {
-                    RolePermissionId = createdGrant.RolePermissionId,
-                    RoleId = createdGrant.RoleId,
-                    PermissionId = createdGrant.PermissionId,
+                    RolePermissionId = existingGrant.RolePermissionId,
+                    RoleId = request.RoleId,
+                    PermissionId = request.PermissionId,
                     ActorUserId = actorUserId,
                     OccurredAtUtc = now,
                     CorrelationId = _requestContext.CorrelationId
@@ -106,9 +96,9 @@ namespace Authorization.Application.UseCases.GrantPermissionToRole
 
                 await _outboxWriter.WriteAsync(
                     messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.RolePermissionGranted,
+                    eventType: AuthorizationOutboxConstants.EventTypes.RolePermissionRevoked,
                     aggregateType: AuthorizationOutboxConstants.AggregateTypes.RolePermission,
-                    aggregateId: createdGrant.RolePermissionId.ToString(),
+                    aggregateId: existingGrant.RolePermissionId.ToString(),
                     aggregatePublicId: null,
                     aggregateVersion: null,
                     payload: JsonSerializer.Serialize(integrationEvent),
@@ -120,13 +110,12 @@ namespace Authorization.Application.UseCases.GrantPermissionToRole
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                return new GrantPermissionToRoleResponseDto
+                return new RevokePermissionFromRoleResponseDto
                 {
-                    RolePermissionId = createdGrant.RolePermissionId,
-                    RoleId = createdGrant.RoleId,
-                    PermissionId = createdGrant.PermissionId,
-                    IsGranted = true,
-                    WasAlreadyGranted = false
+                    RoleId = request.RoleId,
+                    PermissionId = request.PermissionId,
+                    IsRevoked = true,
+                    WasAlreadyRevoked = false
                 };
             }
             catch

@@ -2,6 +2,7 @@ using System.Data;
 using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Queries;
 using Authorization.Domain.Entities;
+using Authorization.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
 namespace Authorization.Infrastructure.Persistence.Sql.Repositories
@@ -9,10 +10,14 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
     public sealed class UserRoleRepository : IUserRoleRepository
     {
         private readonly AuthorizationSqlConnectionFactory _connectionFactory;
+        private readonly AuthorizationUnitOfWork _unitOfWork;
 
-        public UserRoleRepository(AuthorizationSqlConnectionFactory connectionFactory)
+        public UserRoleRepository(
+            AuthorizationSqlConnectionFactory connectionFactory,
+            AuthorizationUnitOfWork unitOfWork)
         {
             _connectionFactory = connectionFactory;
+            _unitOfWork = unitOfWork;
         }
 
         public async Task<UserRole?> GetActiveByUserIdAndRoleIdAsync(
@@ -20,27 +25,33 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
             long roleId,
             CancellationToken cancellationToken)
         {
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(
-                "[authorization].[UserRole_SelectActiveByUserIdAndRoleId]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[UserRole_SelectActiveByUserIdAndRoleId]",
+                    connection);
 
-            command.Parameters.AddWithValue("@UserId", userId);
-            command.Parameters.AddWithValue("@RoleId", roleId);
+                command.Parameters.AddWithValue("@UserId", userId);
+                command.Parameters.AddWithValue("@RoleId", roleId);
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                return null;
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapUserRole(reader);
             }
-
-            return MapUserRole(reader);
+            finally
+            {
+                if (owned)
+                {
+                    await connection.DisposeAsync();
+                }
+            }
         }
 
         public async Task<UserRole> InsertAsync(
@@ -49,42 +60,48 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
         {
             ArgumentNullException.ThrowIfNull(userRole);
 
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(
-                "[authorization].[UserRole_Assign]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[UserRole_Assign]",
+                    connection);
 
-            command.Parameters.AddWithValue("@UserId", userRole.UserId);
-            command.Parameters.AddWithValue("@RoleId", userRole.RoleId);
-            command.Parameters.AddWithValue(
-                "@AssignedByUserId",
-                (object?)userRole.AssignedByUserId ?? DBNull.Value);
+                command.Parameters.AddWithValue("@UserId", userRole.UserId);
+                command.Parameters.AddWithValue("@RoleId", userRole.RoleId);
+                command.Parameters.AddWithValue(
+                    "@AssignedByUserId",
+                    (object?)userRole.AssignedByUserId ?? DBNull.Value);
 
-            var userRoleIdParameter = new SqlParameter("@UserRoleId", SqlDbType.BigInt)
-            {
-                Direction = ParameterDirection.Output
-            };
-            command.Parameters.Add(userRoleIdParameter);
+                var userRoleIdParameter = new SqlParameter("@UserRoleId", SqlDbType.BigInt)
+                {
+                    Direction = ParameterDirection.Output
+                };
+                command.Parameters.Add(userRoleIdParameter);
 
-            await command.ExecuteNonQueryAsync(cancellationToken);
+                await command.ExecuteNonQueryAsync(cancellationToken);
 
-            var createdOrExisting = await GetActiveByUserIdAndRoleIdAsync(
-                userRole.UserId,
-                userRole.RoleId,
-                cancellationToken);
+                var createdOrExisting = await GetActiveByUserIdAndRoleIdAsync(
+                    userRole.UserId,
+                    userRole.RoleId,
+                    cancellationToken);
 
-            if (createdOrExisting is null)
-            {
-                throw new InvalidOperationException(
-                    "UserRole_Assign completed but the active user-role assignment could not be reloaded.");
+                if (createdOrExisting is null)
+                {
+                    throw new InvalidOperationException(
+                        "UserRole_Assign completed but the active user-role assignment could not be reloaded.");
+                }
+
+                return createdOrExisting;
             }
-
-            return createdOrExisting;
+            finally
+            {
+                if (owned)
+                {
+                    await connection.DisposeAsync();
+                }
+            }
         }
 
         public async Task RevokeAsync(
@@ -93,23 +110,29 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
             long? revokedByUserId,
             CancellationToken cancellationToken)
         {
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(
-                "[authorization].[UserRole_Revoke]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[UserRole_Revoke]",
+                    connection);
 
-            command.Parameters.AddWithValue("@UserId", userId);
-            command.Parameters.AddWithValue("@RoleId", roleId);
-            command.Parameters.AddWithValue(
-                "@RevokedByUserId",
-                (object?)revokedByUserId ?? DBNull.Value);
+                command.Parameters.AddWithValue("@UserId", userId);
+                command.Parameters.AddWithValue("@RoleId", roleId);
+                command.Parameters.AddWithValue(
+                    "@RevokedByUserId",
+                    (object?)revokedByUserId ?? DBNull.Value);
 
-            await command.ExecuteNonQueryAsync(cancellationToken);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+            finally
+            {
+                if (owned)
+                {
+                    await connection.DisposeAsync();
+                }
+            }
         }
 
         public async Task<IReadOnlyList<UserRoleView>> GetActiveRolesByUserIdAsync(
@@ -117,47 +140,52 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
             CancellationToken cancellationToken)
         {
             var result = new List<UserRoleView>();
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
-
-            await using var command = new SqlCommand(
-                "[authorization].[UserRole_SelectRolesByUserId]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[UserRole_SelectRolesByUserId]",
+                    connection);
 
-            command.Parameters.AddWithValue("@UserId", userId);
+                command.Parameters.AddWithValue("@UserId", userId);
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                if (!reader.IsDBNull(reader.GetOrdinal("RevokedAt")))
+                while (await reader.ReadAsync(cancellationToken))
                 {
-                    continue;
+                    if (!reader.IsDBNull(reader.GetOrdinal("RevokedAt")))
+                    {
+                        continue;
+                    }
+
+                    result.Add(new UserRoleView
+                    {
+                        RoleId = reader.GetInt64(reader.GetOrdinal("RoleId")),
+                        PublicId = reader.GetString(reader.GetOrdinal("RolePublicId")),
+                        Name = reader.GetString(reader.GetOrdinal("RoleName")),
+                        NameNormalized = reader.GetString(reader.GetOrdinal("RoleNameNormalized")),
+                        Description = reader.IsDBNull(reader.GetOrdinal("RoleDescription"))
+                            ? null
+                            : reader.GetString(reader.GetOrdinal("RoleDescription")),
+                        IsSystem = reader.GetBoolean(reader.GetOrdinal("RoleIsSystem")),
+                        IsActive = reader.GetBoolean(reader.GetOrdinal("RoleIsActive")),
+                        AssignedAt = reader.GetDateTime(reader.GetOrdinal("AssignedAt")),
+                        AssignedByUserId = reader.IsDBNull(reader.GetOrdinal("AssignedByUserId"))
+                            ? null
+                            : reader.GetInt64(reader.GetOrdinal("AssignedByUserId"))
+                    });
                 }
 
-                result.Add(new UserRoleView
-                {
-                    RoleId = reader.GetInt64(reader.GetOrdinal("RoleId")),
-                    PublicId = reader.GetString(reader.GetOrdinal("RolePublicId")),
-                    Name = reader.GetString(reader.GetOrdinal("RoleName")),
-                    NameNormalized = reader.GetString(reader.GetOrdinal("RoleNameNormalized")),
-                    Description = reader.IsDBNull(reader.GetOrdinal("RoleDescription"))
-                        ? null
-                        : reader.GetString(reader.GetOrdinal("RoleDescription")),
-                    IsSystem = reader.GetBoolean(reader.GetOrdinal("RoleIsSystem")),
-                    IsActive = reader.GetBoolean(reader.GetOrdinal("RoleIsActive")),
-                    AssignedAt = reader.GetDateTime(reader.GetOrdinal("AssignedAt")),
-                    AssignedByUserId = reader.IsDBNull(reader.GetOrdinal("AssignedByUserId"))
-                        ? null
-                        : reader.GetInt64(reader.GetOrdinal("AssignedByUserId"))
-                });
+                return result;
             }
-
-            return result;
+            finally
+            {
+                if (owned)
+                {
+                    await connection.DisposeAsync();
+                }
+            }
         }
 
         public async Task<IReadOnlyList<RoleUserView>> GetActiveUsersByRoleIdAsync(
@@ -165,46 +193,77 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
             CancellationToken cancellationToken)
         {
             var result = new List<RoleUserView>();
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
-
-            await using var command = new SqlCommand(
-                "[authorization].[UserRole_SelectUsersByRoleId]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[UserRole_SelectUsersByRoleId]",
+                    connection);
 
-            command.Parameters.AddWithValue("@RoleId", roleId);
+                command.Parameters.AddWithValue("@RoleId", roleId);
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            while (await reader.ReadAsync(cancellationToken))
-            {
-                if (!reader.IsDBNull(reader.GetOrdinal("RevokedAt")))
+                while (await reader.ReadAsync(cancellationToken))
                 {
-                    continue;
+                    if (!reader.IsDBNull(reader.GetOrdinal("RevokedAt")))
+                    {
+                        continue;
+                    }
+
+                    result.Add(new RoleUserView
+                    {
+                        UserId = reader.GetInt64(reader.GetOrdinal("UserId")),
+                        PublicId = reader.GetString(reader.GetOrdinal("UserPublicId")),
+                        Email = reader.GetString(reader.GetOrdinal("Email")),
+                        FullName = reader.IsDBNull(reader.GetOrdinal("FullName"))
+                            ? null
+                            : reader.GetString(reader.GetOrdinal("FullName")),
+                        Status = reader.GetString(reader.GetOrdinal("Status")),
+                        IsEmailVerified = reader.GetBoolean(reader.GetOrdinal("IsEmailVerified")),
+                        AssignedAt = reader.GetDateTime(reader.GetOrdinal("AssignedAt")),
+                        AssignedByUserId = reader.IsDBNull(reader.GetOrdinal("AssignedByUserId"))
+                            ? null
+                            : reader.GetInt64(reader.GetOrdinal("AssignedByUserId"))
+                    });
                 }
 
-                result.Add(new RoleUserView
+                return result;
+            }
+            finally
+            {
+                if (owned)
                 {
-                    UserId = reader.GetInt64(reader.GetOrdinal("UserId")),
-                    PublicId = reader.GetString(reader.GetOrdinal("UserPublicId")),
-                    Email = reader.GetString(reader.GetOrdinal("Email")),
-                    FullName = reader.IsDBNull(reader.GetOrdinal("FullName"))
-                        ? null
-                        : reader.GetString(reader.GetOrdinal("FullName")),
-                    Status = reader.GetString(reader.GetOrdinal("Status")),
-                    IsEmailVerified = reader.GetBoolean(reader.GetOrdinal("IsEmailVerified")),
-                    AssignedAt = reader.GetDateTime(reader.GetOrdinal("AssignedAt")),
-                    AssignedByUserId = reader.IsDBNull(reader.GetOrdinal("AssignedByUserId"))
-                        ? null
-                        : reader.GetInt64(reader.GetOrdinal("AssignedByUserId"))
-                });
+                    await connection.DisposeAsync();
+                }
+            }
+        }
+
+        private async Task<(SqlConnection Connection, bool Owned)> GetConnectionAsync(
+            CancellationToken cancellationToken)
+        {
+            if (_unitOfWork.HasActiveConnection)
+            {
+                return (_unitOfWork.Connection, false);
             }
 
-            return result;
+            var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+            return (connection, true);
+        }
+
+        private SqlCommand CreateStoredProcedureCommand(
+            string procedureName,
+            SqlConnection connection)
+        {
+            return new SqlCommand(procedureName, connection)
+            {
+                CommandType = CommandType.StoredProcedure,
+                Transaction = _unitOfWork.HasActiveTransaction
+                    ? _unitOfWork.Transaction
+                    : null
+            };
         }
 
         private static UserRole MapUserRole(SqlDataReader reader)

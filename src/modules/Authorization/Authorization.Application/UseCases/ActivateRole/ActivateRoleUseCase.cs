@@ -5,57 +5,55 @@ using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
 using CommercialNews.BuildingBlocks.Messaging.Outbox;
 
-namespace Authorization.Application.UseCases.DeactivatePermission
+namespace Authorization.Application.UseCases.ActivateRole
 {
-    public sealed class DeactivatePermissionUseCase : IDeactivatePermissionUseCase
+    public sealed class ActivateRoleUseCase : IActivateRoleUseCase
     {
-        private readonly IPermissionRepository _permissionRepository;
+        private readonly IRoleRepository _roleRepository;
         private readonly IRequestContext _requestContext;
         private readonly IOutboxMessageIdGenerator _outboxMessageIdGenerator;
         private readonly IAuthorizationUnitOfWork _unitOfWork;
         private readonly IOutboxWriter _outboxWriter;
 
-        public DeactivatePermissionUseCase(
-            IPermissionRepository permissionRepository,
+        public ActivateRoleUseCase(
+            IRoleRepository roleRepository,
             IRequestContext requestContext,
             IOutboxMessageIdGenerator outboxMessageIdGenerator,
             IAuthorizationUnitOfWork unitOfWork,
             IOutboxWriter outboxWriter)
         {
-            _permissionRepository = permissionRepository;
+            _roleRepository = roleRepository;
             _requestContext = requestContext;
             _outboxMessageIdGenerator = outboxMessageIdGenerator;
             _unitOfWork = unitOfWork;
             _outboxWriter = outboxWriter;
         }
 
-        public async Task<DeactivatePermissionResponseDto> ExecuteAsync(
-            DeactivatePermissionRequestDto request,
+        public async Task<ActivateRoleResponseDto> ExecuteAsync(
+            ActivateRoleRequestDto request,
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
 
-            if (request.PermissionId <= 0)
+            if (request.RoleId <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.PermissionId), "PermissionId must be greater than zero.");
+                throw new ArgumentOutOfRangeException(nameof(request.RoleId), "RoleId must be greater than zero.");
             }
 
-            var permission = await _permissionRepository.GetByIdAsync(
-                request.PermissionId,
-                cancellationToken);
+            var role = await _roleRepository.GetByIdAsync(request.RoleId, cancellationToken);
 
-            if (permission is null)
+            if (role is null)
             {
-                throw new InvalidOperationException($"Permission with id {request.PermissionId} was not found.");
+                throw new InvalidOperationException($"Role with id {request.RoleId} was not found.");
             }
 
-            if (!permission.IsActive)
+            if (role.IsActive)
             {
-                return new DeactivatePermissionResponseDto
+                return new ActivateRoleResponseDto
                 {
-                    PermissionId = request.PermissionId,
-                    IsDeactivated = true,
-                    WasAlreadyDeactivated = true
+                    RoleId = request.RoleId,
+                    IsActivated = true,
+                    WasAlreadyActivated = true
                 };
             }
 
@@ -66,19 +64,15 @@ namespace Authorization.Application.UseCases.DeactivatePermission
                 var now = DateTime.UtcNow;
                 var actorUserId = _requestContext.CurrentUserId;
 
-                permission.Deactivate(
-                    now,
-                    actorUserId);
+                role.Activate(now, actorUserId);
 
-                var updatedPermission = await _permissionRepository.UpdateAsync(
-                    permission,
-                    cancellationToken);
+                var updatedRole = await _roleRepository.UpdateAsync(role, cancellationToken);
 
-                var integrationEvent = new PermissionDeactivatedEvent
+                var integrationEvent = new RoleActivatedEvent
                 {
-                    PermissionId = updatedPermission.PermissionId,
-                    PublicId = updatedPermission.PublicId,
-                    Name = updatedPermission.Name,
+                    RoleId = updatedRole.RoleId,
+                    PublicId = updatedRole.PublicId,
+                    Name = updatedRole.Name,
                     ActorUserId = actorUserId,
                     OccurredAtUtc = now,
                     CorrelationId = _requestContext.CorrelationId
@@ -86,10 +80,10 @@ namespace Authorization.Application.UseCases.DeactivatePermission
 
                 await _outboxWriter.WriteAsync(
                     messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.PermissionDeactivated,
-                    aggregateType: AuthorizationOutboxConstants.AggregateTypes.Permission,
-                    aggregateId: updatedPermission.PermissionId.ToString(),
-                    aggregatePublicId: updatedPermission.PublicId,
+                    eventType: AuthorizationOutboxConstants.EventTypes.RoleActivated,
+                    aggregateType: AuthorizationOutboxConstants.AggregateTypes.Role,
+                    aggregateId: updatedRole.RoleId.ToString(),
+                    aggregatePublicId: updatedRole.PublicId,
                     aggregateVersion: null,
                     payload: JsonSerializer.Serialize(integrationEvent),
                     headers: null,
@@ -100,11 +94,11 @@ namespace Authorization.Application.UseCases.DeactivatePermission
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                return new DeactivatePermissionResponseDto
+                return new ActivateRoleResponseDto
                 {
-                    PermissionId = request.PermissionId,
-                    IsDeactivated = true,
-                    WasAlreadyDeactivated = false
+                    RoleId = request.RoleId,
+                    IsActivated = true,
+                    WasAlreadyActivated = false
                 };
             }
             catch
