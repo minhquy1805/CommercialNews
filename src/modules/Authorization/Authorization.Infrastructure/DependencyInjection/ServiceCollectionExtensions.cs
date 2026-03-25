@@ -1,4 +1,6 @@
 using Authorization.Application.Contracts.Ports;
+using Authorization.Application.UseCases.ActivatePermission;
+using Authorization.Application.UseCases.ActivateRole;
 using Authorization.Application.UseCases.AssignRoleToUser;
 using Authorization.Application.UseCases.CheckUserHasPermission;
 using Authorization.Application.UseCases.CreatePermission;
@@ -15,11 +17,13 @@ using Authorization.Application.UseCases.RevokePermissionFromRole;
 using Authorization.Application.UseCases.RevokeRoleFromUser;
 using Authorization.Application.UseCases.UpdatePermission;
 using Authorization.Application.UseCases.UpdateRole;
+using Authorization.Infrastructure.Messaging.Outbox;
 using Authorization.Infrastructure.Persistence.Sql;
 using Authorization.Infrastructure.Persistence.Sql.Repositories;
 using Authorization.Infrastructure.Requesting;
 using Authorization.Infrastructure.Security;
 using Authorization.Infrastructure.Services;
+using CommercialNews.BuildingBlocks.Messaging.Outbox;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Authorization.Infrastructure.DependencyInjection
@@ -73,6 +77,15 @@ namespace Authorization.Infrastructure.DependencyInjection
             services.AddScoped<IGetUserEffectivePermissionsUseCase, GetUserEffectivePermissionsUseCase>();
             services.AddScoped<ICheckUserHasPermissionUseCase, CheckUserHasPermissionUseCase>();
 
+            services.AddScoped<AuthorizationUnitOfWork>();
+            services.AddScoped<IAuthorizationUnitOfWork>(sp =>
+                sp.GetRequiredService<AuthorizationUnitOfWork>());
+
+            services.AddScoped<IOutboxWriter, AuthorizationSqlOutboxWriter>();
+            services.AddSingleton<IOutboxMessageIdGenerator, AuthorizationOutboxMessageIdGenerator>();
+
+            services.AddScoped<IActivateRoleUseCase, ActivateRoleUseCase>();
+            services.AddScoped<IActivatePermissionUseCase, ActivatePermissionUseCase>();
             return services;
         }
     }

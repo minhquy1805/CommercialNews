@@ -1,7 +1,6 @@
 using System.Data;
 using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Queries;
-using Authorization.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
 namespace Authorization.Infrastructure.Persistence.Sql.Repositories

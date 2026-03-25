@@ -9,36 +9,46 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
     public sealed class PermissionRepository : IPermissionRepository
     {
         private readonly AuthorizationSqlConnectionFactory _connectionFactory;
+        private readonly AuthorizationUnitOfWork _unitOfWork;
 
-        public PermissionRepository(AuthorizationSqlConnectionFactory connectionFactory)
+        public PermissionRepository(
+            AuthorizationSqlConnectionFactory connectionFactory,
+            AuthorizationUnitOfWork unitOfWork)
         {
             _connectionFactory = connectionFactory;
+            _unitOfWork = unitOfWork;
         }
 
         public async Task<Permission?> GetByIdAsync(
             long permissionId,
             CancellationToken cancellationToken)
         {
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(
-                "[authorization].[Permission_SelectById]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[Permission_SelectById]",
+                    connection);
 
-            command.Parameters.AddWithValue("@PermissionId", permissionId);
+                command.Parameters.AddWithValue("@PermissionId", permissionId);
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                return null;
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapPermission(reader);
             }
-
-            return MapPermission(reader);
+            finally
+            {
+                if (owned)
+                {
+                    await connection.DisposeAsync();
+                }
+            }
         }
 
         public async Task<Permission?> GetByNameNormalizedAsync(
@@ -47,26 +57,32 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(nameNormalized);
 
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(
-                "[authorization].[Permission_SelectByNameNormalized]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[Permission_SelectByNameNormalized]",
+                    connection);
 
-            command.Parameters.AddWithValue("@NameNormalized", nameNormalized);
+                command.Parameters.AddWithValue("@NameNormalized", nameNormalized);
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                return null;
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapPermission(reader);
             }
-
-            return MapPermission(reader);
+            finally
+            {
+                if (owned)
+                {
+                    await connection.DisposeAsync();
+                }
+            }
         }
 
         public async Task<Permission> InsertAsync(
@@ -75,48 +91,54 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
         {
             ArgumentNullException.ThrowIfNull(permission);
 
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(
-                "[authorization].[Permission_Insert]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[Permission_Insert]",
+                    connection);
 
-            command.Parameters.AddWithValue("@PublicId", permission.PublicId);
-            command.Parameters.AddWithValue("@Name", permission.Name);
-            command.Parameters.AddWithValue("@NameNormalized", permission.NameNormalized);
-            command.Parameters.AddWithValue("@Description", (object?)permission.Description ?? DBNull.Value);
-            command.Parameters.AddWithValue("@Module", (object?)permission.Module ?? DBNull.Value);
-            command.Parameters.AddWithValue("@IsSystem", permission.IsSystem);
-            command.Parameters.AddWithValue("@CreatedByUserId", (object?)permission.CreatedByUserId ?? DBNull.Value);
+                command.Parameters.AddWithValue("@PublicId", permission.PublicId);
+                command.Parameters.AddWithValue("@Name", permission.Name);
+                command.Parameters.AddWithValue("@NameNormalized", permission.NameNormalized);
+                command.Parameters.AddWithValue("@Description", (object?)permission.Description ?? DBNull.Value);
+                command.Parameters.AddWithValue("@Module", (object?)permission.Module ?? DBNull.Value);
+                command.Parameters.AddWithValue("@IsSystem", permission.IsSystem);
+                command.Parameters.AddWithValue("@CreatedByUserId", (object?)permission.CreatedByUserId ?? DBNull.Value);
 
-            var permissionIdParameter = new SqlParameter("@PermissionId", SqlDbType.BigInt)
-            {
-                Direction = ParameterDirection.Output
-            };
-            command.Parameters.Add(permissionIdParameter);
+                var permissionIdParameter = new SqlParameter("@PermissionId", SqlDbType.BigInt)
+                {
+                    Direction = ParameterDirection.Output
+                };
+                command.Parameters.Add(permissionIdParameter);
 
-            await command.ExecuteNonQueryAsync(cancellationToken);
+                await command.ExecuteNonQueryAsync(cancellationToken);
 
-            if (permissionIdParameter.Value is null || permissionIdParameter.Value == DBNull.Value)
-            {
-                throw new InvalidOperationException("Permission_Insert did not return PermissionId.");
+                if (permissionIdParameter.Value is null || permissionIdParameter.Value == DBNull.Value)
+                {
+                    throw new InvalidOperationException("Permission_Insert did not return PermissionId.");
+                }
+
+                var createdPermissionId = Convert.ToInt64(permissionIdParameter.Value);
+
+                var createdPermission = await GetByIdAsync(createdPermissionId, cancellationToken);
+
+                if (createdPermission is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Permission with id {createdPermissionId} was inserted but could not be reloaded.");
+                }
+
+                return createdPermission;
             }
-
-            var createdPermissionId = Convert.ToInt64(permissionIdParameter.Value);
-
-            var createdPermission = await GetByIdAsync(createdPermissionId, cancellationToken);
-
-            if (createdPermission is null)
+            finally
             {
-                throw new InvalidOperationException(
-                    $"Permission with id {createdPermissionId} was inserted but could not be reloaded.");
+                if (owned)
+                {
+                    await connection.DisposeAsync();
+                }
             }
-
-            return createdPermission;
         }
 
         public async Task<Permission> UpdateAsync(
@@ -125,35 +147,67 @@ namespace Authorization.Infrastructure.Persistence.Sql.Repositories
         {
             ArgumentNullException.ThrowIfNull(permission);
 
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
+            var (connection, owned) = await GetConnectionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(
-                "[authorization].[Permission_Update]",
-                connection)
+            try
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                await using var command = CreateStoredProcedureCommand(
+                    "[authorization].[Permission_Update]",
+                    connection);
 
-            command.Parameters.AddWithValue("@PermissionId", permission.PermissionId);
-            command.Parameters.AddWithValue("@Name", permission.Name);
-            command.Parameters.AddWithValue("@NameNormalized", permission.NameNormalized);
-            command.Parameters.AddWithValue("@Description", (object?)permission.Description ?? DBNull.Value);
-            command.Parameters.AddWithValue("@Module", (object?)permission.Module ?? DBNull.Value);
-            command.Parameters.AddWithValue("@IsActive", permission.IsActive);
-            command.Parameters.AddWithValue("@UpdatedByUserId", (object?)permission.UpdatedByUserId ?? DBNull.Value);
+                command.Parameters.AddWithValue("@PermissionId", permission.PermissionId);
+                command.Parameters.AddWithValue("@Name", permission.Name);
+                command.Parameters.AddWithValue("@NameNormalized", permission.NameNormalized);
+                command.Parameters.AddWithValue("@Description", (object?)permission.Description ?? DBNull.Value);
+                command.Parameters.AddWithValue("@Module", (object?)permission.Module ?? DBNull.Value);
+                command.Parameters.AddWithValue("@IsActive", permission.IsActive);
+                command.Parameters.AddWithValue("@UpdatedByUserId", (object?)permission.UpdatedByUserId ?? DBNull.Value);
 
-            await command.ExecuteNonQueryAsync(cancellationToken);
+                await command.ExecuteNonQueryAsync(cancellationToken);
 
-            var updatedPermission = await GetByIdAsync(permission.PermissionId, cancellationToken);
+                var updatedPermission = await GetByIdAsync(permission.PermissionId, cancellationToken);
 
-            if (updatedPermission is null)
+                if (updatedPermission is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Permission with id {permission.PermissionId} was updated but could not be reloaded.");
+                }
+
+                return updatedPermission;
+            }
+            finally
             {
-                throw new InvalidOperationException(
-                    $"Permission with id {permission.PermissionId} was updated but could not be reloaded.");
+                if (owned)
+                {
+                    await connection.DisposeAsync();
+                }
+            }
+        }
+
+        private async Task<(SqlConnection Connection, bool Owned)> GetConnectionAsync(
+            CancellationToken cancellationToken)
+        {
+            if (_unitOfWork.HasActiveConnection)
+            {
+                return (_unitOfWork.Connection, false);
             }
 
-            return updatedPermission;
+            var connection = _connectionFactory.CreateConnection();
+            await connection.OpenAsync(cancellationToken);
+            return (connection, true);
+        }
+
+        private SqlCommand CreateStoredProcedureCommand(
+            string procedureName,
+            SqlConnection connection)
+        {
+            return new SqlCommand(procedureName, connection)
+            {
+                CommandType = CommandType.StoredProcedure,
+                Transaction = _unitOfWork.HasActiveTransaction
+                    ? _unitOfWork.Transaction
+                    : null
+            };
         }
 
         private static Permission MapPermission(SqlDataReader reader)
