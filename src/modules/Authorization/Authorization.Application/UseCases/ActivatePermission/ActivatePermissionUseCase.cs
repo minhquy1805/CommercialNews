@@ -5,9 +5,9 @@ using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
 using CommercialNews.BuildingBlocks.Messaging.Outbox;
 
-namespace Authorization.Application.UseCases.DeactivatePermission
+namespace Authorization.Application.UseCases.ActivatePermission
 {
-    public sealed class DeactivatePermissionUseCase : IDeactivatePermissionUseCase
+    public sealed class ActivatePermissionUseCase : IActivatePermissionUseCase
     {
         private readonly IPermissionRepository _permissionRepository;
         private readonly IRequestContext _requestContext;
@@ -15,7 +15,7 @@ namespace Authorization.Application.UseCases.DeactivatePermission
         private readonly IAuthorizationUnitOfWork _unitOfWork;
         private readonly IOutboxWriter _outboxWriter;
 
-        public DeactivatePermissionUseCase(
+        public ActivatePermissionUseCase(
             IPermissionRepository permissionRepository,
             IRequestContext requestContext,
             IOutboxMessageIdGenerator outboxMessageIdGenerator,
@@ -29,8 +29,8 @@ namespace Authorization.Application.UseCases.DeactivatePermission
             _outboxWriter = outboxWriter;
         }
 
-        public async Task<DeactivatePermissionResponseDto> ExecuteAsync(
-            DeactivatePermissionRequestDto request,
+        public async Task<ActivatePermissionResponseDto> ExecuteAsync(
+            ActivatePermissionRequestDto request,
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(request);
@@ -40,22 +40,20 @@ namespace Authorization.Application.UseCases.DeactivatePermission
                 throw new ArgumentOutOfRangeException(nameof(request.PermissionId), "PermissionId must be greater than zero.");
             }
 
-            var permission = await _permissionRepository.GetByIdAsync(
-                request.PermissionId,
-                cancellationToken);
+            var permission = await _permissionRepository.GetByIdAsync(request.PermissionId, cancellationToken);
 
             if (permission is null)
             {
                 throw new InvalidOperationException($"Permission with id {request.PermissionId} was not found.");
             }
 
-            if (!permission.IsActive)
+            if (permission.IsActive)
             {
-                return new DeactivatePermissionResponseDto
+                return new ActivatePermissionResponseDto
                 {
                     PermissionId = request.PermissionId,
-                    IsDeactivated = true,
-                    WasAlreadyDeactivated = true
+                    IsActivated = true,
+                    WasAlreadyActivated = true
                 };
             }
 
@@ -66,15 +64,11 @@ namespace Authorization.Application.UseCases.DeactivatePermission
                 var now = DateTime.UtcNow;
                 var actorUserId = _requestContext.CurrentUserId;
 
-                permission.Deactivate(
-                    now,
-                    actorUserId);
+                permission.Activate(now, actorUserId);
 
-                var updatedPermission = await _permissionRepository.UpdateAsync(
-                    permission,
-                    cancellationToken);
+                var updatedPermission = await _permissionRepository.UpdateAsync(permission, cancellationToken);
 
-                var integrationEvent = new PermissionDeactivatedEvent
+                var integrationEvent = new PermissionActivatedEvent
                 {
                     PermissionId = updatedPermission.PermissionId,
                     PublicId = updatedPermission.PublicId,
@@ -86,7 +80,7 @@ namespace Authorization.Application.UseCases.DeactivatePermission
 
                 await _outboxWriter.WriteAsync(
                     messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.PermissionDeactivated,
+                    eventType: AuthorizationOutboxConstants.EventTypes.PermissionActivated,
                     aggregateType: AuthorizationOutboxConstants.AggregateTypes.Permission,
                     aggregateId: updatedPermission.PermissionId.ToString(),
                     aggregatePublicId: updatedPermission.PublicId,
@@ -100,11 +94,11 @@ namespace Authorization.Application.UseCases.DeactivatePermission
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                return new DeactivatePermissionResponseDto
+                return new ActivatePermissionResponseDto
                 {
                     PermissionId = request.PermissionId,
-                    IsDeactivated = true,
-                    WasAlreadyDeactivated = false
+                    IsActivated = true,
+                    WasAlreadyActivated = false
                 };
             }
             catch
