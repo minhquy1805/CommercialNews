@@ -1,5 +1,3 @@
-using System.Text.Json;
-using CommercialNews.Worker.Messaging.Email.Ports;
 using CommercialNews.Worker.Messaging.Outbox.Models;
 using CommercialNews.Worker.Messaging.Outbox.Ports;
 
@@ -30,7 +28,7 @@ namespace CommercialNews.Worker.HostedServices
 
                     var reader = scope.ServiceProvider.GetRequiredService<IOutboxMessageReader>();
                     var stateRepository = scope.ServiceProvider.GetRequiredService<IOutboxMessageStateRepository>();
-                    var dispatcher = scope.ServiceProvider.GetRequiredService<IOutboxEventEmailDispatcher>();
+                    var dispatcher = scope.ServiceProvider.GetRequiredService<IOutboxEventDispatcher>();
 
                     var messages = await reader.SelectPendingAsync(
                         topN: 20,
@@ -54,7 +52,7 @@ namespace CommercialNews.Worker.HostedServices
         private async Task ProcessMessageAsync(
             OutboxMessageRecord message,
             IOutboxMessageStateRepository stateRepository,
-            IOutboxEventEmailDispatcher dispatcher,
+            IOutboxEventDispatcher dispatcher,
             CancellationToken cancellationToken)
         {
             try

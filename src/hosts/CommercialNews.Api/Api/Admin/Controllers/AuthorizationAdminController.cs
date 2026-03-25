@@ -1,4 +1,6 @@
 using Authorization.Application.Contracts.Requests;
+using Authorization.Application.UseCases.ActivatePermission;
+using Authorization.Application.UseCases.ActivateRole;
 using Authorization.Application.UseCases.AssignRoleToUser;
 using Authorization.Application.UseCases.CheckUserHasPermission;
 using Authorization.Application.UseCases.CreatePermission;
@@ -40,6 +42,8 @@ namespace CommercialNews.Api.Api.Admin.Controllers
         private readonly IGetPermissionRolesUseCase _getPermissionRolesUseCase;
         private readonly IGetUserEffectivePermissionsUseCase _getUserEffectivePermissionsUseCase;
         private readonly ICheckUserHasPermissionUseCase _checkUserHasPermissionUseCase;
+        private readonly IActivateRoleUseCase _activateRoleUseCase;
+        private readonly IActivatePermissionUseCase _activatePermissionUseCase;
 
         public AuthorizationAdminController(
             IAssignRoleToUserUseCase assignRoleToUserUseCase,
@@ -57,7 +61,9 @@ namespace CommercialNews.Api.Api.Admin.Controllers
             IGetRolePermissionsUseCase getRolePermissionsUseCase,
             IGetPermissionRolesUseCase getPermissionRolesUseCase,
             IGetUserEffectivePermissionsUseCase getUserEffectivePermissionsUseCase,
-            ICheckUserHasPermissionUseCase checkUserHasPermissionUseCase)
+            ICheckUserHasPermissionUseCase checkUserHasPermissionUseCase,
+            IActivateRoleUseCase activateRoleUseCase,
+            IActivatePermissionUseCase activatePermissionUseCase)
         {
             _assignRoleToUserUseCase = assignRoleToUserUseCase;
             _revokeRoleFromUserUseCase = revokeRoleFromUserUseCase;
@@ -75,6 +81,8 @@ namespace CommercialNews.Api.Api.Admin.Controllers
             _getPermissionRolesUseCase = getPermissionRolesUseCase;
             _getUserEffectivePermissionsUseCase = getUserEffectivePermissionsUseCase;
             _checkUserHasPermissionUseCase = checkUserHasPermissionUseCase;
+            _activateRoleUseCase = activateRoleUseCase;
+            _activatePermissionUseCase = activatePermissionUseCase;
         }
 
         [HttpPost("roles")]
@@ -368,6 +376,36 @@ namespace CommercialNews.Api.Api.Admin.Controllers
                 {
                     UserId = userId,
                     PermissionName = request.PermissionName
+                },
+                cancellationToken);
+
+            return Ok(response);
+        }
+
+        [HttpPost("roles/{roleId:long}:activate")]
+        public async Task<IActionResult> ActivateRole(
+            [FromRoute] long roleId,
+            CancellationToken cancellationToken)
+        {
+            var response = await _activateRoleUseCase.ExecuteAsync(
+                new ActivateRoleRequestDto
+                {
+                    RoleId = roleId
+                },
+                cancellationToken);
+
+            return Ok(response);
+        }
+
+        [HttpPost("permissions/{permissionId:long}:activate")]
+        public async Task<IActionResult> ActivatePermission(
+            [FromRoute] long permissionId,
+            CancellationToken cancellationToken)
+        {
+            var response = await _activatePermissionUseCase.ExecuteAsync(
+                new ActivatePermissionRequestDto
+                {
+                    PermissionId = permissionId
                 },
                 cancellationToken);
 
