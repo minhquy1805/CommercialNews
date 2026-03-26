@@ -20,10 +20,6 @@
     must succeed atomically (for example: update article + insert revision + insert lifecycle event).
 */
 
-SET ANSI_NULLS ON;
-SET QUOTED_IDENTIFIER ON;
-GO
-
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 GO
