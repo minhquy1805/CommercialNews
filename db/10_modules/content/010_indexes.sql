@@ -18,6 +18,10 @@
   - Keep indexes focused on known V1 access patterns; avoid speculative over-indexing.
 */
 
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+GO
+
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 GO
