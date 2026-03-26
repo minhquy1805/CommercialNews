@@ -1,35 +1,33 @@
 ﻿using Authorization.Infrastructure.DependencyInjection;
+using CommercialNews.Api.CompositionRoot;
+using CommercialNews.Api.OpenApi;
 using Identity.Infrastructure.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-builder.Services.AddControllers();
+// Host-level registrations
+builder.Services.AddHostServices(builder.Configuration);
 
-// Swagger / OpenAPI
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-// Module registrations
+// Temporary module registrations
+// TODO:
+// Identity and Authorization are currently registered directly here
+// because these modules were implemented earlier and still need refactoring.
+//
+// After Content and the next modules are implemented in a cleaner,
+// consistent style, move these registrations into ModuleRegistration
+// and split them properly into Application/Infrastructure registration methods.
 builder.Services.AddIdentityInfrastructure();
 builder.Services.AddAuthorizationInfrastructure();
 
+// Future module registration entry point
+builder.Services.AddApplicationModules(builder.Configuration);
+
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+app.UseHostOpenApi();
 
 app.UseHttpsRedirection();
 
-// Khi làm JWT xong thì bật thêm:
-// app.UseAuthentication();
-
-app.UseAuthorization();
-
-app.MapControllers();
+app.UseHostPipeline();
 
 app.Run();
