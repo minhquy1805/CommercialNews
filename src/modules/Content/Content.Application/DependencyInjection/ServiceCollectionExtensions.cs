@@ -11,26 +11,27 @@ using Content.Application.UseCases.Articles.UnpublishArticle;
 using Content.Application.UseCases.Articles.UpdateArticle;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Content.Application.DependencyInjection;
-
-public static class ServiceCollectionExtensions
+namespace Content.Application.DependencyInjection
 {
-    public static IServiceCollection AddContentApplication(this IServiceCollection services)
+    public static class ServiceCollectionExtensions
     {
-        ArgumentNullException.ThrowIfNull(services);
+        public static IServiceCollection AddContentApplication(this IServiceCollection services)
+        {
+            ArgumentNullException.ThrowIfNull(services);
 
-        services.AddScoped<ICreateArticleUseCase, CreateArticleUseCase>();
-        services.AddScoped<IGetArticleByIdUseCase, GetArticleByIdUseCase>();
-        services.AddScoped<IGetArticlesUseCase, GetArticlesUseCase>();
-        services.AddScoped<IUpdateArticleUseCase, UpdateArticleUseCase>();
-        services.AddScoped<IGetArticleRevisionsUseCase, GetArticleRevisionsUseCase>();
-        services.AddScoped<IGetArticleRevisionByIdUseCase, GetArticleRevisionByIdUseCase>();
-        services.AddScoped<IPublishArticleUseCase, PublishArticleUseCase>();
-        services.AddScoped<IUnpublishArticleUseCase, UnpublishArticleUseCase>();
-        services.AddScoped<IArchiveArticleUseCase, ArchiveArticleUseCase>();
-        services.AddScoped<IRestoreArticleUseCase, RestoreArticleUseCase>();
-        services.AddScoped<IDeleteArticleUseCase, DeleteArticleUseCase>();
+            services.AddScoped<ICreateArticleUseCase, CreateArticleUseCase>();
+            services.AddScoped<IGetArticleByIdUseCase, GetArticleByIdUseCase>();
+            services.AddScoped<IGetArticlesUseCase, GetArticlesUseCase>();
+            services.AddScoped<IUpdateArticleUseCase, UpdateArticleUseCase>();
+            services.AddScoped<IGetArticleRevisionsUseCase, GetArticleRevisionsUseCase>();
+            services.AddScoped<IGetArticleRevisionByIdUseCase, GetArticleRevisionByIdUseCase>();
+            services.AddScoped<IPublishArticleUseCase, PublishArticleUseCase>();
+            services.AddScoped<IUnpublishArticleUseCase, UnpublishArticleUseCase>();
+            services.AddScoped<IArchiveArticleUseCase, ArchiveArticleUseCase>();
+            services.AddScoped<IRestoreArticleUseCase, RestoreArticleUseCase>();
+            services.AddScoped<IDeleteArticleUseCase, DeleteArticleUseCase>();
 
-        return services;
+            return services;
+        }
     }
 }
