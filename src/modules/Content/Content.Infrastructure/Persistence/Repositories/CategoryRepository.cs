@@ -8,6 +8,8 @@ namespace Content.Infrastructure.Persistence.Repositories
 {
     public sealed class CategoryRepository : ICategoryRepository
     {
+        private const string CategorySelectByIdProc = "[content].[Content_Category_SelectById]";
+
         private readonly ContentUnitOfWork _unitOfWork;
         private readonly ISqlConnectionFactory _sqlConnectionFactory;
 
@@ -33,7 +35,7 @@ namespace Content.Infrastructure.Persistence.Repositories
             try
             {
                 (SqlCommand command, SqlConnection? connection) =
-                    await CreateReadCommandAsync("Content_Category_ExistsById", cancellationToken);
+                    await CreateReadCommandAsync(CategorySelectByIdProc, cancellationToken);
 
                 ownedConnection = connection;
 
@@ -42,14 +44,17 @@ namespace Content.Infrastructure.Persistence.Repositories
                     command.Parameters.Add(
                         new SqlParameter("@CategoryId", SqlDbType.BigInt) { Value = categoryId });
 
-                    object? result = await command.ExecuteScalarAsync(cancellationToken);
+                    using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-                    if (result is null || result == DBNull.Value)
+                    if (!await reader.ReadAsync(cancellationToken))
                     {
                         return false;
                     }
 
-                    return Convert.ToInt32(result) > 0;
+                    bool isDeleted = reader.GetBoolean(reader.GetOrdinal("IsDeleted"));
+                    bool isActive = reader.GetBoolean(reader.GetOrdinal("IsActive"));
+
+                    return !isDeleted && isActive;
                 }
             }
             finally
@@ -88,4 +93,3 @@ namespace Content.Infrastructure.Persistence.Repositories
         }
     }
 }
-
