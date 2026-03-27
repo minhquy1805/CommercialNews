@@ -1,3 +1,6 @@
+using Content.Application.DependencyInjection;
+using Content.Infrastructure.DependencyInjection;
+
 namespace CommercialNews.Api.CompositionRoot;
 
 public static class ModuleRegistration
@@ -9,6 +12,9 @@ public static class ModuleRegistration
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
+        services.AddContentApplication();
+        services.AddContentInfrastructure();
+
         // TODO:
         // Move module registrations here gradually after each module is refactored
         // into a consistent Application/Infrastructure registration style.
@@ -19,9 +25,6 @@ public static class ModuleRegistration
         //
         // services.AddAuthorizationApplication();
         // services.AddAuthorizationInfrastructure(configuration);
-        //
-        // services.AddContentApplication();
-        // services.AddContentInfrastructure(configuration);
 
         return services;
     }
