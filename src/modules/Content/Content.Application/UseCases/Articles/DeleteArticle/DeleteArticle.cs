@@ -59,7 +59,6 @@ namespace Content.Application.UseCases.Articles.DeleteArticle
 
                 DateTime nowUtc = _dateTimeProvider.UtcNow;
                 long? actorUserId = _requestContext.CurrentUserId;
-
                 string fromStatus = article.Status;
 
                 article.SoftDelete(
@@ -70,22 +69,23 @@ namespace Content.Application.UseCases.Articles.DeleteArticle
 
                 try
                 {
-                    bool updated = await _articleRepository.UpdateAsync(
-                        article,
-                        request.ExpectedVersion,
-                        cancellationToken);
+                    Article? updatedArticle = await _articleRepository.DeleteAsync(
+                        articleId: request.ArticleId,
+                        actorUserId: actorUserId,
+                        expectedVersion: request.ExpectedVersion,
+                        cancellationToken: cancellationToken);
 
-                    if (!updated)
+                    if (updatedArticle is null)
                     {
                         await _unitOfWork.RollbackAsync(cancellationToken);
                         return Result<DeleteArticleResponseDto>.Failure(ContentErrors.ConcurrencyConflict);
                     }
 
                     await _articleLifecycleEventRepository.InsertAsync(
-                        articleId: article.ArticleId,
+                        articleId: updatedArticle.ArticleId,
                         actionType: "Delete",
                         fromStatus: fromStatus,
-                        toStatus: article.Status,
+                        toStatus: updatedArticle.Status,
                         reason: null,
                         occurredAt: nowUtc,
                         actorUserId: actorUserId,
@@ -95,12 +95,12 @@ namespace Content.Application.UseCases.Articles.DeleteArticle
 
                     return Result<DeleteArticleResponseDto>.Success(new DeleteArticleResponseDto
                     {
-                        ArticleId = article.ArticleId,
-                        PublicId = article.PublicId,
-                        IsDeleted = article.IsDeleted,
-                        DeletedAt = article.DeletedAt,
-                        Version = article.Version,
-                        UpdatedAt = article.UpdatedAt
+                        ArticleId = updatedArticle.ArticleId,
+                        PublicId = updatedArticle.PublicId,
+                        IsDeleted = updatedArticle.IsDeleted,
+                        DeletedAt = updatedArticle.DeletedAt,
+                        Version = updatedArticle.Version,
+                        UpdatedAt = updatedArticle.UpdatedAt
                     });
                 }
                 catch

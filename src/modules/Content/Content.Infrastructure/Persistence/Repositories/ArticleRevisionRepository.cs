@@ -9,6 +9,10 @@ namespace Content.Infrastructure.Persistence.Repositories
 {
     public sealed class ArticleRevisionRepository : IArticleRevisionRepository
     {
+        private const string ArticleRevisionInsertProc = "[content].[Content_ArticleRevision_Insert]";
+        private const string ArticleRevisionSelectByArticleIdProc = "[content].[Content_ArticleRevision_SelectByArticleId]";
+        private const string ArticleRevisionSelectByIdProc = "[content].[Content_ArticleRevision_SelectById]";
+
         private readonly ContentUnitOfWork _unitOfWork;
         private readonly ISqlConnectionFactory _sqlConnectionFactory;
 
@@ -35,7 +39,7 @@ namespace Content.Infrastructure.Persistence.Repositories
             string? changeSummary,
             CancellationToken cancellationToken = default)
         {
-            using SqlCommand command = CreateTransactionalCommand("Content_ArticleRevision_Insert");
+            using SqlCommand command = CreateTransactionalCommand(ArticleRevisionInsertProc);
 
             command.Parameters.AddRange(
             [
@@ -47,7 +51,6 @@ namespace Content.Infrastructure.Persistence.Repositories
                 new SqlParameter("@CategoryIdSnapshot", SqlDbType.BigInt) { Value = ToDbValue(categoryIdSnapshot) },
                 new SqlParameter("@StatusSnapshot", SqlDbType.NVarChar, 30) { Value = statusSnapshot },
                 new SqlParameter("@CoverMediaIdSnapshot", SqlDbType.BigInt) { Value = ToDbValue(coverMediaIdSnapshot) },
-                new SqlParameter("@ChangedAt", SqlDbType.DateTime2) { Value = changedAt },
                 new SqlParameter("@ChangedByUserId", SqlDbType.BigInt) { Value = ToDbValue(changedByUserId) },
                 new SqlParameter("@ChangeType", SqlDbType.NVarChar, 30) { Value = changeType },
                 new SqlParameter("@ChangeSummary", SqlDbType.NVarChar, 1000) { Value = ToDbValue(changeSummary) }
@@ -67,26 +70,22 @@ namespace Content.Infrastructure.Persistence.Repositories
             try
             {
                 (SqlCommand command, SqlConnection? connection) =
-                    await CreateReadCommandAsync("Content_ArticleRevision_SelectByArticleId", cancellationToken);
+                    await CreateReadCommandAsync(ArticleRevisionSelectByArticleIdProc, cancellationToken);
 
                 ownedConnection = connection;
 
                 using (command)
                 {
-                    command.Parameters.AddRange(
-                    [
-                        new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = query.ArticleId },
-                        new SqlParameter("@Page", SqlDbType.Int) { Value = query.Page },
-                        new SqlParameter("@PageSize", SqlDbType.Int) { Value = query.PageSize }
-                    ]);
+                    command.Parameters.Add(
+                        new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = query.ArticleId });
 
                     using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-                    List<ArticleRevisionListResultItem> items = [];
+                    List<ArticleRevisionListResultItem> allItems = [];
 
                     while (await reader.ReadAsync(cancellationToken))
                     {
-                        items.Add(new ArticleRevisionListResultItem
+                        allItems.Add(new ArticleRevisionListResultItem
                         {
                             RevisionId = reader.GetInt64(reader.GetOrdinal("RevisionId")),
                             RevisionNumber = reader.GetInt32(reader.GetOrdinal("RevisionNumber")),
@@ -103,17 +102,17 @@ namespace Content.Infrastructure.Persistence.Repositories
                         });
                     }
 
-                    int totalItems = 0;
+                    int totalItems = allItems.Count;
+                    int skip = (query.Page - 1) * query.PageSize;
 
-                    if (await reader.NextResultAsync(cancellationToken) &&
-                        await reader.ReadAsync(cancellationToken))
-                    {
-                        totalItems = reader.GetInt32(reader.GetOrdinal("TotalItems"));
-                    }
+                    IReadOnlyCollection<ArticleRevisionListResultItem> pagedItems = allItems
+                        .Skip(skip)
+                        .Take(query.PageSize)
+                        .ToArray();
 
                     return new PagedQueryResult<ArticleRevisionListResultItem>
                     {
-                        Items = items,
+                        Items = pagedItems,
                         Page = query.Page,
                         PageSize = query.PageSize,
                         TotalItems = totalItems
@@ -139,7 +138,7 @@ namespace Content.Infrastructure.Persistence.Repositories
             try
             {
                 (SqlCommand command, SqlConnection? connection) =
-                    await CreateReadCommandAsync("Content_ArticleRevision_SelectById", cancellationToken);
+                    await CreateReadCommandAsync(ArticleRevisionSelectByIdProc, cancellationToken);
 
                 ownedConnection = connection;
 
@@ -191,7 +190,6 @@ namespace Content.Infrastructure.Persistence.Repositories
             command.Transaction = _unitOfWork.Transaction;
             command.CommandText = storedProcedureName;
             command.CommandType = CommandType.StoredProcedure;
-
             return command;
         }
 
@@ -202,9 +200,7 @@ namespace Content.Infrastructure.Persistence.Repositories
             if (_unitOfWork.HasActiveConnection)
             {
                 SqlCommand ambientCommand = _unitOfWork.Connection.CreateCommand();
-                ambientCommand.Transaction = _unitOfWork.HasActiveTransaction
-                    ? _unitOfWork.Transaction
-                    : null;
+                ambientCommand.Transaction = _unitOfWork.HasActiveTransaction ? _unitOfWork.Transaction : null;
                 ambientCommand.CommandText = storedProcedureName;
                 ambientCommand.CommandType = CommandType.StoredProcedure;
 
@@ -236,4 +232,3 @@ namespace Content.Infrastructure.Persistence.Repositories
         }
     }
 }
-

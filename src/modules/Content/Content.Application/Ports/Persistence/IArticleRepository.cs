@@ -20,11 +20,40 @@ namespace Content.Application.Ports.Persistence
         Task<PagedQueryResult<ArticleListResultItem>> GetPagedAsync(
             ArticleListQuery query,
             CancellationToken cancellationToken = default);
-        
+
         Task<bool> UpdateAsync(
             Article article,
             int expectedVersion,
             CancellationToken cancellationToken = default);
+
+        Task<Article?> PublishAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default);
+
+        Task<Article?> UnpublishAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default);
+
+        Task<Article?> ArchiveAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default);
+
+        Task<Article?> RestoreAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default);
+
+        Task<Article?> DeleteAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default);
     }
 }
-

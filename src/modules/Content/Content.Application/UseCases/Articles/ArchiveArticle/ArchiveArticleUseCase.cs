@@ -59,7 +59,6 @@ namespace Content.Application.UseCases.Articles.ArchiveArticle
 
                 DateTime nowUtc = _dateTimeProvider.UtcNow;
                 long? actorUserId = _requestContext.CurrentUserId;
-
                 string fromStatus = article.Status;
 
                 article.Archive(
@@ -70,22 +69,23 @@ namespace Content.Application.UseCases.Articles.ArchiveArticle
 
                 try
                 {
-                    bool updated = await _articleRepository.UpdateAsync(
-                        article,
-                        request.ExpectedVersion,
-                        cancellationToken);
+                    Article? updatedArticle = await _articleRepository.ArchiveAsync(
+                        articleId: request.ArticleId,
+                        actorUserId: actorUserId,
+                        expectedVersion: request.ExpectedVersion,
+                        cancellationToken: cancellationToken);
 
-                    if (!updated)
+                    if (updatedArticle is null)
                     {
                         await _unitOfWork.RollbackAsync(cancellationToken);
                         return Result<ArchiveArticleResponseDto>.Failure(ContentErrors.ConcurrencyConflict);
                     }
 
                     await _articleLifecycleEventRepository.InsertAsync(
-                        articleId: article.ArticleId,
+                        articleId: updatedArticle.ArticleId,
                         actionType: "Archive",
                         fromStatus: fromStatus,
-                        toStatus: article.Status,
+                        toStatus: updatedArticle.Status,
                         reason: null,
                         occurredAt: nowUtc,
                         actorUserId: actorUserId,
@@ -95,12 +95,12 @@ namespace Content.Application.UseCases.Articles.ArchiveArticle
 
                     return Result<ArchiveArticleResponseDto>.Success(new ArchiveArticleResponseDto
                     {
-                        ArticleId = article.ArticleId,
-                        PublicId = article.PublicId,
-                        Status = article.Status,
-                        ArchivedAt = article.ArchivedAt,
-                        Version = article.Version,
-                        UpdatedAt = article.UpdatedAt
+                        ArticleId = updatedArticle.ArticleId,
+                        PublicId = updatedArticle.PublicId,
+                        Status = updatedArticle.Status,
+                        ArchivedAt = updatedArticle.ArchivedAt,
+                        Version = updatedArticle.Version,
+                        UpdatedAt = updatedArticle.UpdatedAt
                     });
                 }
                 catch
@@ -138,4 +138,3 @@ namespace Content.Application.UseCases.Articles.ArchiveArticle
         }
     }
 }
-
