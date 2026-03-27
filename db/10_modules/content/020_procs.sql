@@ -1289,6 +1289,26 @@ BEGIN
 END
 GO
 
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE [content].[Content_ArticleRevision_SelectById]
+    @ArticleId BIGINT,
+    @RevisionId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SELECT TOP (1) *
+    FROM [content].[ArticleRevision]
+    WHERE [ArticleId] = @ArticleId
+      AND [RevisionId] = @RevisionId;
+END
+GO
+
 /* =========================================================
    ARTICLE LIFECYCLE EVENT
    ========================================================= */
@@ -1375,3 +1395,4 @@ BEGIN
     ORDER BY [OccurredAt] DESC, [ArticleLifecycleEventId] DESC;
 END
 GO
+

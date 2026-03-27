@@ -77,22 +77,23 @@ namespace Content.Application.UseCases.Articles.UnpublishArticle
 
                 try
                 {
-                    bool updated = await _articleRepository.UpdateAsync(
-                        article,
-                        request.ExpectedVersion,
-                        cancellationToken);
+                    Article? updatedArticle = await _articleRepository.UnpublishAsync(
+                        articleId: request.ArticleId,
+                        actorUserId: actorUserId,
+                        expectedVersion: request.ExpectedVersion,
+                        cancellationToken: cancellationToken);
 
-                    if (!updated)
+                    if (updatedArticle is null)
                     {
                         await _unitOfWork.RollbackAsync(cancellationToken);
                         return Result<UnpublishArticleResponseDto>.Failure(ContentErrors.ConcurrencyConflict);
                     }
 
                     await _articleLifecycleEventRepository.InsertAsync(
-                        articleId: article.ArticleId,
+                        articleId: updatedArticle.ArticleId,
                         actionType: "Unpublish",
                         fromStatus: fromStatus,
-                        toStatus: article.Status,
+                        toStatus: updatedArticle.Status,
                         reason: reason,
                         occurredAt: nowUtc,
                         actorUserId: actorUserId,
@@ -102,12 +103,12 @@ namespace Content.Application.UseCases.Articles.UnpublishArticle
 
                     return Result<UnpublishArticleResponseDto>.Success(new UnpublishArticleResponseDto
                     {
-                        ArticleId = article.ArticleId,
-                        PublicId = article.PublicId,
-                        Status = article.Status,
-                        UnpublishedAt = article.UnpublishedAt,
-                        Version = article.Version,
-                        UpdatedAt = article.UpdatedAt
+                        ArticleId = updatedArticle.ArticleId,
+                        PublicId = updatedArticle.PublicId,
+                        Status = updatedArticle.Status,
+                        UnpublishedAt = updatedArticle.UnpublishedAt,
+                        Version = updatedArticle.Version,
+                        UpdatedAt = updatedArticle.UpdatedAt
                     });
                 }
                 catch
@@ -145,4 +146,3 @@ namespace Content.Application.UseCases.Articles.UnpublishArticle
         }
     }
 }
-

@@ -7,6 +7,8 @@ namespace Content.Infrastructure.Persistence.Repositories
 {
     public sealed class ArticleLifecycleEventRepository : IArticleLifecycleEventRepository
     {
+        private const string ArticleLifecycleEventInsertProc = "[content].[Content_ArticleLifecycleEvent_Insert]";
+
         private readonly ContentUnitOfWork _unitOfWork;
 
         public ArticleLifecycleEventRepository(ContentUnitOfWork unitOfWork)
@@ -24,7 +26,7 @@ namespace Content.Infrastructure.Persistence.Repositories
             long? actorUserId,
             CancellationToken cancellationToken = default)
         {
-            using SqlCommand command = CreateTransactionalCommand("Content_ArticleLifecycleEvent_Insert");
+            using SqlCommand command = CreateTransactionalCommand(ArticleLifecycleEventInsertProc);
 
             command.Parameters.AddRange(
             [
@@ -33,7 +35,6 @@ namespace Content.Infrastructure.Persistence.Repositories
                 new SqlParameter("@FromStatus", SqlDbType.NVarChar, 30) { Value = ToDbValue(fromStatus) },
                 new SqlParameter("@ToStatus", SqlDbType.NVarChar, 30) { Value = ToDbValue(toStatus) },
                 new SqlParameter("@Reason", SqlDbType.NVarChar, 1000) { Value = ToDbValue(reason) },
-                new SqlParameter("@OccurredAt", SqlDbType.DateTime2) { Value = occurredAt },
                 new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) }
             ]);
 
@@ -46,11 +47,9 @@ namespace Content.Infrastructure.Persistence.Repositories
             command.Transaction = _unitOfWork.Transaction;
             command.CommandText = storedProcedureName;
             command.CommandType = CommandType.StoredProcedure;
-
             return command;
         }
 
         private static object ToDbValue(object? value) => value ?? DBNull.Value;
     }
 }
-

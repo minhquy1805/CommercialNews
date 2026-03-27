@@ -59,7 +59,6 @@ namespace Content.Application.UseCases.Articles.RestoreArticle
 
                 DateTime nowUtc = _dateTimeProvider.UtcNow;
                 long? actorUserId = _requestContext.CurrentUserId;
-
                 string fromStatus = article.Status;
 
                 article.RestoreToDraft(
@@ -70,22 +69,23 @@ namespace Content.Application.UseCases.Articles.RestoreArticle
 
                 try
                 {
-                    bool updated = await _articleRepository.UpdateAsync(
-                        article,
-                        request.ExpectedVersion,
-                        cancellationToken);
+                    Article? updatedArticle = await _articleRepository.RestoreAsync(
+                        articleId: request.ArticleId,
+                        actorUserId: actorUserId,
+                        expectedVersion: request.ExpectedVersion,
+                        cancellationToken: cancellationToken);
 
-                    if (!updated)
+                    if (updatedArticle is null)
                     {
                         await _unitOfWork.RollbackAsync(cancellationToken);
                         return Result<RestoreArticleResponseDto>.Failure(ContentErrors.ConcurrencyConflict);
                     }
 
                     await _articleLifecycleEventRepository.InsertAsync(
-                        articleId: article.ArticleId,
+                        articleId: updatedArticle.ArticleId,
                         actionType: "Restore",
                         fromStatus: fromStatus,
-                        toStatus: article.Status,
+                        toStatus: updatedArticle.Status,
                         reason: null,
                         occurredAt: nowUtc,
                         actorUserId: actorUserId,
@@ -95,11 +95,11 @@ namespace Content.Application.UseCases.Articles.RestoreArticle
 
                     return Result<RestoreArticleResponseDto>.Success(new RestoreArticleResponseDto
                     {
-                        ArticleId = article.ArticleId,
-                        PublicId = article.PublicId,
-                        Status = article.Status,
-                        Version = article.Version,
-                        UpdatedAt = article.UpdatedAt
+                        ArticleId = updatedArticle.ArticleId,
+                        PublicId = updatedArticle.PublicId,
+                        Status = updatedArticle.Status,
+                        Version = updatedArticle.Version,
+                        UpdatedAt = updatedArticle.UpdatedAt
                     });
                 }
                 catch

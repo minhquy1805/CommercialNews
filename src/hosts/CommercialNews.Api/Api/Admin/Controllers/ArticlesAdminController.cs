@@ -24,6 +24,8 @@ namespace CommercialNews.Api.Api.Admin.Controllers
     [Route("api/v1/admin/content/articles")]
     public sealed class ArticlesAdminController : ControllerBase
     {
+        private const string GetArticleByIdRouteName = "AdminContentArticles.GetById";
+
         private readonly ICreateArticleUseCase _createArticleUseCase;
         private readonly IGetArticleByIdUseCase _getArticleByIdUseCase;
         private readonly IGetArticlesUseCase _getArticlesUseCase;
@@ -86,9 +88,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers
 
             if (result.IsFailure)
             {
-                return this.ToCreatedAtActionResult(
-                    Result<CreateArticleResponse>.Failure(result.Error!),
-                    nameof(GetByIdAsync));
+                return this.ToActionResult(Result<CreateArticleResponse>.Failure(result.Error!));
             }
 
             var response = new CreateArticleResponse
@@ -100,13 +100,13 @@ namespace CommercialNews.Api.Api.Admin.Controllers
                 CreatedAt = result.Value.CreatedAt
             };
 
-            return this.ToCreatedAtActionResult(
-                Result<CreateArticleResponse>.Success(response),
-                nameof(GetByIdAsync),
-                new { articleId = response.ArticleId });
+            return CreatedAtRoute(
+                GetArticleByIdRouteName,
+                new { articleId = response.ArticleId },
+                response);
         }
 
-        [HttpGet("{articleId:long}")]
+        [HttpGet("{articleId:long}", Name = GetArticleByIdRouteName)]
         [ProducesResponseType(typeof(GetArticleByIdResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]

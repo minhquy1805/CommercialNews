@@ -73,7 +73,7 @@ namespace Content.Domain.Entities
             };
         }
 
-        public void Rehydrate(
+        public static Article Rehydrate(
             long articleId,
             string publicId,
             string title,
@@ -121,26 +121,29 @@ namespace Content.Domain.Entities
             ValidateTitle(title);
             ValidateBody(body);
 
-            ArticleId = articleId;
-            PublicId = publicId.Trim();
-            Title = title.Trim();
-            Summary = NormalizeOptional(summary);
-            Body = body.Trim();
-            Status = status;
-            AuthorUserId = authorUserId;
-            CategoryId = categoryId;
-            CoverMediaId = coverMediaId;
-            CreatedAt = createdAt;
-            UpdatedAt = updatedAt;
-            PublishedAt = publishedAt;
-            UnpublishedAt = unpublishedAt;
-            ArchivedAt = archivedAt;
-            CreatedByUserId = createdByUserId;
-            UpdatedByUserId = updatedByUserId;
-            IsDeleted = isDeleted;
-            DeletedAt = deletedAt;
-            DeletedByUserId = deletedByUserId;
-            Version = version;
+            return new Article
+            {
+                ArticleId = articleId,
+                PublicId = publicId.Trim(),
+                Title = title.Trim(),
+                Summary = NormalizeOptional(summary),
+                Body = body.Trim(),
+                Status = status,
+                AuthorUserId = authorUserId,
+                CategoryId = categoryId,
+                CoverMediaId = coverMediaId,
+                CreatedAt = createdAt,
+                UpdatedAt = updatedAt,
+                PublishedAt = publishedAt,
+                UnpublishedAt = unpublishedAt,
+                ArchivedAt = archivedAt,
+                CreatedByUserId = createdByUserId,
+                UpdatedByUserId = updatedByUserId,
+                IsDeleted = isDeleted,
+                DeletedAt = deletedAt,
+                DeletedByUserId = deletedByUserId,
+                Version = version
+            };
         }
 
         public void UpdateDraft(
@@ -348,4 +351,3 @@ namespace Content.Domain.Entities
         }
     }
 }
-

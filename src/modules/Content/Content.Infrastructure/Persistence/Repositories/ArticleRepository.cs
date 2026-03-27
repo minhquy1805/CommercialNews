@@ -10,6 +10,18 @@ namespace Content.Infrastructure.Persistence.Repositories
 {
     public sealed class ArticleRepository : IArticleRepository
     {
+        private const string ArticleInsertProc = "[content].[Content_Article_Insert]";
+        private const string ArticleSelectByIdProc = "[content].[Content_Article_SelectById]";
+        private const string ArticleSelectByPublicIdProc = "[content].[Content_Article_SelectByPublicId]";
+        private const string ArticleSelectSkipAndTakeProc = "[content].[Content_Article_SelectSkipAndTake]";
+        private const string ArticleUpdateProc = "[content].[Content_Article_Update]";
+
+        private const string ArticlePublishProc = "[content].[Content_Article_Publish]";
+        private const string ArticleUnpublishProc = "[content].[Content_Article_Unpublish]";
+        private const string ArticleArchiveProc = "[content].[Content_Article_Archive]";
+        private const string ArticleRestoreProc = "[content].[Content_Article_Restore]";
+        private const string ArticleDeleteProc = "[content].[Content_Article_Delete]";
+
         private readonly ContentUnitOfWork _unitOfWork;
         private readonly ISqlConnectionFactory _sqlConnectionFactory;
 
@@ -27,7 +39,7 @@ namespace Content.Infrastructure.Persistence.Repositories
         {
             ArgumentNullException.ThrowIfNull(article);
 
-            using SqlCommand command = CreateTransactionalCommand("Content_Article_Insert");
+            using SqlCommand command = CreateTransactionalCommand(ArticleInsertProc);
 
             command.Parameters.AddRange(
             [
@@ -42,21 +54,14 @@ namespace Content.Infrastructure.Persistence.Repositories
                 new SqlParameter("@UnpublishedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.UnpublishedAt) },
                 new SqlParameter("@ArchivedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.ArchivedAt) },
                 new SqlParameter("@CoverMediaId", SqlDbType.BigInt) { Value = ToDbValue(article.CoverMediaId) },
-                new SqlParameter("@CreatedAt", SqlDbType.DateTime2) { Value = article.CreatedAt },
-                new SqlParameter("@UpdatedAt", SqlDbType.DateTime2) { Value = article.UpdatedAt },
-                new SqlParameter("@CreatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.CreatedByUserId) },
-                new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.UpdatedByUserId) },
-                new SqlParameter("@IsDeleted", SqlDbType.Bit) { Value = article.IsDeleted },
-                new SqlParameter("@DeletedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.DeletedAt) },
-                new SqlParameter("@DeletedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.DeletedByUserId) },
-                new SqlParameter("@Version", SqlDbType.Int) { Value = article.Version }
+                new SqlParameter("@CreatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.CreatedByUserId) }
             ]);
 
             using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
             if (!await reader.ReadAsync(cancellationToken))
             {
-                throw new InvalidOperationException("Content_Article_Insert did not return the inserted article identity.");
+                throw new InvalidOperationException("Content_Article_Insert did not return the inserted article row.");
             }
 
             long articleId = reader.GetInt64(reader.GetOrdinal("ArticleId"));
@@ -74,7 +79,7 @@ namespace Content.Infrastructure.Persistence.Repositories
             try
             {
                 (SqlCommand command, SqlConnection? connection) =
-                    await CreateReadCommandAsync("Content_Article_SelectById", cancellationToken);
+                    await CreateReadCommandAsync(ArticleSelectByIdProc, cancellationToken);
 
                 ownedConnection = connection;
 
@@ -111,7 +116,7 @@ namespace Content.Infrastructure.Persistence.Repositories
             try
             {
                 (SqlCommand command, SqlConnection? connection) =
-                    await CreateReadCommandAsync("Content_Article_SelectByPublicId", cancellationToken);
+                    await CreateReadCommandAsync(ArticleSelectByPublicIdProc, cancellationToken);
 
                 ownedConnection = connection;
 
@@ -150,28 +155,68 @@ namespace Content.Infrastructure.Persistence.Repositories
             try
             {
                 (SqlCommand command, SqlConnection? connection) =
-                    await CreateReadCommandAsync("Content_Article_SelectSkipAndTake", cancellationToken);
+                    await CreateReadCommandAsync(ArticleSelectSkipAndTakeProc, cancellationToken);
 
                 ownedConnection = connection;
 
                 using (command)
                 {
+                    int skip = (query.Page - 1) * query.PageSize;
+                    int take = query.PageSize;
+
+                    string? keyword = null;
+                    string? sortBy = "UpdatedAt";
+                    string? sortDirection = "DESC";
+
+                    if (!string.IsNullOrWhiteSpace(query.Sort))
+                    {
+                        string raw = query.Sort.Trim();
+
+                        if (raw.StartsWith("-"))
+                        {
+                            sortDirection = "DESC";
+                            raw = raw[1..];
+                        }
+                        else
+                        {
+                            sortDirection = "ASC";
+                        }
+
+                        sortBy = raw switch
+                        {
+                            "createdAt" => "CreatedAt",
+                            "updatedAt" => "UpdatedAt",
+                            "publishedAt" => "PublishedAt",
+                            "title" => "Title",
+                            _ => "UpdatedAt"
+                        };
+                    }
+
                     command.Parameters.AddRange(
                     [
-                        new SqlParameter("@Page", SqlDbType.Int) { Value = query.Page },
-                        new SqlParameter("@PageSize", SqlDbType.Int) { Value = query.PageSize },
+                        new SqlParameter("@Skip", SqlDbType.Int) { Value = skip },
+                        new SqlParameter("@Take", SqlDbType.Int) { Value = take },
+                        new SqlParameter("@Keyword", SqlDbType.NVarChar, 300) { Value = ToDbValue(keyword) },
                         new SqlParameter("@Status", SqlDbType.NVarChar, 30) { Value = ToDbValue(query.Status) },
                         new SqlParameter("@CategoryId", SqlDbType.BigInt) { Value = ToDbValue(query.CategoryId) },
-                        new SqlParameter("@TagId", SqlDbType.BigInt) { Value = ToDbValue(query.TagId) },
-                        new SqlParameter("@Sort", SqlDbType.NVarChar, 50) { Value = query.Sort }
+                        new SqlParameter("@AuthorUserId", SqlDbType.BigInt) { Value = DBNull.Value },
+                        new SqlParameter("@IsDeleted", SqlDbType.Bit) { Value = false },
+                        new SqlParameter("@SortBy", SqlDbType.NVarChar, 30) { Value = sortBy! },
+                        new SqlParameter("@SortDirection", SqlDbType.NVarChar, 4) { Value = sortDirection! }
                     ]);
 
                     using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
                     List<ArticleListResultItem> items = [];
+                    int totalItems = 0;
 
                     while (await reader.ReadAsync(cancellationToken))
                     {
+                        if (totalItems == 0 && !reader.IsDBNull(reader.GetOrdinal("TotalCount")))
+                        {
+                            totalItems = reader.GetInt32(reader.GetOrdinal("TotalCount"));
+                        }
+
                         items.Add(new ArticleListResultItem
                         {
                             ArticleId = reader.GetInt64(reader.GetOrdinal("ArticleId")),
@@ -187,14 +232,6 @@ namespace Content.Infrastructure.Persistence.Repositories
                             PublishedAt = GetNullableDateTime(reader, "PublishedAt"),
                             Version = reader.GetInt32(reader.GetOrdinal("Version"))
                         });
-                    }
-
-                    int totalItems = 0;
-
-                    if (await reader.NextResultAsync(cancellationToken) &&
-                        await reader.ReadAsync(cancellationToken))
-                    {
-                        totalItems = reader.GetInt32(reader.GetOrdinal("TotalItems"));
                     }
 
                     return new PagedQueryResult<ArticleListResultItem>
@@ -222,32 +259,148 @@ namespace Content.Infrastructure.Persistence.Repositories
         {
             ArgumentNullException.ThrowIfNull(article);
 
-            using SqlCommand command = CreateTransactionalCommand("Content_Article_Update");
+            using SqlCommand command = CreateTransactionalCommand(ArticleUpdateProc);
 
             command.Parameters.AddRange(
             [
                 new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = article.ArticleId },
-                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion },
                 new SqlParameter("@CategoryId", SqlDbType.BigInt) { Value = ToDbValue(article.CategoryId) },
                 new SqlParameter("@Title", SqlDbType.NVarChar, 300) { Value = article.Title },
                 new SqlParameter("@Summary", SqlDbType.NVarChar, 2000) { Value = ToDbValue(article.Summary) },
                 new SqlParameter("@Content", SqlDbType.NVarChar) { Value = article.Body },
-                new SqlParameter("@Status", SqlDbType.NVarChar, 30) { Value = article.Status },
-                new SqlParameter("@PublishedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.PublishedAt) },
-                new SqlParameter("@UnpublishedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.UnpublishedAt) },
-                new SqlParameter("@ArchivedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.ArchivedAt) },
                 new SqlParameter("@CoverMediaId", SqlDbType.BigInt) { Value = ToDbValue(article.CoverMediaId) },
-                new SqlParameter("@UpdatedAt", SqlDbType.DateTime2) { Value = article.UpdatedAt },
                 new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.UpdatedByUserId) },
-                new SqlParameter("@IsDeleted", SqlDbType.Bit) { Value = article.IsDeleted },
-                new SqlParameter("@DeletedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.DeletedAt) },
-                new SqlParameter("@DeletedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.DeletedByUserId) },
-                new SqlParameter("@Version", SqlDbType.Int) { Value = article.Version }
+                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
             ]);
 
-            int affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            return affectedRows > 0;
+            return await reader.ReadAsync(cancellationToken);
+        }
+
+        public async Task<Article?> PublishAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default)
+        {
+            using SqlCommand command = CreateTransactionalCommand(ArticlePublishProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return MapArticle(reader);
+        }
+
+        public async Task<Article?> UnpublishAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default)
+        {
+            using SqlCommand command = CreateTransactionalCommand(ArticleUnpublishProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return MapArticle(reader);
+        }
+
+        public async Task<Article?> ArchiveAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default)
+        {
+            using SqlCommand command = CreateTransactionalCommand(ArticleArchiveProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return MapArticle(reader);
+        }
+
+        public async Task<Article?> RestoreAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default)
+        {
+            using SqlCommand command = CreateTransactionalCommand(ArticleRestoreProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return MapArticle(reader);
+        }
+
+        public async Task<Article?> DeleteAsync(
+            long articleId,
+            long? actorUserId,
+            int expectedVersion,
+            CancellationToken cancellationToken = default)
+        {
+            using SqlCommand command = CreateTransactionalCommand(ArticleDeleteProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                new SqlParameter("@DeletedByUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return MapArticle(reader);
         }
 
         private SqlCommand CreateTransactionalCommand(string storedProcedureName)
@@ -256,7 +409,6 @@ namespace Content.Infrastructure.Persistence.Repositories
             command.Transaction = _unitOfWork.Transaction;
             command.CommandText = storedProcedureName;
             command.CommandType = CommandType.StoredProcedure;
-
             return command;
         }
 
@@ -288,18 +440,7 @@ namespace Content.Infrastructure.Persistence.Repositories
 
         private static Article MapArticle(SqlDataReader reader)
         {
-            Article article = Article.CreateDraft(
-                publicId: reader.GetString(reader.GetOrdinal("PublicId")),
-                authorUserId: reader.GetInt64(reader.GetOrdinal("AuthorUserId")),
-                title: reader.GetString(reader.GetOrdinal("Title")),
-                body: reader.GetString(reader.GetOrdinal("Content")),
-                summary: GetNullableString(reader, "Summary"),
-                categoryId: GetNullableInt64(reader, "CategoryId"),
-                coverMediaId: GetNullableInt64(reader, "CoverMediaId"),
-                nowUtc: reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
-                actorUserId: GetNullableInt64(reader, "CreatedByUserId"));
-
-            article.Rehydrate(
+            return Article.Rehydrate(
                 articleId: reader.GetInt64(reader.GetOrdinal("ArticleId")),
                 publicId: reader.GetString(reader.GetOrdinal("PublicId")),
                 title: reader.GetString(reader.GetOrdinal("Title")),
@@ -320,8 +461,6 @@ namespace Content.Infrastructure.Persistence.Repositories
                 deletedAt: GetNullableDateTime(reader, "DeletedAt"),
                 deletedByUserId: GetNullableInt64(reader, "DeletedByUserId"),
                 version: reader.GetInt32(reader.GetOrdinal("Version")));
-
-            return article;
         }
 
         private static object ToDbValue(object? value) => value ?? DBNull.Value;
@@ -345,4 +484,3 @@ namespace Content.Infrastructure.Persistence.Repositories
         }
     }
 }
-
