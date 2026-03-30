@@ -1,6 +1,7 @@
 using CommercialNews.BuildingBlocks.Abstractions.Execution;
 using CommercialNews.BuildingBlocks.Abstractions.Identifiers;
 using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.Results;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
@@ -107,6 +108,10 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
                 throw;
             }
         }
+        catch (PersistenceException exception)
+        {
+            return Result<CreateArticleResponseDto>.Failure(MapPersistenceException(exception));
+        }
         catch (ContentDomainException ex)
         {
             return Result<CreateArticleResponseDto>.Failure(MapDomainException(ex));
@@ -131,6 +136,15 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
             "CONTENT.ARTICLE_ALREADY_ARCHIVED" => ContentErrors.Article.AlreadyArchived,
             "CONTENT.ARTICLE_NOT_ARCHIVED" => ContentErrors.Article.NotArchived,
             "CONTENT.ARTICLE_ALREADY_DELETED" => ContentErrors.Article.AlreadyDeleted,
+            _ => ContentErrors.ValidationFailed
+        };
+    }
+
+    private static Error MapPersistenceException(PersistenceException exception)
+    {
+        return exception.Code switch
+        {
+            "CONTENT.CONCURRENCY_CONFLICT" => ContentErrors.ConcurrencyConflict,
             _ => ContentErrors.ValidationFailed
         };
     }
