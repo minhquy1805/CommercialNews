@@ -17,6 +17,7 @@ namespace Content.Infrastructure.DependencyInjection
 
             services.AddScoped<IArticleRepository, ArticleRepository>();
             services.AddScoped<IArticleLifecycleEventRepository, ArticleLifecycleEventRepository>();
+            services.AddScoped<ITagRepository, TagRepository>();
 
             services.AddScoped<ICategoryRepository, CategoryRepository>();
             services.AddScoped<IArticleRevisionRepository, ArticleRevisionRepository>();
