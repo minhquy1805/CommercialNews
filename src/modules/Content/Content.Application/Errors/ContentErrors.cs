@@ -27,7 +27,7 @@ namespace Content.Application.Errors
         public static readonly Error ConcurrencyConflict =
             Error.Conflict(
                 code: "CONTENT.CONCURRENCY_CONFLICT",
-                message: "The article was modified by another operation. Please reload and try again.");
+                message: "The content resource was modified by another operation. Please reload and try again.");
 
         public static class Article
         {
@@ -55,6 +55,11 @@ namespace Content.Application.Errors
                 Error.Validation(
                     code: "CONTENT.ARTICLE_PUBLIC_ID_REQUIRED",
                     message: "Article public id is required.");
+
+            public static readonly Error PublicIdAlreadyExists =
+                Error.Conflict(
+                    code: "CONTENT.ARTICLE_PUBLIC_ID_ALREADY_EXISTS",
+                    message: "Article public id already exists.");
 
             public static readonly Error AuthorUserIdInvalid =
                 Error.Validation(
@@ -196,6 +201,76 @@ namespace Content.Application.Errors
                 Error.NotFound(
                     code: "CONTENT.TAG_NOT_FOUND",
                     message: "Tag was not found.");
+
+            public static readonly Error PublicIdRequired =
+                Error.Validation(
+                    code: "CONTENT.TAG_PUBLIC_ID_REQUIRED",
+                    message: "Tag public id is required.");
+
+            public static readonly Error PublicIdInvalid =
+                Error.Validation(
+                    code: "CONTENT.TAG_PUBLIC_ID_INVALID",
+                    message: "Tag public id must be exactly 26 characters.");
+
+            public static readonly Error NameRequired =
+                Error.Validation(
+                    code: "CONTENT.TAG_NAME_REQUIRED",
+                    message: "Tag name is required.");
+
+            public static readonly Error NameTooLong =
+                Error.Validation(
+                    code: "CONTENT.TAG_NAME_TOO_LONG",
+                    message: "Tag name must not exceed 150 characters.");
+
+            public static readonly Error NameNormalizedRequired =
+                Error.Validation(
+                    code: "CONTENT.TAG_NAME_NORMALIZED_REQUIRED",
+                    message: "Tag normalized name is required.");
+
+            public static readonly Error NameNormalizedTooLong =
+                Error.Validation(
+                    code: "CONTENT.TAG_NAME_NORMALIZED_TOO_LONG",
+                    message: "Tag normalized name must not exceed 150 characters.");
+
+            public static readonly Error DescriptionTooLong =
+                Error.Validation(
+                    code: "CONTENT.TAG_DESCRIPTION_TOO_LONG",
+                    message: "Tag description must not exceed 500 characters.");
+
+            public static readonly Error AlreadyDeleted =
+                Error.Validation(
+                    code: "CONTENT.TAG_ALREADY_DELETED",
+                    message: "Tag is already deleted.");
+
+            public static readonly Error NotDeleted =
+                Error.Validation(
+                    code: "CONTENT.TAG_NOT_DELETED",
+                    message: "Tag is not deleted.");
+
+            public static readonly Error InvalidTagId =
+                Error.Validation(
+                    code: "CONTENT.TAG_INVALID_TAG_ID",
+                    message: "Tag id must be greater than zero.");
+
+            public static readonly Error InvalidVersion =
+                Error.Validation(
+                    code: "CONTENT.TAG_INVALID_VERSION",
+                    message: "Tag version must be greater than zero.");
+
+            public static readonly Error InvalidUpdatedAt =
+                Error.Validation(
+                    code: "CONTENT.TAG_INVALID_UPDATED_AT",
+                    message: "Tag updated time cannot be earlier than created time.");
+
+            public static readonly Error InvalidDeletedAt =
+                Error.Validation(
+                    code: "CONTENT.TAG_INVALID_DELETED_AT",
+                    message: "Tag deleted time cannot be earlier than created time.");
+
+            public static readonly Error NameNormalizedAlreadyExists =
+                Error.Conflict(
+                    code: "CONTENT.TAG_NAME_NORMALIZED_ALREADY_EXISTS",
+                    message: "Tag normalized name already exists.");
         }
 
         public static class Revision
@@ -212,4 +287,3 @@ namespace Content.Application.Errors
         }
     }
 }
-
