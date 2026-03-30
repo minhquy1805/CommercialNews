@@ -103,6 +103,91 @@ namespace Content.Application.Errors
                 Error.NotFound(
                     code: "CONTENT.CATEGORY_NOT_FOUND",
                     message: "Category was not found.");
+
+            public static readonly Error PublicIdRequired =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_PUBLIC_ID_REQUIRED",
+                    message: "Category public id is required.");
+
+            public static readonly Error PublicIdInvalid =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_PUBLIC_ID_INVALID",
+                    message: "Category public id must be exactly 26 characters.");
+
+            public static readonly Error NameRequired =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_NAME_REQUIRED",
+                    message: "Category name is required.");
+
+            public static readonly Error NameTooLong =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_NAME_TOO_LONG",
+                    message: "Category name must not exceed 200 characters.");
+
+            public static readonly Error NameNormalizedRequired =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_NAME_NORMALIZED_REQUIRED",
+                    message: "Category normalized name is required.");
+
+            public static readonly Error NameNormalizedTooLong =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_NAME_NORMALIZED_TOO_LONG",
+                    message: "Category normalized name must not exceed 200 characters.");
+
+            public static readonly Error DisplayOrderInvalid =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_DISPLAY_ORDER_INVALID",
+                    message: "Category display order must be greater than or equal to zero.");
+
+            public static readonly Error ParentSelfReference =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_PARENT_SELF_REFERENCE",
+                    message: "Category cannot be its own parent.");
+
+            public static readonly Error AlreadyDeleted =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_ALREADY_DELETED",
+                    message: "Category is already deleted.");
+
+            public static readonly Error NotDeleted =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_NOT_DELETED",
+                    message: "Category is not deleted.");
+
+            public static readonly Error AlreadyActive =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_ALREADY_ACTIVE",
+                    message: "Category is already active.");
+
+            public static readonly Error AlreadyInactive =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_ALREADY_INACTIVE",
+                    message: "Category is already inactive.");
+
+            public static readonly Error InvalidCategoryId =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_INVALID_CATEGORY_ID",
+                    message: "Category id must be greater than zero.");
+
+            public static readonly Error InvalidVersion =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_INVALID_VERSION",
+                    message: "Category version must be greater than zero.");
+
+            public static readonly Error ParentNotFound =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_PARENT_NOT_FOUND",
+                    message: "Parent category does not exist or was deleted.");
+
+            public static readonly Error CycleDetected =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_CYCLE_DETECTED",
+                    message: "Category hierarchy cycle was detected.");
+
+            public static readonly Error DeleteBlockedByArticles =
+                Error.Validation(
+                    code: "CONTENT.CATEGORY_DELETE_BLOCKED_BY_ARTICLES",
+                    message: "Category cannot be deleted because active articles still reference it.");
         }
 
         public static class Tag

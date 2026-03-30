@@ -18,4 +18,3 @@ namespace CommercialNews.Api.Api.Middleware
         }
     }
 }
-

@@ -1,4 +1,5 @@
 using Content.Application.Ports.Persistence;
+using Content.Infrastructure.Persistence.Exceptions;
 using Content.Infrastructure.Persistence.Repositories;
 using Content.Infrastructure.Persistence.Sql;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +20,7 @@ namespace Content.Infrastructure.DependencyInjection
 
             services.AddScoped<ICategoryRepository, CategoryRepository>();
             services.AddScoped<IArticleRevisionRepository, ArticleRevisionRepository>();
+            services.AddScoped<ContentSqlExceptionTranslator>();
 
             return services;
         }
