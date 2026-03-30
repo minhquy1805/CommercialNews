@@ -15,6 +15,12 @@ using Content.Application.UseCases.Categories.GetCategories;
 using Content.Application.UseCases.Categories.GetCategoryById;
 using Content.Application.UseCases.Categories.RestoreCategory;
 using Content.Application.UseCases.Categories.UpdateCategory;
+using Content.Application.UseCases.Tags.CreateTag;
+using Content.Application.UseCases.Tags.DeleteTag;
+using Content.Application.UseCases.Tags.GetTagById;
+using Content.Application.UseCases.Tags.GetTags;
+using Content.Application.UseCases.Tags.RestoreTag;
+using Content.Application.UseCases.Tags.UpdateTag;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Content.Application.DependencyInjection
@@ -43,6 +49,13 @@ namespace Content.Application.DependencyInjection
             services.AddScoped<IUpdateCategoryUseCase, UpdateCategoryUseCase>();
             services.AddScoped<IDeleteCategoryUseCase, DeleteCategoryUseCase>();
             services.AddScoped<IRestoreCategoryUseCase, RestoreCategoryUseCase>();
+
+            services.AddScoped<ICreateTagUseCase, CreateTagUseCase>();
+            services.AddScoped<IGetTagByIdUseCase, GetTagByIdUseCase>();
+            services.AddScoped<IGetTagsUseCase, GetTagsUseCase>();
+            services.AddScoped<IUpdateTagUseCase, UpdateTagUseCase>();
+            services.AddScoped<IDeleteTagUseCase, DeleteTagUseCase>();
+            services.AddScoped<IRestoreTagUseCase, RestoreTagUseCase>();
 
             return services;
         }
