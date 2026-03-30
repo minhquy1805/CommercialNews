@@ -618,6 +618,81 @@ BEGIN
 END
 GO
 
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE [content].[Content_Tag_SelectSkipAndTake]
+    @Skip               INT = 0,
+    @Take               INT = 20,
+    @Keyword            NVARCHAR(150) = NULL,
+    @IsActive           BIT = NULL,
+    @IsDeleted          BIT = 0,
+    @SortBy             NVARCHAR(30) = N'Name',
+    @SortDirection      NVARCHAR(4) = N'ASC'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @Skip < 0
+        SET @Skip = 0;
+
+    IF @Take <= 0
+        SET @Take = 20;
+
+    IF @Take > 200
+        SET @Take = 200;
+
+    IF @SortBy NOT IN (N'Name', N'CreatedAt', N'UpdatedAt')
+        SET @SortBy = N'Name';
+
+    IF UPPER(@SortDirection) NOT IN (N'ASC', N'DESC')
+        SET @SortDirection = N'ASC';
+
+    ;WITH [Filtered] AS
+    (
+        SELECT
+            [t].[TagId],
+            [t].[PublicId],
+            [t].[Name],
+            [t].[NameNormalized],
+            [t].[Description],
+            [t].[IsActive],
+            [t].[CreatedAt],
+            [t].[UpdatedAt],
+            [t].[CreatedByUserId],
+            [t].[UpdatedByUserId],
+            [t].[IsDeleted],
+            [t].[DeletedAt],
+            [t].[DeletedByUserId],
+            [t].[Version],
+            COUNT(1) OVER() AS [TotalCount]
+        FROM [content].[Tag] AS [t]
+        WHERE [t].[IsDeleted] = @IsDeleted
+          AND (@IsActive IS NULL OR [t].[IsActive] = @IsActive)
+          AND
+          (
+              @Keyword IS NULL
+              OR [t].[Name] LIKE N'%' + @Keyword + N'%'
+              OR [t].[NameNormalized] LIKE N'%' + @Keyword + N'%'
+          )
+    )
+    SELECT *
+    FROM [Filtered]
+    ORDER BY
+        CASE WHEN @SortBy = N'Name'      AND @SortDirection = N'ASC'  THEN [Name] END ASC,
+        CASE WHEN @SortBy = N'Name'      AND @SortDirection = N'DESC' THEN [Name] END DESC,
+        CASE WHEN @SortBy = N'CreatedAt' AND @SortDirection = N'ASC'  THEN [CreatedAt] END ASC,
+        CASE WHEN @SortBy = N'CreatedAt' AND @SortDirection = N'DESC' THEN [CreatedAt] END DESC,
+        CASE WHEN @SortBy = N'UpdatedAt' AND @SortDirection = N'ASC'  THEN [UpdatedAt] END ASC,
+        CASE WHEN @SortBy = N'UpdatedAt' AND @SortDirection = N'DESC' THEN [UpdatedAt] END DESC,
+        [TagId] DESC
+    OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
+END
+GO
+
 /* =========================================================
    ARTICLE
    ========================================================= */
