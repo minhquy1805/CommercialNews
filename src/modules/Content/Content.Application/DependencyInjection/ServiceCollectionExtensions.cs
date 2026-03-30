@@ -9,6 +9,12 @@ using Content.Application.UseCases.Articles.PublishArticle;
 using Content.Application.UseCases.Articles.RestoreArticle;
 using Content.Application.UseCases.Articles.UnpublishArticle;
 using Content.Application.UseCases.Articles.UpdateArticle;
+using Content.Application.UseCases.Categories.CreateCategory;
+using Content.Application.UseCases.Categories.DeleteCategory;
+using Content.Application.UseCases.Categories.GetCategories;
+using Content.Application.UseCases.Categories.GetCategoryById;
+using Content.Application.UseCases.Categories.RestoreCategory;
+using Content.Application.UseCases.Categories.UpdateCategory;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Content.Application.DependencyInjection
@@ -30,6 +36,13 @@ namespace Content.Application.DependencyInjection
             services.AddScoped<IArchiveArticleUseCase, ArchiveArticleUseCase>();
             services.AddScoped<IRestoreArticleUseCase, RestoreArticleUseCase>();
             services.AddScoped<IDeleteArticleUseCase, DeleteArticleUseCase>();
+
+            services.AddScoped<ICreateCategoryUseCase, CreateCategoryUseCase>();
+            services.AddScoped<IGetCategoryByIdUseCase, GetCategoryByIdUseCase>();
+            services.AddScoped<IGetCategoriesUseCase, GetCategoriesUseCase>();
+            services.AddScoped<IUpdateCategoryUseCase, UpdateCategoryUseCase>();
+            services.AddScoped<IDeleteCategoryUseCase, DeleteCategoryUseCase>();
+            services.AddScoped<IRestoreCategoryUseCase, RestoreCategoryUseCase>();
 
             return services;
         }

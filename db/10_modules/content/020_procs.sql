@@ -315,6 +315,81 @@ BEGIN
 END
 GO
 
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE [content].[Content_Category_SelectSkipAndTake]
+    @Skip               INT = 0,
+    @Take               INT = 20,
+    @Keyword            NVARCHAR(200) = NULL,
+    @ParentCategoryId   BIGINT = NULL,
+    @IsActive           BIT = NULL,
+    @IsDeleted          BIT = 0,
+    @SortBy             NVARCHAR(30) = N'DisplayOrder',
+    @SortDirection      NVARCHAR(4) = N'ASC'
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Skip < 0 SET @Skip = 0;
+    IF @Take <= 0 SET @Take = 20;
+    IF @Take > 200 SET @Take = 200;
+
+    IF @SortBy NOT IN (N'CreatedAt', N'UpdatedAt', N'Name', N'DisplayOrder')
+        SET @SortBy = N'DisplayOrder';
+
+    IF UPPER(@SortDirection) NOT IN (N'ASC', N'DESC')
+        SET @SortDirection = N'ASC';
+
+    ;WITH [Filtered] AS
+    (
+        SELECT
+            [c].[CategoryId],
+            [c].[PublicId],
+            [c].[ParentCategoryId],
+            [c].[Name],
+            [c].[NameNormalized],
+            [c].[Description],
+            [c].[IsActive],
+            [c].[DisplayOrder],
+            [c].[CreatedAt],
+            [c].[UpdatedAt],
+            [c].[CreatedByUserId],
+            [c].[UpdatedByUserId],
+            [c].[IsDeleted],
+            [c].[DeletedAt],
+            [c].[DeletedByUserId],
+            [c].[Version],
+            COUNT(1) OVER() AS [TotalCount]
+        FROM [content].[Category] AS [c]
+        WHERE [c].[IsDeleted] = @IsDeleted
+          AND (@ParentCategoryId IS NULL OR [c].[ParentCategoryId] = @ParentCategoryId)
+          AND (@IsActive IS NULL OR [c].[IsActive] = @IsActive)
+          AND
+          (
+              @Keyword IS NULL
+              OR [c].[Name] LIKE N'%' + @Keyword + N'%'
+              OR [c].[Description] LIKE N'%' + @Keyword + N'%'
+          )
+    )
+    SELECT *
+    FROM [Filtered]
+    ORDER BY
+        CASE WHEN @SortBy = N'CreatedAt'    AND @SortDirection = N'ASC'  THEN [CreatedAt] END ASC,
+        CASE WHEN @SortBy = N'CreatedAt'    AND @SortDirection = N'DESC' THEN [CreatedAt] END DESC,
+        CASE WHEN @SortBy = N'UpdatedAt'    AND @SortDirection = N'ASC'  THEN [UpdatedAt] END ASC,
+        CASE WHEN @SortBy = N'UpdatedAt'    AND @SortDirection = N'DESC' THEN [UpdatedAt] END DESC,
+        CASE WHEN @SortBy = N'Name'         AND @SortDirection = N'ASC'  THEN [Name] END ASC,
+        CASE WHEN @SortBy = N'Name'         AND @SortDirection = N'DESC' THEN [Name] END DESC,
+        CASE WHEN @SortBy = N'DisplayOrder' AND @SortDirection = N'ASC'  THEN [DisplayOrder] END ASC,
+        CASE WHEN @SortBy = N'DisplayOrder' AND @SortDirection = N'DESC' THEN [DisplayOrder] END DESC,
+        [CategoryId] DESC
+    OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
+END
+GO
+
 /* =========================================================
    TAG
    ========================================================= */
