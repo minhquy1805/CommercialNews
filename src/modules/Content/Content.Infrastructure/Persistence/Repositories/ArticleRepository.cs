@@ -3,6 +3,7 @@ using CommercialNews.BuildingBlocks.Persistence.Sql;
 using Content.Application.Models.QueryModels;
 using Content.Application.Ports.Persistence;
 using Content.Domain.Entities;
+using Content.Infrastructure.Persistence.Exceptions;
 using Content.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
@@ -24,13 +25,16 @@ namespace Content.Infrastructure.Persistence.Repositories
 
         private readonly ContentUnitOfWork _unitOfWork;
         private readonly ISqlConnectionFactory _sqlConnectionFactory;
+        private readonly ContentSqlExceptionTranslator _sqlExceptionTranslator;
 
         public ArticleRepository(
             ContentUnitOfWork unitOfWork,
-            ISqlConnectionFactory sqlConnectionFactory)
+            ISqlConnectionFactory sqlConnectionFactory,
+            ContentSqlExceptionTranslator sqlExceptionTranslator)
         {
             _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
             _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
+            _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
         }
 
         public async Task<(long ArticleId, int Version)> InsertAsync(
@@ -39,35 +43,42 @@ namespace Content.Infrastructure.Persistence.Repositories
         {
             ArgumentNullException.ThrowIfNull(article);
 
-            using SqlCommand command = CreateTransactionalCommand(ArticleInsertProc);
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@PublicId", SqlDbType.Char, 26) { Value = article.PublicId },
-                new SqlParameter("@CategoryId", SqlDbType.BigInt) { Value = ToDbValue(article.CategoryId) },
-                new SqlParameter("@AuthorUserId", SqlDbType.BigInt) { Value = article.AuthorUserId },
-                new SqlParameter("@Title", SqlDbType.NVarChar, 300) { Value = article.Title },
-                new SqlParameter("@Summary", SqlDbType.NVarChar, 2000) { Value = ToDbValue(article.Summary) },
-                new SqlParameter("@Content", SqlDbType.NVarChar) { Value = article.Body },
-                new SqlParameter("@Status", SqlDbType.NVarChar, 30) { Value = article.Status },
-                new SqlParameter("@PublishedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.PublishedAt) },
-                new SqlParameter("@UnpublishedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.UnpublishedAt) },
-                new SqlParameter("@ArchivedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.ArchivedAt) },
-                new SqlParameter("@CoverMediaId", SqlDbType.BigInt) { Value = ToDbValue(article.CoverMediaId) },
-                new SqlParameter("@CreatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.CreatedByUserId) }
-            ]);
-
-            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            if (!await reader.ReadAsync(cancellationToken))
+            try
             {
-                throw new InvalidOperationException("Content_Article_Insert did not return the inserted article row.");
+                using SqlCommand command = CreateTransactionalCommand(ArticleInsertProc);
+
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@PublicId", SqlDbType.Char, 26) { Value = article.PublicId },
+                    new SqlParameter("@CategoryId", SqlDbType.BigInt) { Value = ToDbValue(article.CategoryId) },
+                    new SqlParameter("@AuthorUserId", SqlDbType.BigInt) { Value = article.AuthorUserId },
+                    new SqlParameter("@Title", SqlDbType.NVarChar, 300) { Value = article.Title },
+                    new SqlParameter("@Summary", SqlDbType.NVarChar, 2000) { Value = ToDbValue(article.Summary) },
+                    new SqlParameter("@Content", SqlDbType.NVarChar) { Value = article.Body },
+                    new SqlParameter("@Status", SqlDbType.NVarChar, 30) { Value = article.Status },
+                    new SqlParameter("@PublishedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.PublishedAt) },
+                    new SqlParameter("@UnpublishedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.UnpublishedAt) },
+                    new SqlParameter("@ArchivedAt", SqlDbType.DateTime2) { Value = ToDbValue(article.ArchivedAt) },
+                    new SqlParameter("@CoverMediaId", SqlDbType.BigInt) { Value = ToDbValue(article.CoverMediaId) },
+                    new SqlParameter("@CreatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.CreatedByUserId) }
+                ]);
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    throw new InvalidOperationException("Content_Article_Insert did not return the inserted article row.");
+                }
+
+                long articleId = reader.GetInt64(reader.GetOrdinal("ArticleId"));
+                int version = reader.GetInt32(reader.GetOrdinal("Version"));
+
+                return (articleId, version);
             }
-
-            long articleId = reader.GetInt64(reader.GetOrdinal("ArticleId"));
-            int version = reader.GetInt32(reader.GetOrdinal("Version"));
-
-            return (articleId, version);
+            catch (SqlException exception)
+            {
+                throw _sqlExceptionTranslator.Translate(exception);
+            }
         }
 
         public async Task<Article?> GetByIdAsync(
@@ -259,23 +270,30 @@ namespace Content.Infrastructure.Persistence.Repositories
         {
             ArgumentNullException.ThrowIfNull(article);
 
-            using SqlCommand command = CreateTransactionalCommand(ArticleUpdateProc);
+            try
+            {
+                using SqlCommand command = CreateTransactionalCommand(ArticleUpdateProc);
 
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = article.ArticleId },
-                new SqlParameter("@CategoryId", SqlDbType.BigInt) { Value = ToDbValue(article.CategoryId) },
-                new SqlParameter("@Title", SqlDbType.NVarChar, 300) { Value = article.Title },
-                new SqlParameter("@Summary", SqlDbType.NVarChar, 2000) { Value = ToDbValue(article.Summary) },
-                new SqlParameter("@Content", SqlDbType.NVarChar) { Value = article.Body },
-                new SqlParameter("@CoverMediaId", SqlDbType.BigInt) { Value = ToDbValue(article.CoverMediaId) },
-                new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.UpdatedByUserId) },
-                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
-            ]);
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = article.ArticleId },
+                    new SqlParameter("@CategoryId", SqlDbType.BigInt) { Value = ToDbValue(article.CategoryId) },
+                    new SqlParameter("@Title", SqlDbType.NVarChar, 300) { Value = article.Title },
+                    new SqlParameter("@Summary", SqlDbType.NVarChar, 2000) { Value = ToDbValue(article.Summary) },
+                    new SqlParameter("@Content", SqlDbType.NVarChar) { Value = article.Body },
+                    new SqlParameter("@CoverMediaId", SqlDbType.BigInt) { Value = ToDbValue(article.CoverMediaId) },
+                    new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(article.UpdatedByUserId) },
+                    new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+                ]);
 
-            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            return await reader.ReadAsync(cancellationToken);
+                return await reader.ReadAsync(cancellationToken);
+            }
+            catch (SqlException exception)
+            {
+                throw _sqlExceptionTranslator.Translate(exception);
+            }
         }
 
         public async Task<Article?> PublishAsync(
@@ -284,23 +302,30 @@ namespace Content.Infrastructure.Persistence.Repositories
             int expectedVersion,
             CancellationToken cancellationToken = default)
         {
-            using SqlCommand command = CreateTransactionalCommand(ArticlePublishProc);
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
-                new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
-                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
-            ]);
-
-            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            if (!await reader.ReadAsync(cancellationToken))
+            try
             {
-                return null;
-            }
+                using SqlCommand command = CreateTransactionalCommand(ArticlePublishProc);
 
-            return MapArticle(reader);
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                    new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                    new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+                ]);
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapArticle(reader);
+            }
+            catch (SqlException exception)
+            {
+                throw _sqlExceptionTranslator.Translate(exception);
+            }
         }
 
         public async Task<Article?> UnpublishAsync(
@@ -309,23 +334,30 @@ namespace Content.Infrastructure.Persistence.Repositories
             int expectedVersion,
             CancellationToken cancellationToken = default)
         {
-            using SqlCommand command = CreateTransactionalCommand(ArticleUnpublishProc);
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
-                new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
-                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
-            ]);
-
-            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            if (!await reader.ReadAsync(cancellationToken))
+            try
             {
-                return null;
-            }
+                using SqlCommand command = CreateTransactionalCommand(ArticleUnpublishProc);
 
-            return MapArticle(reader);
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                    new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                    new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+                ]);
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapArticle(reader);
+            }
+            catch (SqlException exception)
+            {
+                throw _sqlExceptionTranslator.Translate(exception);
+            }
         }
 
         public async Task<Article?> ArchiveAsync(
@@ -334,23 +366,30 @@ namespace Content.Infrastructure.Persistence.Repositories
             int expectedVersion,
             CancellationToken cancellationToken = default)
         {
-            using SqlCommand command = CreateTransactionalCommand(ArticleArchiveProc);
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
-                new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
-                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
-            ]);
-
-            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            if (!await reader.ReadAsync(cancellationToken))
+            try
             {
-                return null;
-            }
+                using SqlCommand command = CreateTransactionalCommand(ArticleArchiveProc);
 
-            return MapArticle(reader);
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                    new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                    new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+                ]);
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapArticle(reader);
+            }
+            catch (SqlException exception)
+            {
+                throw _sqlExceptionTranslator.Translate(exception);
+            }
         }
 
         public async Task<Article?> RestoreAsync(
@@ -359,23 +398,30 @@ namespace Content.Infrastructure.Persistence.Repositories
             int expectedVersion,
             CancellationToken cancellationToken = default)
         {
-            using SqlCommand command = CreateTransactionalCommand(ArticleRestoreProc);
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
-                new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
-                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
-            ]);
-
-            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            if (!await reader.ReadAsync(cancellationToken))
+            try
             {
-                return null;
-            }
+                using SqlCommand command = CreateTransactionalCommand(ArticleRestoreProc);
 
-            return MapArticle(reader);
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                    new SqlParameter("@ActorUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                    new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+                ]);
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapArticle(reader);
+            }
+            catch (SqlException exception)
+            {
+                throw _sqlExceptionTranslator.Translate(exception);
+            }
         }
 
         public async Task<Article?> DeleteAsync(
@@ -384,23 +430,30 @@ namespace Content.Infrastructure.Persistence.Repositories
             int expectedVersion,
             CancellationToken cancellationToken = default)
         {
-            using SqlCommand command = CreateTransactionalCommand(ArticleDeleteProc);
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
-                new SqlParameter("@DeletedByUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
-                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
-            ]);
-
-            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            if (!await reader.ReadAsync(cancellationToken))
+            try
             {
-                return null;
-            }
+                using SqlCommand command = CreateTransactionalCommand(ArticleDeleteProc);
 
-            return MapArticle(reader);
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId },
+                    new SqlParameter("@DeletedByUserId", SqlDbType.BigInt) { Value = ToDbValue(actorUserId) },
+                    new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion }
+                ]);
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapArticle(reader);
+            }
+            catch (SqlException exception)
+            {
+                throw _sqlExceptionTranslator.Translate(exception);
+            }
         }
 
         private SqlCommand CreateTransactionalCommand(string storedProcedureName)
