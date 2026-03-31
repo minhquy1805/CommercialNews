@@ -1,12 +1,13 @@
-﻿using Identity.Application.Contracts.Requests;
+﻿using CommercialNews.BuildingBlocks.Results;
+using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
 
 namespace Identity.Application.UseCases.LoginUser
 {
     public interface ILoginUserUseCase
     {
-        Task<LoginUserResponseDto> ExecuteAsync(
+        Task<Result<LoginUserResponseDto>> ExecuteAsync(
             LoginUserRequestDto request,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken = default);
     }
 }

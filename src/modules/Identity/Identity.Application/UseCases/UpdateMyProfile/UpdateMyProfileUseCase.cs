@@ -1,6 +1,11 @@
-using Identity.Application.Contracts.Ports;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
+using Identity.Application.Errors;
+using Identity.Application.Ports.Persistence;
 using Identity.Domain.Enums;
 
 namespace Identity.Application.UseCases.UpdateMyProfile
@@ -9,90 +14,119 @@ namespace Identity.Application.UseCases.UpdateMyProfile
     {
         private readonly IRequestContext _requestContext;
         private readonly IUserAccountRepository _userAccountRepository;
-        private readonly IUserProfileService _userProfileService;
         private readonly IIdentityUnitOfWork _unitOfWork;
         private readonly IDateTimeProvider _dateTimeProvider;
 
         public UpdateMyProfileUseCase(
             IRequestContext requestContext,
             IUserAccountRepository userAccountRepository,
-            IUserProfileService userProfileService,
             IIdentityUnitOfWork unitOfWork,
             IDateTimeProvider dateTimeProvider)
         {
             _requestContext = requestContext;
             _userAccountRepository = userAccountRepository;
-            _userProfileService = userProfileService;
             _unitOfWork = unitOfWork;
             _dateTimeProvider = dateTimeProvider;
         }
 
-        public async Task<UpdateMyProfileResponseDto> ExecuteAsync(
+        public async Task<Result<UpdateMyProfileResponseDto>> ExecuteAsync(
             UpdateMyProfileRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
-            ArgumentNullException.ThrowIfNull(request);
-
-            var currentUserId = _requestContext.CurrentUserId;
-            if (currentUserId is null)
+            if (request is null)
             {
-                throw new InvalidOperationException("Current user is not available.");
+                return Result<UpdateMyProfileResponseDto>.Failure(IdentityErrors.ValidationFailed);
             }
 
-            var user = await _userAccountRepository.GetByIdAsync(currentUserId.Value, cancellationToken);
-            if (user is null)
-            {
-                throw new InvalidOperationException("User not found.");
-            }
-
-            if (user.Status == UserAccountStatus.Inactive)
-            {
-                throw new InvalidOperationException("Account is inactive.");
-            }
-
-            if (user.IsLockedAt(_dateTimeProvider.UtcNow))
-            {
-                throw new InvalidOperationException("Account is locked.");
-            }
-
-            var normalizedFullName = NormalizeOptional(request.FullName, 200);
-            var normalizedAvatarUrl = NormalizeOptional(request.AvatarUrl, 800);
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            string? normalizedFullName;
+            string? normalizedAvatarUrl;
 
             try
             {
-                await _userProfileService.UpdateProfileAsync(
-                    user.UserId,
-                    normalizedFullName,
-                    normalizedAvatarUrl,
+                normalizedFullName = NormalizeOptional(request.FullName, 200);
+                normalizedAvatarUrl = NormalizeOptional(request.AvatarUrl, 800);
+            }
+            catch (ArgumentException)
+            {
+                return Result<UpdateMyProfileResponseDto>.Failure(IdentityErrors.ValidationFailed);
+            }
+
+            long? currentUserId = _requestContext.CurrentUserId;
+            if (currentUserId is null)
+            {
+                return Result<UpdateMyProfileResponseDto>.Failure(IdentityErrors.ValidationFailed);
+            }
+
+            try
+            {
+                var user = await _userAccountRepository.GetByIdAsync(
+                    currentUserId.Value,
                     cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-            }
-            catch
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
-            }
+                if (user is null)
+                {
+                    return Result<UpdateMyProfileResponseDto>.Failure(IdentityErrors.User.NotFound);
+                }
 
-            var updatedUser = await _userAccountRepository.GetByIdAsync(user.UserId, cancellationToken);
-            if (updatedUser is null)
-            {
-                throw new InvalidOperationException("Updated user could not be loaded.");
-            }
+                if (user.Status == UserAccountStatus.Inactive)
+                {
+                    return Result<UpdateMyProfileResponseDto>.Failure(IdentityErrors.Auth.AccountInactive);
+                }
 
-            return new UpdateMyProfileResponseDto
+                if (user.IsLockedAt(_dateTimeProvider.UtcNow))
+                {
+                    return Result<UpdateMyProfileResponseDto>.Failure(IdentityErrors.AccountLocked);
+                }
+
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    bool updated = await _userAccountRepository.UpdateProfileAsync(
+                        user.UserId,
+                        normalizedFullName,
+                        normalizedAvatarUrl,
+                        cancellationToken);
+
+                    if (!updated)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                        return Result<UpdateMyProfileResponseDto>.Failure(IdentityErrors.User.NotFound);
+                    }
+
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+
+                var updatedUser = await _userAccountRepository.GetByIdAsync(
+                    user.UserId,
+                    cancellationToken);
+
+                if (updatedUser is null)
+                {
+                    return Result<UpdateMyProfileResponseDto>.Failure(IdentityErrors.User.NotFound);
+                }
+
+                return Result<UpdateMyProfileResponseDto>.Success(new UpdateMyProfileResponseDto
+                {
+                    UserId = updatedUser.UserId,
+                    PublicId = updatedUser.PublicId,
+                    Email = updatedUser.Email,
+                    FullName = updatedUser.FullName,
+                    AvatarUrl = updatedUser.AvatarUrl,
+                    IsEmailVerified = updatedUser.IsEmailVerified,
+                    Status = updatedUser.Status.ToString(),
+                    UpdatedAt = updatedUser.UpdatedAt
+                });
+            }
+            catch (PersistenceException exception)
             {
-                UserId = updatedUser.UserId,
-                PublicId = updatedUser.PublicId,
-                Email = updatedUser.Email,
-                FullName = updatedUser.FullName,
-                AvatarUrl = updatedUser.AvatarUrl,
-                IsEmailVerified = updatedUser.IsEmailVerified,
-                Status = updatedUser.Status.ToString(),
-                UpdatedAt = updatedUser.UpdatedAt
-            };
+                return Result<UpdateMyProfileResponseDto>.Failure(MapPersistenceException(exception));
+            }
         }
 
         private static string? NormalizeOptional(string? value, int maxLength)
@@ -102,7 +136,7 @@ namespace Identity.Application.UseCases.UpdateMyProfile
                 return null;
             }
 
-            var trimmed = value.Trim();
+            string trimmed = value.Trim();
 
             if (trimmed.Length > maxLength)
             {
@@ -110,6 +144,14 @@ namespace Identity.Application.UseCases.UpdateMyProfile
             }
 
             return trimmed;
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                _ => IdentityErrors.ValidationFailed
+            };
         }
     }
 }

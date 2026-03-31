@@ -1,6 +1,6 @@
-﻿using Identity.Application.Contracts.Ports;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
+using Identity.Application.Ports.Services;
 
 namespace Identity.Infrastructure.Security
 {
