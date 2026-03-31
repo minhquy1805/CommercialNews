@@ -16,7 +16,6 @@ builder.Services.AddHostServices(builder.Configuration);
 // After Content and the next modules are implemented in a cleaner,
 // consistent style, move these registrations into ModuleRegistration
 // and split them properly into Application/Infrastructure registration methods.
-builder.Services.AddIdentityInfrastructure();
 builder.Services.AddAuthorizationInfrastructure();
 
 // Future module registration entry point

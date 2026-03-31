@@ -1,7 +1,12 @@
-
-using Identity.Application.Contracts.Ports;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
+using Identity.Application.Errors;
+using Identity.Application.Ports.Persistence;
+using Identity.Application.Ports.Services;
 using Identity.Domain.Enums;
 
 namespace Identity.Application.UseCases.ChangePassword
@@ -11,8 +16,7 @@ namespace Identity.Application.UseCases.ChangePassword
         private readonly IRequestContext _requestContext;
         private readonly IUserAccountRepository _userAccountRepository;
         private readonly IPasswordHasher _passwordHasher;
-        private readonly IUserPasswordService _userPasswordService;
-        private readonly IRefreshTokenRevocationService _refreshTokenRevocationService;
+        private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly IIdentityUnitOfWork _unitOfWork;
         private readonly IDateTimeProvider _dateTimeProvider;
 
@@ -20,113 +24,132 @@ namespace Identity.Application.UseCases.ChangePassword
             IRequestContext requestContext,
             IUserAccountRepository userAccountRepository,
             IPasswordHasher passwordHasher,
-            IUserPasswordService userPasswordService,
-            IRefreshTokenRevocationService refreshTokenRevocationService,
+            IRefreshTokenRepository refreshTokenRepository,
             IIdentityUnitOfWork unitOfWork,
             IDateTimeProvider dateTimeProvider)
         {
             _requestContext = requestContext;
             _userAccountRepository = userAccountRepository;
             _passwordHasher = passwordHasher;
-            _userPasswordService = userPasswordService;
-            _refreshTokenRevocationService = refreshTokenRevocationService;
+            _refreshTokenRepository = refreshTokenRepository;
             _unitOfWork = unitOfWork;
             _dateTimeProvider = dateTimeProvider;
         }
 
-        public async Task<ChangePasswordResponseDto> ExecuteAsync(
+        public async Task<Result<ChangePasswordResponseDto>> ExecuteAsync(
             ChangePasswordRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
-            ValidateRequest(request);
-
-            var currentUserId = _requestContext.CurrentUserId;
-            if (currentUserId is null)
+            if (request is null)
             {
-                throw new InvalidOperationException("Current user is not available.");
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
             }
-
-            var user = await _userAccountRepository.GetByIdAsync(currentUserId.Value, cancellationToken);
-            if (user is null)
-            {
-                throw new InvalidOperationException("User not found.");
-            }
-
-            if (!user.IsEmailVerified)
-            {
-                throw new InvalidOperationException("Email is not verified.");
-            }
-
-            if (user.Status == UserAccountStatus.Inactive)
-            {
-                throw new InvalidOperationException("Account is inactive.");
-            }
-
-            if (user.IsLockedAt(_dateTimeProvider.UtcNow))
-            {
-                throw new InvalidOperationException("Account is locked.");
-            }
-
-            if (!_passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
-            {
-                throw new InvalidOperationException("Current password is incorrect.");
-            }
-
-            if (request.CurrentPassword == request.NewPassword)
-            {
-                throw new InvalidOperationException("New password must be different from current password.");
-            }
-
-            var newPasswordHash = _passwordHasher.Hash(request.NewPassword);
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-            try
-            {
-                await _userPasswordService.UpdatePasswordAsync(
-                    user.UserId,
-                    newPasswordHash,
-                    cancellationToken);
-
-                await _refreshTokenRevocationService.RevokeAllActiveByUserIdAsync(
-                    user.UserId,
-                    "PasswordChanged",
-                    cancellationToken);
-
-                await _unitOfWork.CommitAsync(cancellationToken);
-            }
-            catch
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
-            }
-
-            return new ChangePasswordResponseDto
-            {
-                UserId = user.UserId,
-                PasswordChanged = true
-            };
-        }
-
-        private static void ValidateRequest(ChangePasswordRequestDto request)
-        {
-            ArgumentNullException.ThrowIfNull(request);
 
             if (string.IsNullOrWhiteSpace(request.CurrentPassword))
             {
-                throw new ArgumentException("Current password is required.", nameof(request.CurrentPassword));
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
             }
 
             if (string.IsNullOrWhiteSpace(request.NewPassword))
             {
-                throw new ArgumentException("New password is required.", nameof(request.NewPassword));
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.PasswordPolicyViolation);
             }
 
             if (request.NewPassword.Length < 8)
             {
-                throw new ArgumentException("New password must be at least 8 characters long.", nameof(request.NewPassword));
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.PasswordPolicyViolation);
             }
+
+            long? currentUserId = _requestContext.CurrentUserId;
+            if (currentUserId is null)
+            {
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.LogoutFailed);
+            }
+
+            try
+            {
+                var user = await _userAccountRepository.GetByIdAsync(
+                    currentUserId.Value,
+                    cancellationToken);
+
+                if (user is null)
+                {
+                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.User.NotFound);
+                }
+
+                if (!user.IsEmailVerified)
+                {
+                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.VerificationRequired);
+                }
+
+                if (user.Status == UserAccountStatus.Inactive)
+                {
+                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.AccountInactive);
+                }
+
+                if (user.IsLockedAt(_dateTimeProvider.UtcNow))
+                {
+                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.AccountLocked);
+                }
+
+                if (!_passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
+                {
+                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.InvalidCredentials);
+                }
+
+                if (request.CurrentPassword == request.NewPassword)
+                {
+                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.PasswordPolicyViolation);
+                }
+
+                string newPasswordHash = _passwordHasher.Hash(request.NewPassword);
+
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    bool updated = await _userAccountRepository.UpdatePasswordAsync(
+                        user.UserId,
+                        newPasswordHash,
+                        cancellationToken);
+
+                    if (!updated)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                        return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.User.NotFound);
+                    }
+
+                    await _refreshTokenRepository.RevokeAllActiveByUserIdAsync(
+                        user.UserId,
+                        "PasswordChanged",
+                        cancellationToken);
+
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                    return Result<ChangePasswordResponseDto>.Success(new ChangePasswordResponseDto
+                    {
+                        UserId = user.UserId,
+                        PasswordChanged = true
+                    });
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
+            catch (PersistenceException exception)
+            {
+                return Result<ChangePasswordResponseDto>.Failure(MapPersistenceException(exception));
+            }
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                _ => IdentityErrors.ValidationFailed
+            };
         }
     }
 }
-

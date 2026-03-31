@@ -1,14 +1,14 @@
-﻿using Identity.Application.Contracts.Ports;
-using Identity.Application.Contracts.Responses;
+﻿using Identity.Application.Ports.Services;
+using Identity.Application.Ports.Services.Models;
 using Identity.Domain.Entities;
 
 namespace Identity.Infrastructure.Security
 {
     public sealed class AccessTokenGenerator : IAccessTokenGenerator
     {
-        public AccessTokenResultDto Generate(UserAccount userAccount)
+        public AccessTokenResult Generate(UserAccount userAccount)
         {
-            return new AccessTokenResultDto
+            return new AccessTokenResult
             {
                 AccessToken = $"access-token-for-{userAccount.PublicId}",
                 ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15)

@@ -1,3 +1,4 @@
+using CommercialNews.BuildingBlocks.Results;
 using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
 
@@ -5,8 +6,8 @@ namespace Identity.Application.UseCases.Logout
 {
     public interface ILogoutUseCase
     {
-        Task<LogoutResponseDto> ExecuteAsync(
+        Task<Result<LogoutResponseDto>> ExecuteAsync(
             LogoutRequestDto request,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken = default);
     }
 }
