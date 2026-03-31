@@ -162,9 +162,10 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_UpdateProfile]
-    @UserId      BIGINT,
-    @FullName    NVARCHAR(200) = NULL,
-    @AvatarUrl   NVARCHAR(800) = NULL
+    @UserId          BIGINT,
+    @FullName        NVARCHAR(200) = NULL,
+    @AvatarUrl       NVARCHAR(800) = NULL,
+    @AffectedRows    INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -177,12 +178,15 @@ BEGIN
         [UpdatedAt] = SYSUTCDATETIME(),
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_UpdatePassword]
-    @UserId         BIGINT,
-    @PasswordHash   NVARCHAR(500)
+    @UserId          BIGINT,
+    @PasswordHash    NVARCHAR(500),
+    @AffectedRows    INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -194,11 +198,14 @@ BEGIN
         [UpdatedAt] = SYSUTCDATETIME(),
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_UpdateLastLogin]
-    @UserId BIGINT
+    @UserId          BIGINT,
+    @AffectedRows    INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -209,11 +216,14 @@ BEGIN
         [LastLoginAt] = SYSUTCDATETIME(),
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [UserId] = @UserId;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_SetEmailVerified]
-    @UserId BIGINT
+    @UserId          BIGINT,
+    @AffectedRows    INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -227,13 +237,16 @@ BEGIN
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId
       AND [IsEmailVerified] = 0;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_UpdateStatus]
-    @UserId       BIGINT,
-    @Status       VARCHAR(20),
-    @LockedUntil  DATETIME2(3) = NULL
+    @UserId          BIGINT,
+    @Status          VARCHAR(20),
+    @LockedUntil     DATETIME2(3) = NULL,
+    @AffectedRows    INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -246,6 +259,8 @@ BEGIN
         [UpdatedAt] = SYSUTCDATETIME(),
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -254,12 +269,12 @@ GO
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [identity].[EmailVerificationToken_Insert]
-    @UserId         BIGINT,
-    @TokenHash      VARBINARY(32),
-    @ExpiresAt      DATETIME2(3),
-    @CreatedIp      NVARCHAR(45) = NULL,
-    @CorrelationId  NVARCHAR(100) = NULL,
-    @VerificationTokenId BIGINT OUTPUT
+    @UserId               BIGINT,
+    @TokenHash            VARBINARY(32),
+    @ExpiresAt            DATETIME2(3),
+    @CreatedIp            NVARCHAR(45) = NULL,
+    @CorrelationId        NVARCHAR(100) = NULL,
+    @VerificationTokenId  BIGINT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -309,7 +324,8 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[EmailVerificationToken_MarkUsed]
-    @VerificationTokenId BIGINT
+    @VerificationTokenId  BIGINT,
+    @AffectedRows         INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -319,6 +335,8 @@ BEGIN
     SET [UsedAt] = SYSUTCDATETIME()
     WHERE [VerificationTokenId] = @VerificationTokenId
       AND [UsedAt] IS NULL;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -348,7 +366,8 @@ GO
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [identity].[PasswordResetToken_RevokeActiveByUserId]
-    @UserId BIGINT
+    @UserId          BIGINT,
+    @AffectedRows    INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -360,6 +379,8 @@ BEGIN
       AND [UsedAt] IS NULL
       AND [RevokedAt] IS NULL
       AND [ExpiresAt] > SYSUTCDATETIME();
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -421,7 +442,8 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[PasswordResetToken_MarkUsed]
-    @ResetTokenId BIGINT
+    @ResetTokenId     BIGINT,
+    @AffectedRows     INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -432,6 +454,8 @@ BEGIN
     WHERE [ResetTokenId] = @ResetTokenId
       AND [UsedAt] IS NULL
       AND [RevokedAt] IS NULL;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -548,7 +572,8 @@ GO
 CREATE OR ALTER PROCEDURE [identity].[RefreshToken_Revoke]
     @RefreshTokenId        BIGINT,
     @RevokedReason         NVARCHAR(200) = NULL,
-    @ReplacedByTokenHash   VARBINARY(32) = NULL
+    @ReplacedByTokenHash   VARBINARY(32) = NULL,
+    @AffectedRows          INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -561,12 +586,15 @@ BEGIN
         [ReplacedByTokenHash] = @ReplacedByTokenHash
     WHERE [RefreshTokenId] = @RefreshTokenId
       AND [RevokedAt] IS NULL;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[RefreshToken_RevokeAllActiveByUserId]
-    @UserId         BIGINT,
-    @RevokedReason  NVARCHAR(200) = NULL
+    @UserId          BIGINT,
+    @RevokedReason   NVARCHAR(200) = NULL,
+    @AffectedRows    INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -579,6 +607,8 @@ BEGIN
     WHERE [UserId] = @UserId
       AND [RevokedAt] IS NULL
       AND [ExpiresAt] > SYSUTCDATETIME();
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 

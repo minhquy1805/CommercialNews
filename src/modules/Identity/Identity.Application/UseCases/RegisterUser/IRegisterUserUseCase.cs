@@ -1,12 +1,13 @@
-﻿using Identity.Application.Contracts.Requests;
+﻿using CommercialNews.BuildingBlocks.Results;
+using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
 
 namespace Identity.Application.UseCases.RegisterUser
 {
     public interface IRegisterUserUseCase
     {
-        Task<RegisterUserResponseDto> ExecuteAsync(
-           RegisterUserRequestDto request,
-           CancellationToken cancellationToken);
+        Task<Result<RegisterUserResponseDto>> ExecuteAsync(
+            RegisterUserRequestDto request,
+            CancellationToken cancellationToken = default);
     }
 }

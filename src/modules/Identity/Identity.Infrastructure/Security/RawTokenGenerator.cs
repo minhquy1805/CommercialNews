@@ -1,4 +1,4 @@
-﻿using Identity.Application.Contracts.Ports;
+﻿using Identity.Application.Ports.Services;
 using System.Security.Cryptography;
 
 namespace Identity.Infrastructure.Security

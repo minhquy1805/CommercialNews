@@ -1,10 +1,13 @@
-﻿using CommercialNews.BuildingBlocks.Messaging.Outbox;
-using Identity.Application.Contracts;
-using Identity.Application.Contracts.Payloads;
-using Identity.Application.Contracts.Ports;
+﻿using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
+using Identity.Application.Errors;
+using Identity.Application.Ports.Persistence;
+using Identity.Application.Ports.Services;
 using Identity.Domain.Entities;
+using Identity.Domain.Exceptions;
 
 namespace Identity.Application.UseCases.ForgotPassword
 {
@@ -15,9 +18,7 @@ namespace Identity.Application.UseCases.ForgotPassword
         private readonly IRawTokenGenerator _rawTokenGenerator;
         private readonly ITokenHashProvider _tokenHashProvider;
         private readonly IDateTimeProvider _dateTimeProvider;
-        private readonly IOutboxWriter _outboxWriter;
         private readonly IIdentityUnitOfWork _unitOfWork;
-        private readonly IPublicIdGenerator _publicIdGenerator;
 
         public ForgotPasswordUseCase(
             IUserAccountRepository userAccountRepository,
@@ -25,107 +26,92 @@ namespace Identity.Application.UseCases.ForgotPassword
             IRawTokenGenerator rawTokenGenerator,
             ITokenHashProvider tokenHashProvider,
             IDateTimeProvider dateTimeProvider,
-            IOutboxWriter outboxWriter,
-            IIdentityUnitOfWork unitOfWork,
-            IPublicIdGenerator publicIdGenerator)
+            IIdentityUnitOfWork unitOfWork)
         {
             _userAccountRepository = userAccountRepository;
             _passwordResetTokenRepository = passwordResetTokenRepository;
             _rawTokenGenerator = rawTokenGenerator;
             _tokenHashProvider = tokenHashProvider;
             _dateTimeProvider = dateTimeProvider;
-            _outboxWriter = outboxWriter;
             _unitOfWork = unitOfWork;
-            _publicIdGenerator = publicIdGenerator;
         }
 
-        public async Task<ForgotPasswordResponseDto> ExecuteAsync(
+        public async Task<Result<ForgotPasswordResponseDto>> ExecuteAsync(
             ForgotPasswordRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
-            ValidateRequest(request);
-
-            var normalizedEmail = NormalizeEmail(request.Email);
-            var user = await _userAccountRepository.GetByEmailNormalizedAsync(
-                normalizedEmail,
-                cancellationToken);
-
-            if (user is null)
+            if (request is null)
             {
-                return BuildGenericResponse();
+                return Result<ForgotPasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
             }
-
-            var nowUtc = _dateTimeProvider.UtcNow;
-            var rawResetToken = _rawTokenGenerator.Generate();
-            var resetTokenHash = _tokenHashProvider.Hash(rawResetToken);
-
-            var resetToken = new PasswordResetToken(
-                resetTokenId: 0,
-                userId: user.UserId,
-                tokenHash: resetTokenHash,
-                expiresAt: nowUtc.AddHours(1),
-                usedAt: null,
-                revokedAt: null,
-                createdAt: nowUtc,
-                createdIp: null,
-                correlationId: null);
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-            try
-            {
-                await _passwordResetTokenRepository.RevokeActiveByUserIdAsync(
-                    user.UserId,
-                    cancellationToken);
-
-                await _passwordResetTokenRepository.InsertAsync(
-                    resetToken,
-                    cancellationToken);
-
-                var payload = new PasswordResetRequestedPayloadDto
-                {
-                    UserId = user.UserId,
-                    PublicId = user.PublicId,
-                    Email = user.Email,
-                    RawToken = rawResetToken
-                };
-
-                var payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
-
-                var outboxMessageId = _publicIdGenerator.NewId();
-
-                await _outboxWriter.WriteAsync(
-                    messageId: outboxMessageId,
-                    eventType: IdentityOutboxEventTypes.PasswordResetRequested,
-                    aggregateType: "UserAccount",
-                    aggregateId: user.UserId.ToString(),
-                    aggregatePublicId: user.PublicId,
-                    aggregateVersion: user.Version,
-                    payload: payloadJson,
-                    headers: null,
-                    correlationId: null,
-                    initiatorUserId: user.UserId,
-                    occurredAtUtc: nowUtc,
-                    cancellationToken: cancellationToken);
-
-                await _unitOfWork.CommitAsync(cancellationToken);
-            }
-            catch
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
-            }
-
-            return BuildGenericResponse();
-        }
-
-        private static void ValidateRequest(ForgotPasswordRequestDto request)
-        {
-            ArgumentNullException.ThrowIfNull(request);
 
             if (string.IsNullOrWhiteSpace(request.Email))
             {
-                throw new ArgumentException("Email is required.", nameof(request.Email));
+                return Result<ForgotPasswordResponseDto>.Failure(IdentityErrors.User.EmailRequired);
+            }
+
+            if (request.Email.Trim().Length > 320)
+            {
+                return Result<ForgotPasswordResponseDto>.Failure(IdentityErrors.User.EmailTooLong);
+            }
+
+            try
+            {
+                string normalizedEmail = NormalizeEmail(request.Email);
+
+                var user = await _userAccountRepository.GetByEmailNormalizedAsync(
+                    normalizedEmail,
+                    cancellationToken);
+
+                if (user is null)
+                {
+                    return Result<ForgotPasswordResponseDto>.Success(BuildGenericResponse());
+                }
+
+                DateTime nowUtc = _dateTimeProvider.UtcNow;
+                string rawResetToken = _rawTokenGenerator.Generate();
+                byte[] resetTokenHash = _tokenHashProvider.Hash(rawResetToken);
+
+                PasswordResetToken resetToken = PasswordResetToken.Create(
+                    userId: user.UserId,
+                    tokenHash: resetTokenHash,
+                    createdAt: nowUtc,
+                    expiresAt: nowUtc.AddHours(1),
+                    createdIp: null,
+                    correlationId: null);
+
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    await _passwordResetTokenRepository.RevokeActiveByUserIdAsync(
+                        user.UserId,
+                        cancellationToken);
+
+                    await _passwordResetTokenRepository.InsertAsync(
+                        resetToken,
+                        cancellationToken);
+
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                    // DEV ONLY: output reset token for local workflow testing
+                    Console.WriteLine($"[DEV][RESET] Email={user.Email}; PublicId={user.PublicId}; Token={rawResetToken}");
+
+                    return Result<ForgotPasswordResponseDto>.Success(BuildGenericResponse());
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
+            catch (PersistenceException exception)
+            {
+                return Result<ForgotPasswordResponseDto>.Failure(MapPersistenceException(exception));
+            }
+            catch (IdentityDomainException exception)
+            {
+                return Result<ForgotPasswordResponseDto>.Failure(MapDomainException(exception));
             }
         }
 
@@ -140,6 +126,28 @@ namespace Identity.Application.UseCases.ForgotPassword
             {
                 Requested = true,
                 Message = "If the account exists, a password reset email will be sent."
+            };
+        }
+
+        private static Error MapDomainException(IdentityDomainException exception)
+        {
+            return exception.Code switch
+            {
+                "IDENTITY.PASSWORD_RESET_INVALID_USER_ID" => IdentityErrors.PasswordReset.InvalidUserId,
+                "IDENTITY.PASSWORD_RESET_TOKEN_HASH_REQUIRED" => IdentityErrors.PasswordReset.TokenHashRequired,
+                "IDENTITY.PASSWORD_RESET_TOKEN_HASH_INVALID" => IdentityErrors.PasswordReset.TokenHashInvalid,
+                "IDENTITY.PASSWORD_RESET_INVALID_EXPIRES_AT" => IdentityErrors.PasswordReset.InvalidExpiresAt,
+                "IDENTITY.PASSWORD_RESET_CREATED_IP_TOO_LONG" => IdentityErrors.PasswordReset.CreatedIpTooLong,
+                "IDENTITY.PASSWORD_RESET_CORRELATION_ID_TOO_LONG" => IdentityErrors.PasswordReset.CorrelationIdTooLong,
+                _ => IdentityErrors.ValidationFailed
+            };
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                _ => IdentityErrors.ValidationFailed
             };
         }
     }
