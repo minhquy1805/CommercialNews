@@ -1,11 +1,14 @@
-﻿using CommercialNews.BuildingBlocks.Messaging.Outbox;
-using Identity.Application.Contracts;
-using Identity.Application.Contracts.Payloads;
-using Identity.Application.Contracts.Ports;
+﻿using CommercialNews.BuildingBlocks.Abstractions.Identifiers;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
+using Identity.Application.Errors;
+using Identity.Application.Ports.Persistence;
+using Identity.Application.Ports.Services;
 using Identity.Domain.Entities;
-using Identity.Domain.Enums;
+using Identity.Domain.Exceptions;
 
 namespace Identity.Application.UseCases.RegisterUser
 {
@@ -13,165 +16,181 @@ namespace Identity.Application.UseCases.RegisterUser
     {
         private readonly IUserAccountRepository _userAccountRepository;
         private readonly IEmailVerificationTokenRepository _emailVerificationTokenRepository;
+        private readonly IIdentityUnitOfWork _unitOfWork;
         private readonly IPasswordHasher _passwordHasher;
         private readonly IPublicIdGenerator _publicIdGenerator;
         private readonly IRawTokenGenerator _rawTokenGenerator;
         private readonly ITokenHashProvider _tokenHashProvider;
         private readonly IDateTimeProvider _dateTimeProvider;
-        // private readonly IIdentityEmailSender _identityEmailSender;
-        private readonly IOutboxWriter _outboxWriter;
-        private readonly IIdentityUnitOfWork _unitOfWork;
 
         public RegisterUserUseCase(
             IUserAccountRepository userAccountRepository,
             IEmailVerificationTokenRepository emailVerificationTokenRepository,
+            IIdentityUnitOfWork unitOfWork,
             IPasswordHasher passwordHasher,
             IPublicIdGenerator publicIdGenerator,
             IRawTokenGenerator rawTokenGenerator,
             ITokenHashProvider tokenHashProvider,
-            IDateTimeProvider dateTimeProvider,
-            IOutboxWriter outboxWriter,
-            IIdentityUnitOfWork unitOfWork)
+            IDateTimeProvider dateTimeProvider)
         {
             _userAccountRepository = userAccountRepository;
             _emailVerificationTokenRepository = emailVerificationTokenRepository;
+            _unitOfWork = unitOfWork;
             _passwordHasher = passwordHasher;
             _publicIdGenerator = publicIdGenerator;
             _rawTokenGenerator = rawTokenGenerator;
             _tokenHashProvider = tokenHashProvider;
             _dateTimeProvider = dateTimeProvider;
-            _outboxWriter = outboxWriter;
-            _unitOfWork = unitOfWork;
         }
 
-        public async Task<RegisterUserResponseDto> ExecuteAsync(
+        public async Task<Result<RegisterUserResponseDto>> ExecuteAsync(
             RegisterUserRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
-            ValidateRequest(request);
-
-            var normalizedEmail = NormalizeEmail(request.Email);
-
-            var existingUser = await _userAccountRepository.GetByEmailNormalizedAsync(
-                normalizedEmail,
-                cancellationToken);
-
-            if (existingUser is not null)
+            if (request is null)
             {
-                throw new InvalidOperationException("An account with this email already exists.");
+                return Result<RegisterUserResponseDto>.Failure(IdentityErrors.ValidationFailed);
             }
-
-            var nowUtc = _dateTimeProvider.UtcNow;
-            var publicId = _publicIdGenerator.NewId();
-            var passwordHash = _passwordHasher.Hash(request.Password);
-
-            var user = new UserAccount(
-                userId: 0,
-                publicId: publicId,
-                email: request.Email.Trim(),
-                emailNormalized: normalizedEmail,
-                passwordHash: passwordHash,
-                fullName: string.IsNullOrWhiteSpace(request.FullName) ? null : request.FullName.Trim(),
-                avatarUrl: null,
-                isEmailVerified: false,
-                emailVerifiedAt: null,
-                status: UserAccountStatus.Active,
-                lockedUntil: null,
-                createdAt: nowUtc,
-                updatedAt: nowUtc,
-                lastLoginAt: null,
-                version: 1);
-
-            var rawVerificationToken = _rawTokenGenerator.Generate();
-            var verificationTokenHash = _tokenHashProvider.Hash(rawVerificationToken);
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-            
-            try
-            {
-                var userId = await _userAccountRepository.InsertAsync(user, cancellationToken);
-
-                var verificationToken = new EmailVerificationToken(
-                    verificationTokenId: 0,
-                    userId: userId,
-                    tokenHash: verificationTokenHash,
-                    expiresAt: nowUtc.AddHours(24),
-                    usedAt: null,
-                    createdAt: nowUtc,
-                    createdIp: null,
-                    correlationId: null);
-
-                await _emailVerificationTokenRepository.InsertAsync(
-                    verificationToken,
-                    cancellationToken);
-
-                var payload = new EmailVerificationRequestedPayloadDto
-                {
-                    UserId = userId,
-                    PublicId = user.PublicId,
-                    Email = user.Email,
-                    RawToken = rawVerificationToken
-                };
-
-                var payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
-
-                var outboxMessageId = _publicIdGenerator.NewId();
-
-                await _outboxWriter.WriteAsync(
-                    messageId: outboxMessageId,
-                    eventType: IdentityOutboxEventTypes.EmailVerificationRequested,
-                    aggregateType: "UserAccount",
-                    aggregateId: userId.ToString(),
-                    aggregatePublicId: user.PublicId,
-                    aggregateVersion: 1,
-                    payload: payloadJson,
-                    headers: null,
-                    correlationId: null,
-                    initiatorUserId: userId,
-                    occurredAtUtc: nowUtc,
-                    cancellationToken: cancellationToken);
-
-                await _unitOfWork.CommitAsync(cancellationToken);
-
-                return new RegisterUserResponseDto
-                {
-                    UserId = userId,
-                    PublicId = user.PublicId,
-                    Email = user.Email,
-                    RequiresEmailVerification = true
-                };
-            }
-            catch
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
-            }
-        }
-
-        private static void ValidateRequest(RegisterUserRequestDto request)
-        {
-            ArgumentNullException.ThrowIfNull(request);
 
             if (string.IsNullOrWhiteSpace(request.Email))
             {
-                throw new ArgumentException("Email is required.", nameof(request.Email));
+                return Result<RegisterUserResponseDto>.Failure(IdentityErrors.User.EmailRequired);
+            }
+
+            if (request.Email.Trim().Length > 320)
+            {
+                return Result<RegisterUserResponseDto>.Failure(IdentityErrors.User.EmailTooLong);
             }
 
             if (string.IsNullOrWhiteSpace(request.Password))
             {
-                throw new ArgumentException("Password is required.", nameof(request.Password));
+                return Result<RegisterUserResponseDto>.Failure(IdentityErrors.ValidationFailed);
             }
 
             if (request.Password.Length < 8)
             {
-                throw new ArgumentException("Password must be at least 8 characters long.", nameof(request.Password));
+                return Result<RegisterUserResponseDto>.Failure(IdentityErrors.PasswordPolicyViolation);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.FullName) &&
+                request.FullName.Trim().Length > 200)
+            {
+                return Result<RegisterUserResponseDto>.Failure(IdentityErrors.User.FullNameTooLong);
+            }
+
+            try
+            {
+                string normalizedEmail = NormalizeEmail(request.Email);
+
+                UserAccount? existingUser = await _userAccountRepository.GetByEmailNormalizedAsync(
+                    normalizedEmail,
+                    cancellationToken);
+
+                if (existingUser is not null)
+                {
+                    return Result<RegisterUserResponseDto>.Failure(IdentityErrors.EmailAlreadyExists);
+                }
+
+                DateTime nowUtc = _dateTimeProvider.UtcNow;
+                string publicId = _publicIdGenerator.NewId();
+                string passwordHash = _passwordHasher.Hash(request.Password);
+
+                UserAccount user = UserAccount.Create(
+                    publicId: publicId,
+                    email: request.Email.Trim(),
+                    emailNormalized: normalizedEmail,
+                    passwordHash: passwordHash,
+                    fullName: request.FullName,
+                    avatarUrl: null,
+                    nowUtc: nowUtc);
+
+                string rawVerificationToken = _rawTokenGenerator.Generate();
+                byte[] verificationTokenHash = _tokenHashProvider.Hash(rawVerificationToken);
+
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    long userId = await _userAccountRepository.InsertAsync(
+                        user,
+                        cancellationToken);
+
+                    EmailVerificationToken verificationToken = EmailVerificationToken.Create(
+                        userId: userId,
+                        tokenHash: verificationTokenHash,
+                        createdAt: nowUtc,
+                        expiresAt: nowUtc.AddHours(24),
+                        createdIp: null,
+                        correlationId: null);
+
+                    await _emailVerificationTokenRepository.InsertAsync(
+                        verificationToken,
+                        cancellationToken);
+
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                    // DEV ONLY: output verification token for local workflow testing
+                    Console.WriteLine($"[DEV][VERIFY] Email={user.Email}; PublicId={user.PublicId}; Token={rawVerificationToken}");
+
+                    return Result<RegisterUserResponseDto>.Success(new RegisterUserResponseDto
+                    {
+                        UserId = userId,
+                        PublicId = user.PublicId,
+                        Email = user.Email,
+                        RequiresEmailVerification = true
+                    });
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
+            catch (PersistenceException exception)
+            {
+                return Result<RegisterUserResponseDto>.Failure(MapPersistenceException(exception));
+            }
+            catch (IdentityDomainException exception)
+            {
+                return Result<RegisterUserResponseDto>.Failure(MapDomainException(exception));
             }
         }
 
         private static string NormalizeEmail(string email)
         {
             return email.Trim().ToUpperInvariant();
+        }
+
+        private static Error MapDomainException(IdentityDomainException exception)
+        {
+            return exception.Code switch
+            {
+                "IDENTITY.USER_PUBLIC_ID_REQUIRED" => IdentityErrors.User.PublicIdRequired,
+                "IDENTITY.USER_PUBLIC_ID_INVALID" => IdentityErrors.User.PublicIdInvalid,
+                "IDENTITY.USER_EMAIL_REQUIRED" => IdentityErrors.User.EmailRequired,
+                "IDENTITY.USER_EMAIL_TOO_LONG" => IdentityErrors.User.EmailTooLong,
+                "IDENTITY.USER_EMAIL_NORMALIZED_REQUIRED" => IdentityErrors.User.EmailNormalizedRequired,
+                "IDENTITY.USER_EMAIL_NORMALIZED_TOO_LONG" => IdentityErrors.User.EmailNormalizedTooLong,
+                "IDENTITY.USER_PASSWORD_HASH_REQUIRED" => IdentityErrors.User.PasswordHashRequired,
+                "IDENTITY.USER_PASSWORD_HASH_TOO_LONG" => IdentityErrors.User.PasswordHashTooLong,
+                "IDENTITY.USER_FULL_NAME_TOO_LONG" => IdentityErrors.User.FullNameTooLong,
+                "IDENTITY.EMAIL_VERIFICATION_INVALID_USER_ID" => IdentityErrors.EmailVerification.InvalidUserId,
+                "IDENTITY.EMAIL_VERIFICATION_TOKEN_HASH_REQUIRED" => IdentityErrors.EmailVerification.TokenHashRequired,
+                "IDENTITY.EMAIL_VERIFICATION_TOKEN_HASH_INVALID" => IdentityErrors.EmailVerification.TokenHashInvalid,
+                "IDENTITY.EMAIL_VERIFICATION_INVALID_EXPIRES_AT" => IdentityErrors.EmailVerification.InvalidExpiresAt,
+                "IDENTITY.EMAIL_VERIFICATION_CREATED_IP_TOO_LONG" => IdentityErrors.EmailVerification.CreatedIpTooLong,
+                "IDENTITY.EMAIL_VERIFICATION_CORRELATION_ID_TOO_LONG" => IdentityErrors.EmailVerification.CorrelationIdTooLong,
+                _ => IdentityErrors.ValidationFailed
+            };
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "IDENTITY.EMAIL_EXISTS" => IdentityErrors.EmailAlreadyExists,
+                _ => IdentityErrors.ValidationFailed
+            };
         }
     }
 }

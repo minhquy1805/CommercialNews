@@ -1,5 +1,9 @@
-using Identity.Application.Contracts.Ports;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Results;
 using Identity.Application.Contracts.Responses;
+using Identity.Application.Errors;
+using Identity.Application.Ports.Persistence;
 using Identity.Domain.Enums;
 
 namespace Identity.Application.UseCases.GetMyProfile
@@ -20,32 +24,35 @@ namespace Identity.Application.UseCases.GetMyProfile
             _dateTimeProvider = dateTimeProvider;
         }
 
-        public async Task<GetMyProfileResponseDto> ExecuteAsync(
-            CancellationToken cancellationToken)
+        public async Task<Result<GetMyProfileResponseDto>> ExecuteAsync(
+            CancellationToken cancellationToken = default)
         {
-            var currentUserId = _requestContext.CurrentUserId;
+            long? currentUserId = _requestContext.CurrentUserId;
             if (currentUserId is null)
             {
-                throw new InvalidOperationException("Current user is not available.");
+                return Result<GetMyProfileResponseDto>.Failure(IdentityErrors.ValidationFailed);
             }
 
-            var user = await _userAccountRepository.GetByIdAsync(currentUserId.Value, cancellationToken);
+            var user = await _userAccountRepository.GetByIdAsync(
+                currentUserId.Value,
+                cancellationToken);
+
             if (user is null)
             {
-                throw new InvalidOperationException("User not found.");
+                return Result<GetMyProfileResponseDto>.Failure(IdentityErrors.User.NotFound);
             }
 
             if (user.Status == UserAccountStatus.Inactive)
             {
-                throw new InvalidOperationException("Account is inactive.");
+                return Result<GetMyProfileResponseDto>.Failure(IdentityErrors.Auth.AccountInactive);
             }
 
             if (user.IsLockedAt(_dateTimeProvider.UtcNow))
             {
-                throw new InvalidOperationException("Account is locked.");
+                return Result<GetMyProfileResponseDto>.Failure(IdentityErrors.AccountLocked);
             }
 
-            return new GetMyProfileResponseDto
+            return Result<GetMyProfileResponseDto>.Success(new GetMyProfileResponseDto
             {
                 UserId = user.UserId,
                 PublicId = user.PublicId,
@@ -57,7 +64,7 @@ namespace Identity.Application.UseCases.GetMyProfile
                 CreatedAt = user.CreatedAt,
                 UpdatedAt = user.UpdatedAt,
                 LastLoginAt = user.LastLoginAt
-            };
+            });
         }
     }
 }

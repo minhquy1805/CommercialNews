@@ -1,5 +1,11 @@
-﻿using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+﻿using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Api.Public.Identity.Contracts.Recovery.Requests;
+using CommercialNews.Api.Api.Public.Identity.Contracts.Recovery.Responses;
+using CommercialNews.Api.Api.Public.Identity.Contracts.Session.Requests;
+using CommercialNews.Api.Api.Public.Identity.Contracts.Session.Responses;
+using CommercialNews.Api.Api.Public.Identity.Contracts.User.Requests;
+using CommercialNews.Api.Api.Public.Identity.Contracts.User.Responses;
+using Identity.Application.Contracts.Requests;
 using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.GetMyProfile;
@@ -21,337 +27,379 @@ namespace CommercialNews.Api.Api.Public.Controllers
     public sealed class IdentityController : ControllerBase
     {
         [HttpPost("register")]
-        [ProducesResponseType(typeof(RegisterUserResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(RegisterResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> Register(
-            [FromBody] RegisterUserRequestDto request,
+            [FromBody] RegisterRequest request,
             [FromServices] IRegisterUserUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new RegisterUserRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                Email = request.Email,
+                Password = request.Password,
+                FullName = request.FullName
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new RegisterResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    PublicId = value.PublicId,
+                    Email = value.Email,
+                    RequiresEmailVerification = value.RequiresEmailVerification
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("verify-email")]
-        [ProducesResponseType(typeof(VerifyEmailResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(VerifyEmailResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> VerifyEmail(
-            [FromBody] VerifyEmailRequestDto request,
+            [FromBody] VerifyEmailRequest request,
             [FromServices] IVerifyEmailUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new VerifyEmailRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                Token = request.Token
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new VerifyEmailResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    Verified = value.Verified
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("login")]
-        [ProducesResponseType(typeof(LoginUserResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<IActionResult> Login(
-            [FromBody] LoginUserRequestDto request,
+            [FromBody] LoginRequest request,
             [FromServices] ILoginUserUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new LoginUserRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                Email = request.Email,
+                Password = request.Password
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new LoginResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    PublicId = value.PublicId,
+                    Email = value.Email,
+                    AccessToken = value.AccessToken,
+                    RefreshToken = value.RefreshToken,
+                    AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc,
+                    RefreshTokenExpiresAtUtc = value.RefreshTokenExpiresAtUtc
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("forgot-password")]
-        [ProducesResponseType(typeof(ForgotPasswordResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ForgotPasswordResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> ForgotPassword(
-            [FromBody] ForgotPasswordRequestDto request,
+            [FromBody] ForgotPasswordRequest request,
             [FromServices] IForgotPasswordUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new ForgotPasswordRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                Email = request.Email
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new ForgotPasswordResponse
                 {
-                    message = ex.Message
+                    Requested = value.Requested,
+                    Message = value.Message
                 });
             }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("reset-password")]
-        [ProducesResponseType(typeof(ResetPasswordResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> ResetPassword(
-            [FromBody] ResetPasswordRequestDto request,
+            [FromBody] ResetPasswordRequest request,
             [FromServices] IResetPasswordUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new ResetPasswordRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                Token = request.Token,
+                NewPassword = request.NewPassword
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new ResetPasswordResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    PasswordReset = value.PasswordReset
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("refresh-token")]
-        [ProducesResponseType(typeof(RefreshTokenResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(RefreshTokenResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> RefreshToken(
-            [FromBody] RefreshTokenRequestDto request,
+            [FromBody] RefreshTokenRequest request,
             [FromServices] IRefreshTokenUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new RefreshTokenRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                RefreshToken = request.RefreshToken
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new RefreshTokenResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    AccessToken = value.AccessToken,
+                    RefreshToken = value.RefreshToken,
+                    AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc,
+                    RefreshTokenExpiresAtUtc = value.RefreshTokenExpiresAtUtc
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("resend-verification-email")]
-        [ProducesResponseType(typeof(ResendVerificationEmailResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ResendVerificationEmailResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
         public async Task<IActionResult> ResendVerificationEmail(
-            [FromBody] ResendVerificationEmailRequestDto request,
+            [FromBody] ResendVerificationEmailRequest request,
             [FromServices] IResendVerificationEmailUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new ResendVerificationEmailRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                Email = request.Email
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new ResendVerificationEmailResponse
                 {
-                    message = ex.Message
+                    Requested = value.Requested,
+                    Message = value.Message
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("change-password")]
-        [ProducesResponseType(typeof(ChangePasswordResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ChangePasswordResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> ChangePassword(
-            [FromBody] ChangePasswordRequestDto request,
+            [FromBody] ChangePasswordRequest request,
             [FromServices] IChangePasswordUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new ChangePasswordRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                CurrentPassword = request.CurrentPassword,
+                NewPassword = request.NewPassword
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new ChangePasswordResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    PasswordChanged = value.PasswordChanged
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("logout")]
-        [ProducesResponseType(typeof(LogoutResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(LogoutResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> Logout(
-            [FromBody] LogoutRequestDto request,
+            [FromBody] LogoutRequest request,
             [FromServices] ILogoutUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new LogoutRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                RefreshToken = request.RefreshToken
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new LogoutResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    LoggedOut = value.LoggedOut
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpGet("me")]
-        [ProducesResponseType(typeof(GetMyProfileResponseDto), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [ProducesResponseType(typeof(GetMyProfileResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetMyProfile(
             [FromServices] IGetMyProfileUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var result = await useCase.ExecuteAsync(cancellationToken);
+
+            if (result.IsSuccess)
             {
-                var result = await useCase.ExecuteAsync(cancellationToken);
-                return Ok(result);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
+                var value = result.Value!;
+                return Ok(new GetMyProfileResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    PublicId = value.PublicId,
+                    Email = value.Email,
+                    FullName = value.FullName,
+                    AvatarUrl = value.AvatarUrl,
+                    IsEmailVerified = value.IsEmailVerified,
+                    Status = value.Status,
+                    CreatedAt = value.CreatedAt,
+                    UpdatedAt = value.UpdatedAt,
+                    LastLoginAt = value.LastLoginAt
                 });
             }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPut("me")]
-        [ProducesResponseType(typeof(UpdateMyProfileResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(UpdateMyProfileResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> UpdateMyProfile(
-            [FromBody] UpdateMyProfileRequestDto request,
+            [FromBody] UpdateMyProfileRequest request,
             [FromServices] IUpdateMyProfileUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var applicationRequest = new UpdateMyProfileRequestDto
             {
-                var result = await useCase.ExecuteAsync(request, cancellationToken);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
+                FullName = request.FullName,
+                AvatarUrl = request.AvatarUrl
+            };
+
+            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+            if (result.IsSuccess)
             {
-                return BadRequest(new
+                var value = result.Value!;
+                return Ok(new UpdateMyProfileResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    PublicId = value.PublicId,
+                    Email = value.Email,
+                    FullName = value.FullName,
+                    AvatarUrl = value.AvatarUrl,
+                    IsEmailVerified = value.IsEmailVerified,
+                    Status = value.Status,
+                    UpdatedAt = value.UpdatedAt
                 });
             }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
-                {
-                    message = ex.Message
-                });
-            }
+
+            return this.ToActionResult(result);
         }
 
         [HttpPost("logout-all-sessions")]
-        [ProducesResponseType(typeof(LogoutAllSessionsResponseDto), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        [ProducesResponseType(typeof(LogoutAllSessionsResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
         public async Task<IActionResult> LogoutAllSessions(
             [FromServices] ILogoutAllSessionsUseCase useCase,
             CancellationToken cancellationToken)
         {
-            try
+            var result = await useCase.ExecuteAsync(cancellationToken);
+
+            if (result.IsSuccess)
             {
-                var result = await useCase.ExecuteAsync(cancellationToken);
-                return Ok(result);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return Conflict(new
+                var value = result.Value!;
+                return Ok(new LogoutAllSessionsResponse
                 {
-                    message = ex.Message
+                    UserId = value.UserId,
+                    LoggedOutAllSessions = value.LoggedOutAllSessions
                 });
             }
+
+            return this.ToActionResult(result);
         }
     }
 }

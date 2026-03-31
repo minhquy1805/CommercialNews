@@ -1,6 +1,11 @@
-using Identity.Application.Contracts.Ports;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
+using Identity.Application.Errors;
+using Identity.Application.Ports.Persistence;
+using Identity.Application.Ports.Services;
 
 namespace Identity.Application.UseCases.Logout
 {
@@ -8,90 +13,108 @@ namespace Identity.Application.UseCases.Logout
     {
         private readonly IRequestContext _requestContext;
         private readonly ITokenHashProvider _tokenHashProvider;
-        private readonly IRefreshTokenLookupService _refreshTokenLookupService;
-        private readonly IRefreshTokenRevocationService _refreshTokenRevocationService;
+        private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly IIdentityUnitOfWork _unitOfWork;
 
         public LogoutUseCase(
             IRequestContext requestContext,
             ITokenHashProvider tokenHashProvider,
-            IRefreshTokenLookupService refreshTokenLookupService,
-            IRefreshTokenRevocationService refreshTokenRevocationService,
+            IRefreshTokenRepository refreshTokenRepository,
             IIdentityUnitOfWork unitOfWork)
         {
             _requestContext = requestContext;
             _tokenHashProvider = tokenHashProvider;
-            _refreshTokenLookupService = refreshTokenLookupService;
-            _refreshTokenRevocationService = refreshTokenRevocationService;
+            _refreshTokenRepository = refreshTokenRepository;
             _unitOfWork = unitOfWork;
         }
 
-        public async Task<LogoutResponseDto> ExecuteAsync(
+        public async Task<Result<LogoutResponseDto>> ExecuteAsync(
             LogoutRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
-            ValidateRequest(request);
-
-            var currentUserId = _requestContext.CurrentUserId;
-            if (currentUserId is null)
+            if (request is null)
             {
-                throw new InvalidOperationException("Current user is not available.");
+                return Result<LogoutResponseDto>.Failure(IdentityErrors.ValidationFailed);
             }
-
-            var tokenHash = _tokenHashProvider.Hash(request.RefreshToken);
-
-            var refreshToken = await _refreshTokenLookupService.GetByTokenHashAsync(
-                tokenHash,
-                cancellationToken);
-
-            if (refreshToken is null)
-            {
-                throw new InvalidOperationException("Refresh token not found.");
-            }
-
-            if (refreshToken.UserId != currentUserId.Value)
-            {
-                throw new InvalidOperationException("Refresh token does not belong to current user.");
-            }
-
-            if (refreshToken.RevokedAt is not null)
-            {
-                throw new InvalidOperationException("Refresh token is already revoked.");
-            }
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-            try
-            {
-                await _refreshTokenRevocationService.RevokeAsync(
-                    refreshToken.RefreshTokenId,
-                    "LoggedOut",
-                    replacedByTokenHash: null,
-                    cancellationToken);
-
-                await _unitOfWork.CommitAsync(cancellationToken);
-            }
-            catch
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
-            }
-
-            return new LogoutResponseDto
-            {
-                UserId = currentUserId.Value,
-                LoggedOut = true
-            };
-        }
-
-        private static void ValidateRequest(LogoutRequestDto request)
-        {
-            ArgumentNullException.ThrowIfNull(request);
 
             if (string.IsNullOrWhiteSpace(request.RefreshToken))
             {
-                throw new ArgumentException("Refresh token is required.", nameof(request.RefreshToken));
+                return Result<LogoutResponseDto>.Failure(IdentityErrors.Refresh.TokenHashRequired);
+            }
+
+            long? currentUserId = _requestContext.CurrentUserId;
+            if (currentUserId is null)
+            {
+                return Result<LogoutResponseDto>.Failure(IdentityErrors.Auth.LogoutFailed);
+            }
+
+            try
+            {
+                byte[] tokenHash = _tokenHashProvider.Hash(request.RefreshToken);
+
+                var refreshToken = await _refreshTokenRepository.GetByTokenHashAsync(
+                    tokenHash,
+                    cancellationToken);
+
+                if (refreshToken is null)
+                {
+                    return Result<LogoutResponseDto>.Failure(IdentityErrors.Refresh.TokenNotFound);
+                }
+
+                if (refreshToken.UserId != currentUserId.Value)
+                {
+                    return Result<LogoutResponseDto>.Failure(IdentityErrors.Auth.LogoutFailed);
+                }
+
+                if (refreshToken.RevokedAt is not null)
+                {
+                    return Result<LogoutResponseDto>.Failure(IdentityErrors.Refresh.TokenRevoked);
+                }
+
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    bool revoked = await _refreshTokenRepository.RevokeAsync(
+                        refreshTokenId: refreshToken.RefreshTokenId,
+                        revokedReason: "LoggedOut",
+                        replacedByTokenHash: null,
+                        cancellationToken: cancellationToken);
+
+                    if (!revoked)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+                        return Result<LogoutResponseDto>.Failure(IdentityErrors.Auth.LogoutFailed);
+                    }
+
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                    return Result<LogoutResponseDto>.Success(new LogoutResponseDto
+                    {
+                        UserId = currentUserId.Value,
+                        LoggedOut = true
+                    });
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
+            }
+            catch (PersistenceException exception)
+            {
+                return Result<LogoutResponseDto>.Failure(MapPersistenceException(exception));
             }
         }
-    }   
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "IDENTITY.REFRESH_TOKEN_NOT_FOUND" => IdentityErrors.Refresh.TokenNotFound,
+                "IDENTITY.REFRESH_TOKEN_REVOKED" => IdentityErrors.Refresh.TokenRevoked,
+                _ => IdentityErrors.Auth.LogoutFailed
+            };
+        }
+    }
 }

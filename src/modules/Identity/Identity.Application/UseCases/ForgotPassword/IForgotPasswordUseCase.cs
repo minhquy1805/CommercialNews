@@ -1,12 +1,13 @@
-﻿using Identity.Application.Contracts.Requests;
+﻿using CommercialNews.BuildingBlocks.Results;
+using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
 
 namespace Identity.Application.UseCases.ForgotPassword
 {
     public interface IForgotPasswordUseCase
     {
-        Task<ForgotPasswordResponseDto> ExecuteAsync(
+        Task<Result<ForgotPasswordResponseDto>> ExecuteAsync(
             ForgotPasswordRequestDto request,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken = default);
     }
 }

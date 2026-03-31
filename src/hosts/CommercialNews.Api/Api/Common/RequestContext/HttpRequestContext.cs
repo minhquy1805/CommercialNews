@@ -1,23 +1,44 @@
 using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using System.Security.Claims;
 
 namespace CommercialNews.Api.Api.Common.RequestContext
 {
     public sealed class HttpRequestContext : IRequestContext
     {
+        private const string UserIdHeaderName = "X-User-Id";
+
         private readonly IHttpContextAccessor _httpContextAccessor;
 
         public HttpRequestContext(IHttpContextAccessor httpContextAccessor)
         {
-            _httpContextAccessor = httpContextAccessor;
+            _httpContextAccessor = httpContextAccessor
+                ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         }
 
         public long? CurrentUserId
         {
             get
             {
-                string? value = _httpContextAccessor.HttpContext?.User?.FindFirst("sub")?.Value;
+                HttpContext? httpContext = _httpContextAccessor.HttpContext;
+                if (httpContext is null)
+                {
+                    return null;
+                }
 
-                return long.TryParse(value, out long userId) ? userId : null;
+                string? claimValue =
+                    httpContext.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                    ?? httpContext.User?.FindFirst("sub")?.Value;
+
+                if (long.TryParse(claimValue, out long claimUserId))
+                {
+                    return claimUserId;
+                }
+
+                string? headerValue = httpContext.Request.Headers[UserIdHeaderName].ToString();
+
+                return long.TryParse(headerValue, out long headerUserId)
+                    ? headerUserId
+                    : null;
             }
         }
 
