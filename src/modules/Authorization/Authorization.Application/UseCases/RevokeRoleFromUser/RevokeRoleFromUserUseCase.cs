@@ -1,9 +1,11 @@
-using System.Text.Json;
-using Authorization.Application.Contracts.Events;
-using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
-using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.RevokeRoleFromUser
 {
@@ -14,129 +16,140 @@ namespace Authorization.Application.UseCases.RevokeRoleFromUser
         private readonly IUserRoleRepository _userRoleRepository;
         private readonly IRequestContext _requestContext;
         private readonly IAuthorizationUnitOfWork _unitOfWork;
-        private readonly IOutboxWriter _outboxWriter;
-        private readonly IOutboxMessageIdGenerator _outboxMessageIdGenerator;
 
         public RevokeRoleFromUserUseCase(
             IAuthorizationUserLookupService authorizationUserLookupService,
             IRoleRepository roleRepository,
             IUserRoleRepository userRoleRepository,
             IRequestContext requestContext,
-            IAuthorizationUnitOfWork unitOfWork,
-            IOutboxWriter outboxWriter,
-            IOutboxMessageIdGenerator outboxMessageIdGenerator)
+            IAuthorizationUnitOfWork unitOfWork)
         {
             _authorizationUserLookupService = authorizationUserLookupService;
             _roleRepository = roleRepository;
             _userRoleRepository = userRoleRepository;
             _requestContext = requestContext;
             _unitOfWork = unitOfWork;
-            _outboxWriter = outboxWriter;
-            _outboxMessageIdGenerator = outboxMessageIdGenerator;
         }
 
-        public async Task<RevokeRoleFromUserResponseDto> ExecuteAsync(
+        public async Task<Result<RevokeRoleFromUserResponseDto>> ExecuteAsync(
             RevokeRoleFromUserRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (request.UserId <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.UserId), "UserId must be greater than zero.");
+                return Result<RevokeRoleFromUserResponseDto>.Failure(
+                    AuthorizationErrors.UserRole.InvalidUserId);
             }
 
             if (request.RoleId <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.RoleId), "RoleId must be greater than zero.");
+                return Result<RevokeRoleFromUserResponseDto>.Failure(
+                    AuthorizationErrors.UserRole.InvalidRoleId);
             }
-
-            var userExists = await _authorizationUserLookupService.ExistsAsync(
-                request.UserId,
-                cancellationToken);
-
-            if (!userExists)
-            {
-                throw new InvalidOperationException($"User with id {request.UserId} was not found.");
-            }
-
-            var role = await _roleRepository.GetByIdAsync(
-                request.RoleId,
-                cancellationToken);
-
-            if (role is null)
-            {
-                throw new InvalidOperationException($"Role with id {request.RoleId} was not found.");
-            }
-
-            var existingAssignment = await _userRoleRepository.GetActiveByUserIdAndRoleIdAsync(
-                request.UserId,
-                request.RoleId,
-                cancellationToken);
-
-            if (existingAssignment is null)
-            {
-                return new RevokeRoleFromUserResponseDto
-                {
-                    UserId = request.UserId,
-                    RoleId = request.RoleId,
-                    IsRevoked = true,
-                    WasAlreadyRevoked = true
-                };
-            }
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                var now = DateTime.UtcNow;
-                var actorUserId = _requestContext.CurrentUserId;
-
-                await _userRoleRepository.RevokeAsync(
+                var userExists = await _authorizationUserLookupService.ExistsAsync(
                     request.UserId,
-                    request.RoleId,
-                    actorUserId,
                     cancellationToken);
 
-                var integrationEvent = new UserRoleRevokedEvent
+                if (!userExists)
                 {
-                    UserRoleId = existingAssignment.UserRoleId,
-                    TargetUserId = request.UserId,
-                    RoleId = request.RoleId,
-                    ActorUserId = actorUserId,
-                    OccurredAtUtc = now,
-                    CorrelationId = _requestContext.CorrelationId
-                };
+                    return Result<RevokeRoleFromUserResponseDto>.Failure(
+                        AuthorizationErrors.User.NotFound);
+                }
 
-                await _outboxWriter.WriteAsync(
-                    messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.UserRoleRevoked,
-                    aggregateType: AuthorizationOutboxConstants.AggregateTypes.UserRole,
-                    aggregateId: existingAssignment.UserRoleId.ToString(),
-                    aggregatePublicId: null,
-                    aggregateVersion: null,
-                    payload: JsonSerializer.Serialize(integrationEvent),
-                    headers: null,
-                    correlationId: _requestContext.CorrelationId,
-                    initiatorUserId: actorUserId,
-                    occurredAtUtc: now,
-                    cancellationToken: cancellationToken);
+                var role = await _roleRepository.GetByIdAsync(
+                    request.RoleId,
+                    cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-
-                return new RevokeRoleFromUserResponseDto
+                if (role is null)
                 {
-                    UserId = request.UserId,
-                    RoleId = request.RoleId,
-                    IsRevoked = true,
-                    WasAlreadyRevoked = false
-                };
+                    return Result<RevokeRoleFromUserResponseDto>.Failure(
+                        AuthorizationErrors.Role.NotFound);
+                }
+
+                var existingAssignment = await _userRoleRepository.GetActiveByUserIdAndRoleIdAsync(
+                    request.UserId,
+                    request.RoleId,
+                    cancellationToken);
+
+                if (existingAssignment is null)
+                {
+                    return Result<RevokeRoleFromUserResponseDto>.Success(
+                        new RevokeRoleFromUserResponseDto
+                        {
+                            UserId = request.UserId,
+                            RoleId = request.RoleId,
+                            IsRevoked = true,
+                            WasAlreadyRevoked = true
+                        });
+                }
+
+                var actorUserId = _requestContext.CurrentUserId;
+
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    var revoked = await _userRoleRepository.RevokeAsync(
+                        request.UserId,
+                        request.RoleId,
+                        actorUserId,
+                        cancellationToken);
+
+                    if (!revoked)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<RevokeRoleFromUserResponseDto>.Success(
+                            new RevokeRoleFromUserResponseDto
+                            {
+                                UserId = request.UserId,
+                                RoleId = request.RoleId,
+                                IsRevoked = true,
+                                WasAlreadyRevoked = true
+                            });
+                    }
+
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                    return Result<RevokeRoleFromUserResponseDto>.Success(
+                        new RevokeRoleFromUserResponseDto
+                        {
+                            UserId = request.UserId,
+                            RoleId = request.RoleId,
+                            IsRevoked = true,
+                            WasAlreadyRevoked = false
+                        });
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
             }
-            catch
+            catch (PersistenceException exception)
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
+                return Result<RevokeRoleFromUserResponseDto>.Failure(
+                    MapPersistenceException(exception));
             }
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.USER_NOT_FOUND" =>
+                    AuthorizationErrors.User.NotFound,
+
+                "AUTHORIZATION.ROLE_NOT_FOUND" =>
+                    AuthorizationErrors.Role.NotFound,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
         }
     }
 }

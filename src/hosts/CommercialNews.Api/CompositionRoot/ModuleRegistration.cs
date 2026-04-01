@@ -1,3 +1,5 @@
+using Authorization.Application.DependencyInjection;
+using Authorization.Infrastructure.DependencyInjection;
 using Content.Application.DependencyInjection;
 using Content.Infrastructure.DependencyInjection;
 using Identity.Application.DependencyInjection;
@@ -17,19 +19,12 @@ public static class ModuleRegistration
         services.AddContentApplication();
         services.AddContentInfrastructure();
 
-        // TODO:
-        // Move module registrations here gradually after each module is refactored
-        // into a consistent Application/Infrastructure registration style.
-        //
-        // Example future state:
-        // services.AddIdentityApplication();
-        // services.AddIdentityInfrastructure(configuration);
-        //
-        // services.AddAuthorizationApplication();
-        // services.AddAuthorizationInfrastructure(configuration);
 
         services.AddIdentityApplication();
         services.AddIdentityInfrastructure();
+
+        services.AddAuthorizationApplication();
+        services.AddAuthorizationInfrastructure();
 
         return services;
     }

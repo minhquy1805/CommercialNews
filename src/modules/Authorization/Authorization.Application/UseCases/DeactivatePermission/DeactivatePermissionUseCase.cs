@@ -1,117 +1,144 @@
-using System.Text.Json;
-using Authorization.Application.Contracts.Events;
-using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
-using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
+using Authorization.Domain.Exceptions;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.DeactivatePermission
 {
     public sealed class DeactivatePermissionUseCase : IDeactivatePermissionUseCase
     {
         private readonly IPermissionRepository _permissionRepository;
-        private readonly IRequestContext _requestContext;
-        private readonly IOutboxMessageIdGenerator _outboxMessageIdGenerator;
         private readonly IAuthorizationUnitOfWork _unitOfWork;
-        private readonly IOutboxWriter _outboxWriter;
+        private readonly IDateTimeProvider _dateTimeProvider;
+        private readonly IRequestContext _requestContext;
 
         public DeactivatePermissionUseCase(
             IPermissionRepository permissionRepository,
-            IRequestContext requestContext,
-            IOutboxMessageIdGenerator outboxMessageIdGenerator,
             IAuthorizationUnitOfWork unitOfWork,
-            IOutboxWriter outboxWriter)
+            IDateTimeProvider dateTimeProvider,
+            IRequestContext requestContext)
         {
             _permissionRepository = permissionRepository;
-            _requestContext = requestContext;
-            _outboxMessageIdGenerator = outboxMessageIdGenerator;
             _unitOfWork = unitOfWork;
-            _outboxWriter = outboxWriter;
+            _dateTimeProvider = dateTimeProvider;
+            _requestContext = requestContext;
         }
 
-        public async Task<DeactivatePermissionResponseDto> ExecuteAsync(
+        public async Task<Result<DeactivatePermissionResponseDto>> ExecuteAsync(
             DeactivatePermissionRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (request.PermissionId <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.PermissionId), "PermissionId must be greater than zero.");
+                return Result<DeactivatePermissionResponseDto>.Failure(
+                    AuthorizationErrors.Permission.InvalidPermissionId);
             }
-
-            var permission = await _permissionRepository.GetByIdAsync(
-                request.PermissionId,
-                cancellationToken);
-
-            if (permission is null)
-            {
-                throw new InvalidOperationException($"Permission with id {request.PermissionId} was not found.");
-            }
-
-            if (!permission.IsActive)
-            {
-                return new DeactivatePermissionResponseDto
-                {
-                    PermissionId = request.PermissionId,
-                    IsDeactivated = true,
-                    WasAlreadyDeactivated = true
-                };
-            }
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                var now = DateTime.UtcNow;
+                var permission = await _permissionRepository.GetByIdAsync(
+                    request.PermissionId,
+                    cancellationToken);
+
+                if (permission is null)
+                {
+                    return Result<DeactivatePermissionResponseDto>.Failure(
+                        AuthorizationErrors.Permission.NotFound);
+                }
+
+                if (!permission.IsActive)
+                {
+                    return Result<DeactivatePermissionResponseDto>.Success(
+                        new DeactivatePermissionResponseDto
+                        {
+                            PermissionId = request.PermissionId,
+                            IsDeactivated = true,
+                            WasAlreadyDeactivated = true
+                        });
+                }
+
+                var nowUtc = _dateTimeProvider.UtcNow;
                 var actorUserId = _requestContext.CurrentUserId;
 
                 permission.Deactivate(
-                    now,
+                    nowUtc,
                     actorUserId);
 
-                var updatedPermission = await _permissionRepository.UpdateAsync(
-                    permission,
-                    cancellationToken);
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-                var integrationEvent = new PermissionDeactivatedEvent
+                try
                 {
-                    PermissionId = updatedPermission.PermissionId,
-                    PublicId = updatedPermission.PublicId,
-                    Name = updatedPermission.Name,
-                    ActorUserId = actorUserId,
-                    OccurredAtUtc = now,
-                    CorrelationId = _requestContext.CorrelationId
-                };
+                    var updatedPermission = await _permissionRepository.UpdateAsync(
+                        permission,
+                        cancellationToken);
 
-                await _outboxWriter.WriteAsync(
-                    messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.PermissionDeactivated,
-                    aggregateType: AuthorizationOutboxConstants.AggregateTypes.Permission,
-                    aggregateId: updatedPermission.PermissionId.ToString(),
-                    aggregatePublicId: updatedPermission.PublicId,
-                    aggregateVersion: null,
-                    payload: JsonSerializer.Serialize(integrationEvent),
-                    headers: null,
-                    correlationId: _requestContext.CorrelationId,
-                    initiatorUserId: actorUserId,
-                    occurredAtUtc: now,
-                    cancellationToken: cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-
-                return new DeactivatePermissionResponseDto
+                    return Result<DeactivatePermissionResponseDto>.Success(
+                        new DeactivatePermissionResponseDto
+                        {
+                            PermissionId = updatedPermission.PermissionId,
+                            IsDeactivated = true,
+                            WasAlreadyDeactivated = false
+                        });
+                }
+                catch
                 {
-                    PermissionId = request.PermissionId,
-                    IsDeactivated = true,
-                    WasAlreadyDeactivated = false
-                };
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
             }
-            catch
+            catch (PersistenceException exception)
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
+                return Result<DeactivatePermissionResponseDto>.Failure(
+                    MapPersistenceException(exception));
             }
+            catch (AuthorizationDomainException exception)
+            {
+                return Result<DeactivatePermissionResponseDto>.Failure(
+                    MapDomainException(exception));
+            }
+        }
+
+        private static Error MapDomainException(AuthorizationDomainException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.PERMISSION_INVALID_PERMISSION_ID" =>
+                    AuthorizationErrors.Permission.InvalidPermissionId,
+
+                "AUTHORIZATION.PERMISSION_INVALID_TIMESTAMP" =>
+                    AuthorizationErrors.Permission.InvalidTimestamp,
+
+                "AUTHORIZATION.PERMISSION_STALE_UPDATE_TIME" =>
+                    AuthorizationErrors.Permission.StaleUpdateTime,
+
+                "AUTHORIZATION.SYSTEM_PERMISSION_PROTECTED" =>
+                    AuthorizationErrors.Permission.SystemProtected,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.PERMISSION_NOT_FOUND" =>
+                    AuthorizationErrors.Permission.NotFound,
+
+                "AUTHORIZATION.PERMISSION_EXISTS" =>
+                    AuthorizationErrors.Permission.Exists,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
         }
     }
 }

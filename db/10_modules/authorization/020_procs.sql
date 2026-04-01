@@ -20,13 +20,13 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-USE [CommercialNews];
-GO
-
 IF DB_ID(N'CommercialNews') IS NULL
 BEGIN
     THROW 53201, 'Database [CommercialNews] does not exist. Run bootstrap scripts first.', 1;
 END
+GO
+
+USE [CommercialNews];
 GO
 
 IF SCHEMA_ID(N'authorization') IS NULL
@@ -52,6 +52,23 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    IF NULLIF(LTRIM(RTRIM(@PublicId)), N'') IS NULL
+        THROW 53310, 'Role public id is required.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@Name)), N'') IS NULL
+        THROW 53311, 'Role name is required.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@NameNormalized)), N'') IS NULL
+        THROW 53312, 'Role normalized name is required.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Role]
+        WHERE [NameNormalized] = @NameNormalized
+    )
+        THROW 53313, 'Role name already exists.', 1;
 
     INSERT INTO [authorization].[Role]
     (
@@ -86,11 +103,38 @@ CREATE OR ALTER PROCEDURE [authorization].[Role_Update]
     @NameNormalized    NVARCHAR(100),
     @Description       NVARCHAR(500) = NULL,
     @IsActive          BIT,
-    @UpdatedByUserId   BIGINT = NULL
+    @UpdatedByUserId   BIGINT = NULL,
+    @AffectedRows      INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    IF @RoleId <= 0
+        THROW 53314, 'Role id must be greater than zero.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@Name)), N'') IS NULL
+        THROW 53311, 'Role name is required.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@NameNormalized)), N'') IS NULL
+        THROW 53312, 'Role normalized name is required.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Role]
+        WHERE [RoleId] = @RoleId
+    )
+        THROW 53316, 'Role was not found.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Role]
+        WHERE [NameNormalized] = @NameNormalized
+          AND [RoleId] <> @RoleId
+    )
+        THROW 53313, 'Role name already exists.', 1;
 
     UPDATE [authorization].[Role]
     SET
@@ -101,19 +145,43 @@ BEGIN
         [UpdatedAt] = SYSUTCDATETIME(),
         [UpdatedByUserId] = @UpdatedByUserId
     WHERE [RoleId] = @RoleId;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Role_Delete]
-    @RoleId BIGINT
+    @RoleId BIGINT,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF @RoleId <= 0
+        THROW 53314, 'Role id must be greater than zero.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Role]
+        WHERE [RoleId] = @RoleId
+    )
+        THROW 53316, 'Role was not found.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Role]
+        WHERE [RoleId] = @RoleId
+          AND [IsSystem] = 1
+    )
+        THROW 53315, 'System role is protected.', 1;
+
     DELETE FROM [authorization].[Role]
-    WHERE [RoleId] = @RoleId
-      AND [IsSystem] = 0;
+    WHERE [RoleId] = @RoleId;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -290,6 +358,23 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF NULLIF(LTRIM(RTRIM(@PublicId)), N'') IS NULL
+        THROW 53330, 'Permission public id is required.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@Name)), N'') IS NULL
+        THROW 53331, 'Permission name is required.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@NameNormalized)), N'') IS NULL
+        THROW 53332, 'Permission normalized name is required.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Permission]
+        WHERE [NameNormalized] = @NameNormalized
+    )
+        THROW 53333, 'Permission name already exists.', 1;
+
     INSERT INTO [authorization].[Permission]
     (
         [PublicId],
@@ -326,11 +411,38 @@ CREATE OR ALTER PROCEDURE [authorization].[Permission_Update]
     @Description       NVARCHAR(500) = NULL,
     @Module            NVARCHAR(100) = NULL,
     @IsActive          BIT,
-    @UpdatedByUserId   BIGINT = NULL
+    @UpdatedByUserId   BIGINT = NULL,
+    @AffectedRows      INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    IF @PermissionId <= 0
+        THROW 53334, 'Permission id must be greater than zero.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@Name)), N'') IS NULL
+        THROW 53331, 'Permission name is required.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@NameNormalized)), N'') IS NULL
+        THROW 53332, 'Permission normalized name is required.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Permission]
+        WHERE [PermissionId] = @PermissionId
+    )
+        THROW 53336, 'Permission was not found.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Permission]
+        WHERE [NameNormalized] = @NameNormalized
+          AND [PermissionId] <> @PermissionId
+    )
+        THROW 53333, 'Permission name already exists.', 1;
 
     UPDATE [authorization].[Permission]
     SET
@@ -342,19 +454,43 @@ BEGIN
         [UpdatedAt] = SYSUTCDATETIME(),
         [UpdatedByUserId] = @UpdatedByUserId
     WHERE [PermissionId] = @PermissionId;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Permission_Delete]
-    @PermissionId BIGINT
+    @PermissionId BIGINT,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF @PermissionId <= 0
+        THROW 53334, 'Permission id must be greater than zero.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Permission]
+        WHERE [PermissionId] = @PermissionId
+    )
+        THROW 53336, 'Permission was not found.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[Permission]
+        WHERE [PermissionId] = @PermissionId
+          AND [IsSystem] = 1
+    )
+        THROW 53335, 'System permission is protected.', 1;
+
     DELETE FROM [authorization].[Permission]
-    WHERE [PermissionId] = @PermissionId
-      AND [IsSystem] = 0;
+    WHERE [PermissionId] = @PermissionId;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -535,6 +671,14 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF @UserId <= 0
+        THROW 53352, 'User id must be greater than zero.', 1;
+
+    IF @RoleId <= 0
+        THROW 53353, 'Role id must be greater than zero.', 1;
+
+    SET @UserRoleId = NULL;
+
     SELECT TOP (1)
         @UserRoleId = [UserRoleId]
     FROM [authorization].[UserRole]
@@ -565,11 +709,18 @@ GO
 CREATE OR ALTER PROCEDURE [authorization].[UserRole_Revoke]
     @UserId             BIGINT,
     @RoleId             BIGINT,
-    @RevokedByUserId    BIGINT = NULL
+    @RevokedByUserId    BIGINT = NULL,
+    @AffectedRows       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    IF @UserId <= 0
+        THROW 53352, 'User id must be greater than zero.', 1;
+
+    IF @RoleId <= 0
+        THROW 53353, 'Role id must be greater than zero.', 1;
 
     UPDATE [authorization].[UserRole]
     SET
@@ -578,6 +729,8 @@ BEGIN
     WHERE [UserId] = @UserId
       AND [RoleId] = @RoleId
       AND [RevokedAt] IS NULL;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -605,6 +758,7 @@ BEGIN
     INNER JOIN [authorization].[Role] r
         ON ur.[RoleId] = r.[RoleId]
     WHERE ur.[UserId] = @UserId
+      AND ur.[RevokedAt] IS NULL
     ORDER BY ur.[AssignedAt] DESC, ur.[UserRoleId] DESC;
 END;
 GO
@@ -633,6 +787,7 @@ BEGIN
     INNER JOIN [identity].[UserAccount] ua
         ON ur.[UserId] = ua.[UserId]
     WHERE ur.[RoleId] = @RoleId
+      AND ur.[RevokedAt] IS NULL
     ORDER BY ur.[AssignedAt] DESC, ur.[UserRoleId] DESC;
 END;
 GO
@@ -697,6 +852,14 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF @RoleId <= 0
+        THROW 53372, 'Role id must be greater than zero.', 1;
+
+    IF @PermissionId <= 0
+        THROW 53373, 'Permission id must be greater than zero.', 1;
+
+    SET @RolePermissionId = NULL;
+
     SELECT TOP (1)
         @RolePermissionId = [RolePermissionId]
     FROM [authorization].[RolePermission]
@@ -727,11 +890,18 @@ GO
 CREATE OR ALTER PROCEDURE [authorization].[RolePermission_Revoke]
     @RoleId             BIGINT,
     @PermissionId       BIGINT,
-    @RevokedByUserId    BIGINT = NULL
+    @RevokedByUserId    BIGINT = NULL,
+    @AffectedRows       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    IF @RoleId <= 0
+        THROW 53372, 'Role id must be greater than zero.', 1;
+
+    IF @PermissionId <= 0
+        THROW 53373, 'Permission id must be greater than zero.', 1;
 
     UPDATE [authorization].[RolePermission]
     SET
@@ -740,6 +910,8 @@ BEGIN
     WHERE [RoleId] = @RoleId
       AND [PermissionId] = @PermissionId
       AND [RevokedAt] IS NULL;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -768,6 +940,7 @@ BEGIN
     INNER JOIN [authorization].[Permission] p
         ON rp.[PermissionId] = p.[PermissionId]
     WHERE rp.[RoleId] = @RoleId
+      AND rp.[RevokedAt] IS NULL
     ORDER BY rp.[GrantedAt] DESC, rp.[RolePermissionId] DESC;
 END;
 GO
@@ -796,6 +969,7 @@ BEGIN
     INNER JOIN [authorization].[Role] r
         ON rp.[RoleId] = r.[RoleId]
     WHERE rp.[PermissionId] = @PermissionId
+      AND rp.[RevokedAt] IS NULL
     ORDER BY rp.[GrantedAt] DESC, rp.[RolePermissionId] DESC;
 END;
 GO
