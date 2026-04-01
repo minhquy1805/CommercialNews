@@ -1,12 +1,13 @@
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.RevokeRoleFromUser
 {
     public interface IRevokeRoleFromUserUseCase
     {
-        Task<RevokeRoleFromUserResponseDto> ExecuteAsync(
+        Task<Result<RevokeRoleFromUserResponseDto>> ExecuteAsync(
             RevokeRoleFromUserRequestDto request,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken = default);
     }
 }

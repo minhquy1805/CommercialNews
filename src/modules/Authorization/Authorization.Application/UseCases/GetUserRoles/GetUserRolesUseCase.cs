@@ -1,6 +1,10 @@
-using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.GetUserRoles
 {
@@ -17,45 +21,67 @@ namespace Authorization.Application.UseCases.GetUserRoles
             _userRoleRepository = userRoleRepository;
         }
 
-        public async Task<GetUserRolesResponseDto> ExecuteAsync(
+        public async Task<Result<GetUserRolesResponseDto>> ExecuteAsync(
             GetUserRolesRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (request.UserId <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.UserId), "UserId must be greater than zero.");
+                return Result<GetUserRolesResponseDto>.Failure(
+                    AuthorizationErrors.UserRole.InvalidUserId);
             }
 
-            var userExists = await _authorizationUserLookupService.ExistsAsync(
-                request.UserId,
-                cancellationToken);
-
-            if (!userExists)
+            try
             {
-                throw new InvalidOperationException($"User with id {request.UserId} was not found.");
-            }
+                var userExists = await _authorizationUserLookupService.ExistsAsync(
+                    request.UserId,
+                    cancellationToken);
 
-            var roles = await _userRoleRepository.GetActiveRolesByUserIdAsync(
-                request.UserId,
-                cancellationToken);
-
-            return new GetUserRolesResponseDto
-            {
-                UserId = request.UserId,
-                Roles = roles.Select(x => new UserRoleItemDto
+                if (!userExists)
                 {
-                    RoleId = x.RoleId,
-                    PublicId = x.PublicId,
-                    Name = x.Name,
-                    NameNormalized = x.NameNormalized,
-                    Description = x.Description,
-                    IsSystem = x.IsSystem,
-                    IsActive = x.IsActive,
-                    AssignedAt = x.AssignedAt,
-                    AssignedByUserId = x.AssignedByUserId
-                }).ToList()
+                    return Result<GetUserRolesResponseDto>.Failure(
+                        AuthorizationErrors.User.NotFound);
+                }
+
+                var roles = await _userRoleRepository.GetActiveRolesByUserIdAsync(
+                    request.UserId,
+                    cancellationToken);
+
+                return Result<GetUserRolesResponseDto>.Success(
+                    new GetUserRolesResponseDto
+                    {
+                        UserId = request.UserId,
+                        Roles = roles.Select(x => new UserRoleItemDto
+                        {
+                            RoleId = x.RoleId,
+                            PublicId = x.PublicId,
+                            Name = x.Name,
+                            NameNormalized = x.NameNormalized,
+                            Description = x.Description,
+                            IsSystem = x.IsSystem,
+                            IsActive = x.IsActive,
+                            AssignedAt = x.AssignedAt,
+                            AssignedByUserId = x.AssignedByUserId
+                        }).ToList()
+                    });
+            }
+            catch (PersistenceException exception)
+            {
+                return Result<GetUserRolesResponseDto>.Failure(
+                    MapPersistenceException(exception));
+            }
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.USER_NOT_FOUND" =>
+                    AuthorizationErrors.User.NotFound,
+
+                _ => AuthorizationErrors.ValidationFailed
             };
         }
     }

@@ -1,12 +1,13 @@
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.GetUserEffectivePermissions
 {
     public interface IGetUserEffectivePermissionsUseCase
     {
-        Task<GetUserEffectivePermissionsResponseDto> ExecuteAsync(
+        Task<Result<GetUserEffectivePermissionsResponseDto>> ExecuteAsync(
             GetUserEffectivePermissionsRequestDto request,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken = default);
     }
 }

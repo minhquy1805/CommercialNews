@@ -1,36 +1,58 @@
-using Authorization.Application.Contracts.Ports;
-using Authorization.Infrastructure.Persistence.Sql;
+using Authorization.Application.Ports.Services;
+using Authorization.Infrastructure.Persistence.Exceptions;
+using CommercialNews.BuildingBlocks.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
 namespace Authorization.Infrastructure.Services
 {
     public sealed class AuthorizationUserLookupService : IAuthorizationUserLookupService
     {
-        private readonly AuthorizationSqlConnectionFactory _connectionFactory;
+        private readonly ISqlConnectionFactory _sqlConnectionFactory;
+        private readonly AuthorizationSqlExceptionTranslator _sqlExceptionTranslator;
 
-        public AuthorizationUserLookupService(AuthorizationSqlConnectionFactory connectionFactory)
+        public AuthorizationUserLookupService(
+            ISqlConnectionFactory sqlConnectionFactory,
+            AuthorizationSqlExceptionTranslator sqlExceptionTranslator)
         {
-            _connectionFactory = connectionFactory;
+            _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
+            _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
         }
 
         public async Task<bool> ExistsAsync(
             long userId,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
+            if (userId <= 0)
+            {
+                return false;
+            }
+
             const string sql = """
                 SELECT TOP (1) 1
                 FROM [identity].[UserAccount]
                 WHERE [UserId] = @UserId;
                 """;
 
-            await using var connection = _connectionFactory.CreateConnection();
-            await connection.OpenAsync(cancellationToken);
+            await using SqlConnection connection = _sqlConnectionFactory.CreateConnection();
 
-            await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@UserId", userId);
+            try
+            {
+                await connection.OpenAsync(cancellationToken);
 
-            var result = await command.ExecuteScalarAsync(cancellationToken);
-            return result is not null;
+                await using SqlCommand command = new(sql, connection);
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", System.Data.SqlDbType.BigInt)
+                    {
+                        Value = userId
+                    });
+
+                object? result = await command.ExecuteScalarAsync(cancellationToken);
+                return result is not null && result is not DBNull;
+            }
+            catch (SqlException exception)
+            {
+                throw _sqlExceptionTranslator.Translate(exception);
+            }
         }
     }
 }
