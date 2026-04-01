@@ -1,11 +1,15 @@
-using System.Text.Json;
-using Authorization.Application.Contracts.Events;
-using Authorization.Application.Contracts.Ports;
+using Authorization.Application.Common;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
-using Authorization.Application.Helpers;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
 using Authorization.Domain.Entities;
-using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Authorization.Domain.Exceptions;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Abstractions.Identifiers;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.CreateRole
 {
@@ -14,54 +18,50 @@ namespace Authorization.Application.UseCases.CreateRole
         private readonly IRoleRepository _roleRepository;
         private readonly IRequestContext _requestContext;
         private readonly IPublicIdGenerator _publicIdGenerator;
-        private readonly IOutboxMessageIdGenerator _outboxMessageIdGenerator;
         private readonly IAuthorizationUnitOfWork _unitOfWork;
-        private readonly IOutboxWriter _outboxWriter;
+        private readonly IDateTimeProvider _dateTimeProvider;
 
         public CreateRoleUseCase(
             IRoleRepository roleRepository,
             IRequestContext requestContext,
             IPublicIdGenerator publicIdGenerator,
-            IOutboxMessageIdGenerator outboxMessageIdGenerator,
             IAuthorizationUnitOfWork unitOfWork,
-            IOutboxWriter outboxWriter)
+            IDateTimeProvider dateTimeProvider)
         {
             _roleRepository = roleRepository;
             _requestContext = requestContext;
             _publicIdGenerator = publicIdGenerator;
-            _outboxMessageIdGenerator = outboxMessageIdGenerator;
             _unitOfWork = unitOfWork;
-            _outboxWriter = outboxWriter;
+            _dateTimeProvider = dateTimeProvider;
         }
 
-        public async Task<CreateRoleResponseDto> ExecuteAsync(
+        public async Task<Result<CreateRoleResponseDto>> ExecuteAsync(
             CreateRoleRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (string.IsNullOrWhiteSpace(request.Name))
             {
-                throw new ArgumentException("Role name is required.", nameof(request.Name));
+                return Result<CreateRoleResponseDto>.Failure(
+                    AuthorizationErrors.Role.NameRequired);
             }
-
-            var normalizedName = AuthorizationNameNormalizer.Normalize(request.Name);
-
-            var existingRole = await _roleRepository.GetByNameNormalizedAsync(
-                normalizedName,
-                cancellationToken);
-
-            if (existingRole is not null)
-            {
-                throw new InvalidOperationException(
-                    $"Role with normalized name '{normalizedName}' already exists.");
-            }
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                var now = DateTime.UtcNow;
+                var normalizedName = AuthorizationNameNormalizer.Normalize(request.Name);
+
+                var existingRole = await _roleRepository.GetByNameNormalizedAsync(
+                    normalizedName,
+                    cancellationToken);
+
+                if (existingRole is not null)
+                {
+                    return Result<CreateRoleResponseDto>.Failure(
+                        AuthorizationErrors.Role.Exists);
+                }
+
+                var nowUtc = _dateTimeProvider.UtcNow;
                 var actorUserId = _requestContext.CurrentUserId;
 
                 var role = Role.CreateNew(
@@ -70,60 +70,98 @@ namespace Authorization.Application.UseCases.CreateRole
                     nameNormalized: normalizedName,
                     description: request.Description,
                     isSystem: request.IsSystem,
-                    createdAt: now,
-                    createdByUserId: actorUserId);
+                    nowUtc: nowUtc,
+                    actorUserId: actorUserId);
 
-                var createdRole = await _roleRepository.InsertAsync(
-                    role,
-                    cancellationToken);
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-                var integrationEvent = new RoleCreatedEvent
+                try
                 {
-                    RoleId = createdRole.RoleId,
-                    PublicId = createdRole.PublicId,
-                    Name = createdRole.Name,
-                    NameNormalized = createdRole.NameNormalized,
-                    IsSystem = createdRole.IsSystem,
-                    IsActive = createdRole.IsActive,
-                    ActorUserId = actorUserId,
-                    OccurredAtUtc = now,
-                    CorrelationId = _requestContext.CorrelationId
-                };
+                    var createdRole = await _roleRepository.InsertAsync(
+                        role,
+                        cancellationToken);
 
-                await _outboxWriter.WriteAsync(
-                    messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.RoleCreated,
-                    aggregateType: AuthorizationOutboxConstants.AggregateTypes.Role,
-                    aggregateId: createdRole.RoleId.ToString(),
-                    aggregatePublicId: createdRole.PublicId,
-                    aggregateVersion: null,
-                    payload: JsonSerializer.Serialize(integrationEvent),
-                    headers: null,
-                    correlationId: _requestContext.CorrelationId,
-                    initiatorUserId: actorUserId,
-                    occurredAtUtc: now,
-                    cancellationToken: cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-
-                return new CreateRoleResponseDto
+                    return Result<CreateRoleResponseDto>.Success(
+                        new CreateRoleResponseDto
+                        {
+                            RoleId = createdRole.RoleId,
+                            PublicId = createdRole.PublicId,
+                            Name = createdRole.Name,
+                            NameNormalized = createdRole.NameNormalized,
+                            Description = createdRole.Description,
+                            IsSystem = createdRole.IsSystem,
+                            IsActive = createdRole.IsActive,
+                            CreatedAt = createdRole.CreatedAt,
+                            CreatedByUserId = createdRole.CreatedByUserId
+                        });
+                }
+                catch
                 {
-                    RoleId = createdRole.RoleId,
-                    PublicId = createdRole.PublicId,
-                    Name = createdRole.Name,
-                    NameNormalized = createdRole.NameNormalized,
-                    Description = createdRole.Description,
-                    IsSystem = createdRole.IsSystem,
-                    IsActive = createdRole.IsActive,
-                    CreatedAt = createdRole.CreatedAt,
-                    CreatedByUserId = createdRole.CreatedByUserId
-                };
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
             }
-            catch
+            catch (PersistenceException exception)
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
+                return Result<CreateRoleResponseDto>.Failure(
+                    MapPersistenceException(exception));
             }
+            catch (AuthorizationDomainException exception)
+            {
+                return Result<CreateRoleResponseDto>.Failure(
+                    MapDomainException(exception));
+            }
+        }
+
+        private static Error MapDomainException(AuthorizationDomainException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.ROLE_PUBLIC_ID_REQUIRED" =>
+                    AuthorizationErrors.Role.PublicIdRequired,
+
+                "AUTHORIZATION.ROLE_NAME_REQUIRED" =>
+                    AuthorizationErrors.Role.NameRequired,
+
+                "AUTHORIZATION.ROLE_NAME_TOO_LONG" =>
+                    AuthorizationErrors.Role.NameTooLong,
+
+                "AUTHORIZATION.ROLE_NAME_NORMALIZED_REQUIRED" =>
+                    AuthorizationErrors.Role.NameNormalizedRequired,
+
+                "AUTHORIZATION.ROLE_NAME_NORMALIZED_TOO_LONG" =>
+                    AuthorizationErrors.Role.NameNormalizedTooLong,
+
+                "AUTHORIZATION.ROLE_INVALID_ROLE_ID" =>
+                    AuthorizationErrors.Role.InvalidRoleId,
+
+                "AUTHORIZATION.ROLE_INVALID_TIMESTAMP" =>
+                    AuthorizationErrors.Role.InvalidTimestamp,
+
+                "AUTHORIZATION.ROLE_STALE_UPDATE_TIME" =>
+                    AuthorizationErrors.Role.StaleUpdateTime,
+
+                "AUTHORIZATION.SYSTEM_ROLE_PROTECTED" =>
+                    AuthorizationErrors.Role.SystemProtected,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.ROLE_EXISTS" =>
+                    AuthorizationErrors.Role.Exists,
+
+                "AUTHORIZATION.ROLE_NOT_FOUND" =>
+                    AuthorizationErrors.Role.NotFound,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
         }
     }
 }

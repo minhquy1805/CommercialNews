@@ -1,12 +1,13 @@
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.DeactivatePermission
 {
     public interface IDeactivatePermissionUseCase
     {
-        Task<DeactivatePermissionResponseDto> ExecuteAsync(
+        Task<Result<DeactivatePermissionResponseDto>> ExecuteAsync(
             DeactivatePermissionRequestDto request,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken = default);
     }
 }

@@ -1,176 +1,216 @@
-namespace Authorization.Domain.Entities;
+using Authorization.Domain.Exceptions;
 
-public sealed class Role
+namespace Authorization.Domain.Entities
 {
-    public long RoleId { get; private set; }
-    public string PublicId { get; private set; }
-    public string Name { get; private set; }
-    public string NameNormalized { get; private set; }
-    public string? Description { get; private set; }
-
-    public bool IsSystem { get; private set; }
-    public bool IsActive { get; private set; }
-
-    public DateTime CreatedAt { get; private set; }
-    public DateTime UpdatedAt { get; private set; }
-
-    public long? CreatedByUserId { get; private set; }
-    public long? UpdatedByUserId { get; private set; }
-
-    public Role(
-        long roleId,
-        string publicId,
-        string name,
-        string nameNormalized,
-        string? description,
-        bool isSystem,
-        bool isActive,
-        DateTime createdAt,
-        DateTime updatedAt,
-        long? createdByUserId,
-        long? updatedByUserId)
+    public sealed class Role
     {
-        if (roleId < 0)
+        public long RoleId { get; private set; }
+        public string PublicId { get; private set; } = string.Empty;
+
+        public string Name { get; private set; } = string.Empty;
+        public string NameNormalized { get; private set; } = string.Empty;
+        public string? Description { get; private set; }
+
+        public bool IsSystem { get; private set; }
+        public bool IsActive { get; private set; }
+
+        public DateTime CreatedAt { get; private set; }
+        public DateTime UpdatedAt { get; private set; }
+
+        public long? CreatedByUserId { get; private set; }
+        public long? UpdatedByUserId { get; private set; }
+
+        private Role()
         {
-            throw new ArgumentOutOfRangeException(nameof(roleId), "RoleId cannot be negative.");
         }
 
-        if (string.IsNullOrWhiteSpace(publicId))
+        public static Role CreateNew(
+            string publicId,
+            string name,
+            string nameNormalized,
+            string? description,
+            bool isSystem,
+            DateTime nowUtc,
+            long? actorUserId)
         {
-            throw new ArgumentException("PublicId is required.", nameof(publicId));
+            ValidatePublicId(publicId);
+            ValidateName(name);
+            ValidateNameNormalized(nameNormalized);
+
+            return new Role
+            {
+                PublicId = publicId.Trim(),
+                Name = name.Trim(),
+                NameNormalized = nameNormalized.Trim(),
+                Description = NormalizeOptional(description),
+                IsSystem = isSystem,
+                IsActive = true,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+                CreatedByUserId = actorUserId,
+                UpdatedByUserId = actorUserId
+            };
         }
 
-        if (string.IsNullOrWhiteSpace(name))
+        public static Role Rehydrate(
+            long roleId,
+            string publicId,
+            string name,
+            string nameNormalized,
+            string? description,
+            bool isSystem,
+            bool isActive,
+            DateTime createdAt,
+            DateTime updatedAt,
+            long? createdByUserId,
+            long? updatedByUserId)
         {
-            throw new ArgumentException("Role name is required.", nameof(name));
+            if (roleId <= 0)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_INVALID_ROLE_ID",
+                    "Role id must be greater than zero.");
+            }
+
+            ValidatePublicId(publicId);
+            ValidateName(name);
+            ValidateNameNormalized(nameNormalized);
+
+            if (updatedAt < createdAt)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_INVALID_TIMESTAMP",
+                    "UpdatedAt cannot be earlier than CreatedAt.");
+            }
+
+            return new Role
+            {
+                RoleId = roleId,
+                PublicId = publicId.Trim(),
+                Name = name.Trim(),
+                NameNormalized = nameNormalized.Trim(),
+                Description = NormalizeOptional(description),
+                IsSystem = isSystem,
+                IsActive = isActive,
+                CreatedAt = createdAt,
+                UpdatedAt = updatedAt,
+                CreatedByUserId = createdByUserId,
+                UpdatedByUserId = updatedByUserId
+            };
         }
 
-        if (string.IsNullOrWhiteSpace(nameNormalized))
+        public void UpdateMetadata(
+            string name,
+            string nameNormalized,
+            string? description,
+            DateTime nowUtc,
+            long? actorUserId)
         {
-            throw new ArgumentException("Normalized role name is required.", nameof(nameNormalized));
+            ValidateName(name);
+            ValidateNameNormalized(nameNormalized);
+            EnsureValidUpdateTime(nowUtc);
+
+            Name = name.Trim();
+            NameNormalized = nameNormalized.Trim();
+            Description = NormalizeOptional(description);
+            UpdatedAt = nowUtc;
+            UpdatedByUserId = actorUserId;
         }
 
-        if (updatedAt < createdAt)
+        public void Activate(DateTime nowUtc, long? actorUserId)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.");
+            EnsureValidUpdateTime(nowUtc);
+
+            IsActive = true;
+            UpdatedAt = nowUtc;
+            UpdatedByUserId = actorUserId;
         }
 
-        RoleId = roleId;
-        PublicId = publicId.Trim();
-        Name = name.Trim();
-        NameNormalized = nameNormalized.Trim();
-        Description = NormalizeOptional(description);
-
-        IsSystem = isSystem;
-        IsActive = isActive;
-
-        CreatedAt = createdAt;
-        UpdatedAt = updatedAt;
-
-        CreatedByUserId = createdByUserId;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void Rename(
-        string newName,
-        string newNameNormalized,
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (string.IsNullOrWhiteSpace(newName))
+        public void Deactivate(DateTime nowUtc, long? actorUserId)
         {
-            throw new ArgumentException("Role name is required.", nameof(newName));
+            if (IsSystem)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.SYSTEM_ROLE_PROTECTED",
+                    "System role cannot be deactivated.");
+            }
+
+            EnsureValidUpdateTime(nowUtc);
+
+            IsActive = false;
+            UpdatedAt = nowUtc;
+            UpdatedByUserId = actorUserId;
         }
 
-        if (string.IsNullOrWhiteSpace(newNameNormalized))
+        private void EnsureValidUpdateTime(DateTime nowUtc)
         {
-            throw new ArgumentException("Normalized role name is required.", nameof(newNameNormalized));
+            if (nowUtc < CreatedAt)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_INVALID_TIMESTAMP",
+                    "UpdatedAt cannot be earlier than CreatedAt.");
+            }
+
+            if (nowUtc < UpdatedAt)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_STALE_UPDATE_TIME",
+                    "UpdatedAt cannot be earlier than the current UpdatedAt.");
+            }
         }
 
-        if (updatedAt < CreatedAt)
+        private static void ValidatePublicId(string publicId)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
+            if (string.IsNullOrWhiteSpace(publicId))
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_PUBLIC_ID_REQUIRED",
+                    "Role public id is required.");
+            }
         }
 
-        Name = newName.Trim();
-        NameNormalized = newNameNormalized.Trim();
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void ChangeDescription(
-        string? description,
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (updatedAt < CreatedAt)
+        private static void ValidateName(string name)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_NAME_REQUIRED",
+                    "Role name is required.");
+            }
+
+            if (name.Trim().Length > 100)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_NAME_TOO_LONG",
+                    "Role name must not exceed 100 characters.");
+            }
         }
 
-        Description = NormalizeOptional(description);
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void Activate(
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (updatedAt < CreatedAt)
+        private static void ValidateNameNormalized(string nameNormalized)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
+            if (string.IsNullOrWhiteSpace(nameNormalized))
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_NAME_NORMALIZED_REQUIRED",
+                    "Normalized role name is required.");
+            }
+
+            if (nameNormalized.Trim().Length > 100)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.ROLE_NAME_NORMALIZED_TOO_LONG",
+                    "Normalized role name must not exceed 100 characters.");
+            }
         }
 
-        IsActive = true;
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void Deactivate(
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (IsSystem)
+        private static string? NormalizeOptional(string? value)
         {
-            throw new InvalidOperationException("System role cannot be deactivated.");
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            return value.Trim();
         }
-
-        if (updatedAt < CreatedAt)
-        {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
-        }
-
-        IsActive = false;
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public static Role CreateNew(
-        string publicId,
-        string name,
-        string nameNormalized,
-        string? description,
-        bool isSystem,
-        DateTime createdAt,
-        long? createdByUserId)
-    {
-        return new Role(
-            roleId: 0,
-            publicId: publicId,
-            name: name,
-            nameNormalized: nameNormalized,
-            description: description,
-            isSystem: isSystem,
-            isActive: true,
-            createdAt: createdAt,
-            updatedAt: createdAt,
-            createdByUserId: createdByUserId,
-            updatedByUserId: createdByUserId);
-    }
-
-    private static string? NormalizeOptional(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 }

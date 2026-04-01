@@ -1,6 +1,9 @@
-using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.GetPermissionRoles
 {
@@ -17,45 +20,67 @@ namespace Authorization.Application.UseCases.GetPermissionRoles
             _rolePermissionRepository = rolePermissionRepository;
         }
 
-        public async Task<GetPermissionRolesResponseDto> ExecuteAsync(
+        public async Task<Result<GetPermissionRolesResponseDto>> ExecuteAsync(
             GetPermissionRolesRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (request.PermissionId <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.PermissionId), "PermissionId must be greater than zero.");
+                return Result<GetPermissionRolesResponseDto>.Failure(
+                    AuthorizationErrors.Permission.InvalidPermissionId);
             }
 
-            var permission = await _permissionRepository.GetByIdAsync(
-                request.PermissionId,
-                cancellationToken);
-
-            if (permission is null)
+            try
             {
-                throw new InvalidOperationException($"Permission with id {request.PermissionId} was not found.");
-            }
+                var permission = await _permissionRepository.GetByIdAsync(
+                    request.PermissionId,
+                    cancellationToken);
 
-            var roles = await _rolePermissionRepository.GetActiveRolesByPermissionIdAsync(
-                request.PermissionId,
-                cancellationToken);
-
-            return new GetPermissionRolesResponseDto
-            {
-                PermissionId = request.PermissionId,
-                Roles = roles.Select(x => new PermissionRoleItemDto
+                if (permission is null)
                 {
-                    RoleId = x.RoleId,
-                    PublicId = x.PublicId,
-                    Name = x.Name,
-                    NameNormalized = x.NameNormalized,
-                    Description = x.Description,
-                    IsSystem = x.IsSystem,
-                    IsActive = x.IsActive,
-                    GrantedAt = x.GrantedAt,
-                    GrantedByUserId = x.GrantedByUserId
-                }).ToList()
+                    return Result<GetPermissionRolesResponseDto>.Failure(
+                        AuthorizationErrors.Permission.NotFound);
+                }
+
+                var roles = await _rolePermissionRepository.GetActiveRolesByPermissionIdAsync(
+                    request.PermissionId,
+                    cancellationToken);
+
+                return Result<GetPermissionRolesResponseDto>.Success(
+                    new GetPermissionRolesResponseDto
+                    {
+                        PermissionId = request.PermissionId,
+                        Roles = roles.Select(x => new PermissionRoleItemDto
+                        {
+                            RoleId = x.RoleId,
+                            PublicId = x.PublicId,
+                            Name = x.Name,
+                            NameNormalized = x.NameNormalized,
+                            Description = x.Description,
+                            IsSystem = x.IsSystem,
+                            IsActive = x.IsActive,
+                            GrantedAt = x.GrantedAt,
+                            GrantedByUserId = x.GrantedByUserId
+                        }).ToList()
+                    });
+            }
+            catch (PersistenceException exception)
+            {
+                return Result<GetPermissionRolesResponseDto>.Failure(
+                    MapPersistenceException(exception));
+            }
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.PERMISSION_NOT_FOUND" =>
+                    AuthorizationErrors.Permission.NotFound,
+
+                _ => AuthorizationErrors.ValidationFailed
             };
         }
     }
