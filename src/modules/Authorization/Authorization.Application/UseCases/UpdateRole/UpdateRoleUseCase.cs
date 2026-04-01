@@ -1,10 +1,13 @@
-using System.Text.Json;
-using Authorization.Application.Contracts.Events;
-using Authorization.Application.Contracts.Ports;
+using Authorization.Application.Common;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
-using Authorization.Application.Helpers;
-using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
+using Authorization.Domain.Exceptions;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.UpdateRole
 {
@@ -12,112 +15,163 @@ namespace Authorization.Application.UseCases.UpdateRole
     {
         private readonly IRoleRepository _roleRepository;
         private readonly IRequestContext _requestContext;
-        private readonly IOutboxMessageIdGenerator _outboxMessageIdGenerator;
         private readonly IAuthorizationUnitOfWork _unitOfWork;
-        private readonly IOutboxWriter _outboxWriter;
+        private readonly IDateTimeProvider _dateTimeProvider;
 
         public UpdateRoleUseCase(
             IRoleRepository roleRepository,
             IRequestContext requestContext,
-            IOutboxMessageIdGenerator outboxMessageIdGenerator,
             IAuthorizationUnitOfWork unitOfWork,
-            IOutboxWriter outboxWriter)
+            IDateTimeProvider dateTimeProvider)
         {
             _roleRepository = roleRepository;
             _requestContext = requestContext;
-            _outboxMessageIdGenerator = outboxMessageIdGenerator;
             _unitOfWork = unitOfWork;
-            _outboxWriter = outboxWriter;
+            _dateTimeProvider = dateTimeProvider;
         }
 
-        public async Task<UpdateRoleResponseDto> ExecuteAsync(
+        public async Task<Result<UpdateRoleResponseDto>> ExecuteAsync(
             UpdateRoleRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (request.RoleId <= 0)
-                throw new ArgumentOutOfRangeException(nameof(request.RoleId), "RoleId must be greater than zero.");
-
-            if (string.IsNullOrWhiteSpace(request.Name))
-                throw new ArgumentException("Role name is required.", nameof(request.Name));
-
-            var role = await _roleRepository.GetByIdAsync(request.RoleId, cancellationToken);
-            if (role is null)
-                throw new InvalidOperationException($"Role with id {request.RoleId} was not found.");
-
-            var normalizedName = AuthorizationNameNormalizer.Normalize(request.Name);
-
-            var existingRole = await _roleRepository.GetByNameNormalizedAsync(
-                normalizedName,
-                cancellationToken);
-
-            if (existingRole is not null && existingRole.RoleId != role.RoleId)
             {
-                throw new InvalidOperationException(
-                    $"Another role with normalized name '{normalizedName}' already exists.");
+                return Result<UpdateRoleResponseDto>.Failure(
+                    AuthorizationErrors.Role.InvalidRoleId);
             }
 
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(request.Name))
+            {
+                return Result<UpdateRoleResponseDto>.Failure(
+                    AuthorizationErrors.Role.NameRequired);
+            }
 
             try
             {
-                var now = DateTime.UtcNow;
+                var role = await _roleRepository.GetByIdAsync(
+                    request.RoleId,
+                    cancellationToken);
+
+                if (role is null)
+                {
+                    return Result<UpdateRoleResponseDto>.Failure(
+                        AuthorizationErrors.Role.NotFound);
+                }
+
+                var normalizedName = AuthorizationNameNormalizer.Normalize(request.Name);
+
+                var existingRole = await _roleRepository.GetByNameNormalizedAsync(
+                    normalizedName,
+                    cancellationToken);
+
+                if (existingRole is not null &&
+                    existingRole.RoleId != role.RoleId)
+                {
+                    return Result<UpdateRoleResponseDto>.Failure(
+                        AuthorizationErrors.Role.Exists);
+                }
+
+                var nowUtc = _dateTimeProvider.UtcNow;
                 var actorUserId = _requestContext.CurrentUserId;
 
-                role.Rename(request.Name.Trim(), normalizedName, now, actorUserId);
-                role.ChangeDescription(request.Description, now, actorUserId);
+                role.UpdateMetadata(
+                    name: request.Name.Trim(),
+                    nameNormalized: normalizedName,
+                    description: request.Description,
+                    nowUtc: nowUtc,
+                    actorUserId: actorUserId);
 
-                var updatedRole = await _roleRepository.UpdateAsync(role, cancellationToken);
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-                var integrationEvent = new RoleUpdatedEvent
+                try
                 {
-                    RoleId = updatedRole.RoleId,
-                    PublicId = updatedRole.PublicId,
-                    Name = updatedRole.Name,
-                    NameNormalized = updatedRole.NameNormalized,
-                    Description = updatedRole.Description,
-                    IsSystem = updatedRole.IsSystem,
-                    IsActive = updatedRole.IsActive,
-                    ActorUserId = actorUserId,
-                    OccurredAtUtc = now,
-                    CorrelationId = _requestContext.CorrelationId
-                };
+                    var updatedRole = await _roleRepository.UpdateAsync(
+                        role,
+                        cancellationToken);
 
-                await _outboxWriter.WriteAsync(
-                    messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.RoleUpdated,
-                    aggregateType: AuthorizationOutboxConstants.AggregateTypes.Role,
-                    aggregateId: updatedRole.RoleId.ToString(),
-                    aggregatePublicId: updatedRole.PublicId,
-                    aggregateVersion: null,
-                    payload: JsonSerializer.Serialize(integrationEvent),
-                    headers: null,
-                    correlationId: _requestContext.CorrelationId,
-                    initiatorUserId: actorUserId,
-                    occurredAtUtc: now,
-                    cancellationToken: cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-
-                return new UpdateRoleResponseDto
+                    return Result<UpdateRoleResponseDto>.Success(
+                        new UpdateRoleResponseDto
+                        {
+                            RoleId = updatedRole.RoleId,
+                            PublicId = updatedRole.PublicId,
+                            Name = updatedRole.Name,
+                            NameNormalized = updatedRole.NameNormalized,
+                            Description = updatedRole.Description,
+                            IsSystem = updatedRole.IsSystem,
+                            IsActive = updatedRole.IsActive,
+                            UpdatedAt = updatedRole.UpdatedAt,
+                            UpdatedByUserId = updatedRole.UpdatedByUserId
+                        });
+                }
+                catch
                 {
-                    RoleId = updatedRole.RoleId,
-                    PublicId = updatedRole.PublicId,
-                    Name = updatedRole.Name,
-                    NameNormalized = updatedRole.NameNormalized,
-                    Description = updatedRole.Description,
-                    IsSystem = updatedRole.IsSystem,
-                    IsActive = updatedRole.IsActive,
-                    UpdatedAt = updatedRole.UpdatedAt,
-                    UpdatedByUserId = updatedRole.UpdatedByUserId
-                };
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
             }
-            catch
+            catch (PersistenceException exception)
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
+                return Result<UpdateRoleResponseDto>.Failure(
+                    MapPersistenceException(exception));
             }
+            catch (AuthorizationDomainException exception)
+            {
+                return Result<UpdateRoleResponseDto>.Failure(
+                    MapDomainException(exception));
+            }
+        }
+
+        private static Error MapDomainException(AuthorizationDomainException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.ROLE_PUBLIC_ID_REQUIRED" =>
+                    AuthorizationErrors.Role.PublicIdRequired,
+
+                "AUTHORIZATION.ROLE_NAME_REQUIRED" =>
+                    AuthorizationErrors.Role.NameRequired,
+
+                "AUTHORIZATION.ROLE_NAME_TOO_LONG" =>
+                    AuthorizationErrors.Role.NameTooLong,
+
+                "AUTHORIZATION.ROLE_NAME_NORMALIZED_REQUIRED" =>
+                    AuthorizationErrors.Role.NameNormalizedRequired,
+
+                "AUTHORIZATION.ROLE_NAME_NORMALIZED_TOO_LONG" =>
+                    AuthorizationErrors.Role.NameNormalizedTooLong,
+
+                "AUTHORIZATION.ROLE_INVALID_ROLE_ID" =>
+                    AuthorizationErrors.Role.InvalidRoleId,
+
+                "AUTHORIZATION.ROLE_INVALID_TIMESTAMP" =>
+                    AuthorizationErrors.Role.InvalidTimestamp,
+
+                "AUTHORIZATION.ROLE_STALE_UPDATE_TIME" =>
+                    AuthorizationErrors.Role.StaleUpdateTime,
+
+                "AUTHORIZATION.SYSTEM_ROLE_PROTECTED" =>
+                    AuthorizationErrors.Role.SystemProtected,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.ROLE_EXISTS" =>
+                    AuthorizationErrors.Role.Exists,
+
+                "AUTHORIZATION.ROLE_NOT_FOUND" =>
+                    AuthorizationErrors.Role.NotFound,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
         }
     }
 }

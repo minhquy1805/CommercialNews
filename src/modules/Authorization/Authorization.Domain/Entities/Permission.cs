@@ -1,196 +1,241 @@
-namespace Authorization.Domain.Entities;
+using Authorization.Domain.Exceptions;
 
-public sealed class Permission
+namespace Authorization.Domain.Entities
 {
-    public long PermissionId { get; private set; }
-    public string PublicId { get; private set; }
-    public string Name { get; private set; }
-    public string NameNormalized { get; private set; }
-    public string? Description { get; private set; }
-    public string? Module { get; private set; }
-
-    public bool IsSystem { get; private set; }
-    public bool IsActive { get; private set; }
-
-    public DateTime CreatedAt { get; private set; }
-    public DateTime UpdatedAt { get; private set; }
-
-    public long? CreatedByUserId { get; private set; }
-    public long? UpdatedByUserId { get; private set; }
-
-    public Permission(
-        long permissionId,
-        string publicId,
-        string name,
-        string nameNormalized,
-        string? description,
-        string? module,
-        bool isSystem,
-        bool isActive,
-        DateTime createdAt,
-        DateTime updatedAt,
-        long? createdByUserId,
-        long? updatedByUserId)
+    public sealed class Permission
     {
-        if (permissionId < 0)
+        public long PermissionId { get; private set; }
+        public string PublicId { get; private set; } = string.Empty;
+
+        public string Name { get; private set; } = string.Empty;
+        public string NameNormalized { get; private set; } = string.Empty;
+        public string? Description { get; private set; }
+        public string? Module { get; private set; }
+
+        public bool IsSystem { get; private set; }
+        public bool IsActive { get; private set; }
+
+        public DateTime CreatedAt { get; private set; }
+        public DateTime UpdatedAt { get; private set; }
+
+        public long? CreatedByUserId { get; private set; }
+        public long? UpdatedByUserId { get; private set; }
+
+        private Permission()
         {
-            throw new ArgumentOutOfRangeException(nameof(permissionId), "PermissionId cannot be negative.");
         }
 
-        if (string.IsNullOrWhiteSpace(publicId))
+        public static Permission CreateNew(
+            string publicId,
+            string name,
+            string nameNormalized,
+            string? description,
+            string? module,
+            bool isSystem,
+            DateTime nowUtc,
+            long? actorUserId)
         {
-            throw new ArgumentException("PublicId is required.", nameof(publicId));
+            ValidatePublicId(publicId);
+            ValidateName(name);
+            ValidateNameNormalized(nameNormalized);
+            ValidateModule(module);
+
+            return new Permission
+            {
+                PublicId = publicId.Trim(),
+                Name = name.Trim(),
+                NameNormalized = nameNormalized.Trim(),
+                Description = NormalizeOptional(description),
+                Module = NormalizeOptional(module),
+                IsSystem = isSystem,
+                IsActive = true,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+                CreatedByUserId = actorUserId,
+                UpdatedByUserId = actorUserId
+            };
         }
 
-        if (string.IsNullOrWhiteSpace(name))
+        public static Permission Rehydrate(
+            long permissionId,
+            string publicId,
+            string name,
+            string nameNormalized,
+            string? description,
+            string? module,
+            bool isSystem,
+            bool isActive,
+            DateTime createdAt,
+            DateTime updatedAt,
+            long? createdByUserId,
+            long? updatedByUserId)
         {
-            throw new ArgumentException("Permission name is required.", nameof(name));
+            if (permissionId <= 0)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_INVALID_PERMISSION_ID",
+                    "Permission id must be greater than zero.");
+            }
+
+            ValidatePublicId(publicId);
+            ValidateName(name);
+            ValidateNameNormalized(nameNormalized);
+            ValidateModule(module);
+
+            if (updatedAt < createdAt)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_INVALID_TIMESTAMP",
+                    "UpdatedAt cannot be earlier than CreatedAt.");
+            }
+
+            return new Permission
+            {
+                PermissionId = permissionId,
+                PublicId = publicId.Trim(),
+                Name = name.Trim(),
+                NameNormalized = nameNormalized.Trim(),
+                Description = NormalizeOptional(description),
+                Module = NormalizeOptional(module),
+                IsSystem = isSystem,
+                IsActive = isActive,
+                CreatedAt = createdAt,
+                UpdatedAt = updatedAt,
+                CreatedByUserId = createdByUserId,
+                UpdatedByUserId = updatedByUserId
+            };
         }
 
-        if (string.IsNullOrWhiteSpace(nameNormalized))
+        public void UpdateMetadata(
+            string name,
+            string nameNormalized,
+            string? description,
+            string? module,
+            DateTime nowUtc,
+            long? actorUserId)
         {
-            throw new ArgumentException("Normalized permission name is required.", nameof(nameNormalized));
+            ValidateName(name);
+            ValidateNameNormalized(nameNormalized);
+            ValidateModule(module);
+            EnsureValidUpdateTime(nowUtc);
+
+            Name = name.Trim();
+            NameNormalized = nameNormalized.Trim();
+            Description = NormalizeOptional(description);
+            Module = NormalizeOptional(module);
+            UpdatedAt = nowUtc;
+            UpdatedByUserId = actorUserId;
         }
 
-        if (updatedAt < createdAt)
+        public void Activate(DateTime nowUtc, long? actorUserId)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.");
+            EnsureValidUpdateTime(nowUtc);
+
+            IsActive = true;
+            UpdatedAt = nowUtc;
+            UpdatedByUserId = actorUserId;
         }
 
-        PermissionId = permissionId;
-        PublicId = publicId.Trim();
-        Name = name.Trim();
-        NameNormalized = nameNormalized.Trim();
-        Description = NormalizeOptional(description);
-        Module = NormalizeOptional(module);
-
-        IsSystem = isSystem;
-        IsActive = isActive;
-
-        CreatedAt = createdAt;
-        UpdatedAt = updatedAt;
-
-        CreatedByUserId = createdByUserId;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void Rename(
-        string newName,
-        string newNameNormalized,
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (string.IsNullOrWhiteSpace(newName))
+        public void Deactivate(DateTime nowUtc, long? actorUserId)
         {
-            throw new ArgumentException("Permission name is required.", nameof(newName));
+            if (IsSystem)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.SYSTEM_PERMISSION_PROTECTED",
+                    "System permission cannot be deactivated.");
+            }
+
+            EnsureValidUpdateTime(nowUtc);
+
+            IsActive = false;
+            UpdatedAt = nowUtc;
+            UpdatedByUserId = actorUserId;
         }
 
-        if (string.IsNullOrWhiteSpace(newNameNormalized))
+        private void EnsureValidUpdateTime(DateTime nowUtc)
         {
-            throw new ArgumentException("Normalized permission name is required.", nameof(newNameNormalized));
+            if (nowUtc < CreatedAt)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_INVALID_TIMESTAMP",
+                    "UpdatedAt cannot be earlier than CreatedAt.");
+            }
+
+            if (nowUtc < UpdatedAt)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_STALE_UPDATE_TIME",
+                    "UpdatedAt cannot be earlier than the current UpdatedAt.");
+            }
         }
 
-        if (updatedAt < CreatedAt)
+        private static void ValidatePublicId(string publicId)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
+            if (string.IsNullOrWhiteSpace(publicId))
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_PUBLIC_ID_REQUIRED",
+                    "Permission public id is required.");
+            }
         }
 
-        Name = newName.Trim();
-        NameNormalized = newNameNormalized.Trim();
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void ChangeDescription(
-        string? description,
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (updatedAt < CreatedAt)
+        private static void ValidateName(string name)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_NAME_REQUIRED",
+                    "Permission name is required.");
+            }
+
+            if (name.Trim().Length > 150)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_NAME_TOO_LONG",
+                    "Permission name must not exceed 150 characters.");
+            }
         }
 
-        Description = NormalizeOptional(description);
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void ChangeModule(
-        string? module,
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (updatedAt < CreatedAt)
+        private static void ValidateNameNormalized(string nameNormalized)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
+            if (string.IsNullOrWhiteSpace(nameNormalized))
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_NAME_NORMALIZED_REQUIRED",
+                    "Normalized permission name is required.");
+            }
+
+            if (nameNormalized.Trim().Length > 150)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_NAME_NORMALIZED_TOO_LONG",
+                    "Normalized permission name must not exceed 150 characters.");
+            }
         }
 
-        Module = NormalizeOptional(module);
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void Activate(
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (updatedAt < CreatedAt)
+        private static void ValidateModule(string? module)
         {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
+            if (module is null)
+            {
+                return;
+            }
+
+            if (module.Trim().Length > 100)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.PERMISSION_MODULE_TOO_LONG",
+                    "Permission module must not exceed 100 characters.");
+            }
         }
 
-        IsActive = true;
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public void Deactivate(
-        DateTime updatedAt,
-        long? updatedByUserId)
-    {
-        if (IsSystem)
+        private static string? NormalizeOptional(string? value)
         {
-            throw new InvalidOperationException("System permission cannot be deactivated.");
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            return value.Trim();
         }
-
-        if (updatedAt < CreatedAt)
-        {
-            throw new ArgumentException("UpdatedAt cannot be earlier than CreatedAt.", nameof(updatedAt));
-        }
-
-        IsActive = false;
-        UpdatedAt = updatedAt;
-        UpdatedByUserId = updatedByUserId;
-    }
-
-    public static Permission CreateNew(
-        string publicId,
-        string name,
-        string nameNormalized,
-        string? description,
-        string? module,
-        bool isSystem,
-        DateTime createdAt,
-        long? createdByUserId)
-    {
-        return new Permission(
-            permissionId: 0,
-            publicId: publicId,
-            name: name,
-            nameNormalized: nameNormalized,
-            description: description,
-            module: module,
-            isSystem: isSystem,
-            isActive: true,
-            createdAt: createdAt,
-            updatedAt: createdAt,
-            createdByUserId: createdByUserId,
-            updatedByUserId: createdByUserId);
-    }
-
-    private static string? NormalizeOptional(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 }

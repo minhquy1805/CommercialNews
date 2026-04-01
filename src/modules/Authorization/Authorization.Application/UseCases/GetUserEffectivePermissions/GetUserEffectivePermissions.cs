@@ -1,6 +1,10 @@
-using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.GetUserEffectivePermissions
 {
@@ -17,44 +21,66 @@ namespace Authorization.Application.UseCases.GetUserEffectivePermissions
             _authorizationPermissionQueryRepository = authorizationPermissionQueryRepository;
         }
 
-        public async Task<GetUserEffectivePermissionsResponseDto> ExecuteAsync(
+        public async Task<Result<GetUserEffectivePermissionsResponseDto>> ExecuteAsync(
             GetUserEffectivePermissionsRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (request.UserId <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.UserId), "UserId must be greater than zero.");
+                return Result<GetUserEffectivePermissionsResponseDto>.Failure(
+                    AuthorizationErrors.UserRole.InvalidUserId);
             }
 
-            var userExists = await _authorizationUserLookupService.ExistsAsync(
-                request.UserId,
-                cancellationToken);
-
-            if (!userExists)
+            try
             {
-                throw new InvalidOperationException($"User with id {request.UserId} was not found.");
-            }
+                var userExists = await _authorizationUserLookupService.ExistsAsync(
+                    request.UserId,
+                    cancellationToken);
 
-            var permissions = await _authorizationPermissionQueryRepository.GetEffectivePermissionsByUserIdAsync(
-                request.UserId,
-                cancellationToken);
-
-            return new GetUserEffectivePermissionsResponseDto
-            {
-                UserId = request.UserId,
-                Permissions = permissions.Select(x => new EffectivePermissionItemDto
+                if (!userExists)
                 {
-                    PermissionId = x.PermissionId,
-                    PublicId = x.PublicId,
-                    Name = x.Name,
-                    NameNormalized = x.NameNormalized,
-                    Description = x.Description,
-                    Module = x.Module,
-                    IsSystem = x.IsSystem,
-                    IsActive = x.IsActive
-                }).ToList()
+                    return Result<GetUserEffectivePermissionsResponseDto>.Failure(
+                        AuthorizationErrors.User.NotFound);
+                }
+
+                var permissions = await _authorizationPermissionQueryRepository.GetEffectivePermissionsByUserIdAsync(
+                    request.UserId,
+                    cancellationToken);
+
+                return Result<GetUserEffectivePermissionsResponseDto>.Success(
+                    new GetUserEffectivePermissionsResponseDto
+                    {
+                        UserId = request.UserId,
+                        Permissions = permissions.Select(x => new EffectivePermissionItemDto
+                        {
+                            PermissionId = x.PermissionId,
+                            PublicId = x.PublicId,
+                            Name = x.Name,
+                            NameNormalized = x.NameNormalized,
+                            Description = x.Description,
+                            Module = x.Module,
+                            IsSystem = x.IsSystem,
+                            IsActive = x.IsActive
+                        }).ToList()
+                    });
+            }
+            catch (PersistenceException exception)
+            {
+                return Result<GetUserEffectivePermissionsResponseDto>.Failure(
+                    MapPersistenceException(exception));
+            }
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.USER_NOT_FOUND" =>
+                    AuthorizationErrors.User.NotFound,
+
+                _ => AuthorizationErrors.ValidationFailed
             };
         }
     }

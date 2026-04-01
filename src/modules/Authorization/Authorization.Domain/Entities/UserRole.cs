@@ -1,103 +1,143 @@
-namespace Authorization.Domain.Entities;
+using Authorization.Domain.Exceptions;
 
-public sealed class UserRole
+namespace Authorization.Domain.Entities
 {
-    public long UserRoleId { get; private set; }
-    public long UserId { get; private set; }
-    public long RoleId { get; private set; }
-
-    public DateTime AssignedAt { get; private set; }
-    public long? AssignedByUserId { get; private set; }
-
-    public DateTime? RevokedAt { get; private set; }
-    public long? RevokedByUserId { get; private set; }
-
-    public UserRole(
-        long userRoleId,
-        long userId,
-        long roleId,
-        DateTime assignedAt,
-        long? assignedByUserId,
-        DateTime? revokedAt,
-        long? revokedByUserId)
+    public sealed class UserRole
     {
-        if (userRoleId < 0)
+        public long UserRoleId { get; private set; }
+        public long UserId { get; private set; }
+        public long RoleId { get; private set; }
+
+        public DateTime AssignedAt { get; private set; }
+        public long? AssignedByUserId { get; private set; }
+
+        public DateTime? RevokedAt { get; private set; }
+        public long? RevokedByUserId { get; private set; }
+
+        private UserRole()
         {
-            throw new ArgumentOutOfRangeException(nameof(userRoleId), "UserRoleId cannot be negative.");
         }
 
-        if (userId <= 0)
+        public static UserRole CreateNew(
+            long userId,
+            long roleId,
+            DateTime assignedAt,
+            long? assignedByUserId)
         {
-            throw new ArgumentOutOfRangeException(nameof(userId), "UserId must be greater than zero.");
+            ValidateUserId(userId);
+            ValidateRoleId(roleId);
+
+            return new UserRole
+            {
+                UserId = userId,
+                RoleId = roleId,
+                AssignedAt = assignedAt,
+                AssignedByUserId = assignedByUserId,
+                RevokedAt = null,
+                RevokedByUserId = null
+            };
         }
 
-        if (roleId <= 0)
+        public static UserRole Rehydrate(
+            long userRoleId,
+            long userId,
+            long roleId,
+            DateTime assignedAt,
+            long? assignedByUserId,
+            DateTime? revokedAt,
+            long? revokedByUserId)
         {
-            throw new ArgumentOutOfRangeException(nameof(roleId), "RoleId must be greater than zero.");
+            if (userRoleId <= 0)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.USER_ROLE_INVALID_USER_ROLE_ID",
+                    "User role id must be greater than zero.");
+            }
+
+            ValidateUserId(userId);
+            ValidateRoleId(roleId);
+            ValidateRevocationState(assignedAt, revokedAt, revokedByUserId);
+
+            return new UserRole
+            {
+                UserRoleId = userRoleId,
+                UserId = userId,
+                RoleId = roleId,
+                AssignedAt = assignedAt,
+                AssignedByUserId = assignedByUserId,
+                RevokedAt = revokedAt,
+                RevokedByUserId = revokedByUserId
+            };
         }
 
-        if (revokedAt.HasValue && revokedAt.Value < assignedAt)
+        public bool IsActiveAt(DateTime pointInTimeUtc)
         {
-            throw new ArgumentException("RevokedAt cannot be earlier than AssignedAt.");
+            return RevokedAt is null || RevokedAt > pointInTimeUtc;
         }
 
-        if (!revokedAt.HasValue && revokedByUserId.HasValue)
+        public bool IsCurrentlyActive()
         {
-            throw new ArgumentException("RevokedByUserId cannot be set when RevokedAt is null.");
+            return RevokedAt is null;
         }
 
-        UserRoleId = userRoleId;
-        UserId = userId;
-        RoleId = roleId;
-
-        AssignedAt = assignedAt;
-        AssignedByUserId = assignedByUserId;
-
-        RevokedAt = revokedAt;
-        RevokedByUserId = revokedByUserId;
-    }
-
-    public static UserRole CreateNew(
-        long userId,
-        long roleId,
-        DateTime assignedAt,
-        long? assignedByUserId)
-    {
-        return new UserRole(
-            userRoleId: 0,
-            userId: userId,
-            roleId: roleId,
-            assignedAt: assignedAt,
-            assignedByUserId: assignedByUserId,
-            revokedAt: null,
-            revokedByUserId: null);
-    }
-
-    public bool IsActiveAt(DateTime pointInTimeUtc)
-    {
-        return !RevokedAt.HasValue || RevokedAt.Value > pointInTimeUtc;
-    }
-
-    public bool IsCurrentlyActive()
-    {
-        return RevokedAt is null;
-    }
-
-    public void Revoke(
-        DateTime revokedAt,
-        long? revokedByUserId)
-    {
-        if (RevokedAt.HasValue)
+        public void Revoke(DateTime revokedAt, long? revokedByUserId)
         {
-            throw new InvalidOperationException("User role assignment is already revoked.");
+            if (RevokedAt.HasValue)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.USER_ROLE_ALREADY_REVOKED",
+                    "User role assignment is already revoked.");
+            }
+
+            if (revokedAt < AssignedAt)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.USER_ROLE_INVALID_REVOKE_TIME",
+                    "RevokedAt cannot be earlier than AssignedAt.");
+            }
+
+            RevokedAt = revokedAt;
+            RevokedByUserId = revokedByUserId;
         }
 
-        if (revokedAt < AssignedAt)
+        private static void ValidateUserId(long userId)
         {
-            throw new ArgumentException("RevokedAt cannot be earlier than AssignedAt.", nameof(revokedAt));
+            if (userId <= 0)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.USER_ROLE_INVALID_USER_ID",
+                    "User id must be greater than zero.");
+            }
         }
 
-        RevokedAt = revokedAt;
-        RevokedByUserId = revokedByUserId;
+        private static void ValidateRoleId(long roleId)
+        {
+            if (roleId <= 0)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.USER_ROLE_INVALID_ROLE_ID",
+                    "Role id must be greater than zero.");
+            }
+        }
+
+        private static void ValidateRevocationState(
+            DateTime assignedAt,
+            DateTime? revokedAt,
+            long? revokedByUserId)
+        {
+            if (revokedAt.HasValue && revokedAt.Value < assignedAt)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.USER_ROLE_INVALID_REVOKE_TIME",
+                    "RevokedAt cannot be earlier than AssignedAt.");
+            }
+
+            if (!revokedAt.HasValue && revokedByUserId.HasValue)
+            {
+                throw new AuthorizationDomainException(
+                    "AUTHORIZATION.USER_ROLE_INVALID_REVOKE_STATE",
+                    "RevokedByUserId cannot be set when RevokedAt is null.");
+            }
+        }
     }
 }

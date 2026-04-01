@@ -1,10 +1,13 @@
-using System.Text.Json;
-using Authorization.Application.Contracts.Events;
-using Authorization.Application.Contracts.Ports;
+using Authorization.Application.Common;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
-using Authorization.Application.Helpers;
-using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
+using Authorization.Domain.Exceptions;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.UpdatePermission
 {
@@ -12,138 +15,168 @@ namespace Authorization.Application.UseCases.UpdatePermission
     {
         private readonly IPermissionRepository _permissionRepository;
         private readonly IRequestContext _requestContext;
-        private readonly IOutboxMessageIdGenerator _outboxMessageIdGenerator;
         private readonly IAuthorizationUnitOfWork _unitOfWork;
-        private readonly IOutboxWriter _outboxWriter;
+        private readonly IDateTimeProvider _dateTimeProvider;
 
         public UpdatePermissionUseCase(
             IPermissionRepository permissionRepository,
             IRequestContext requestContext,
-            IOutboxMessageIdGenerator outboxMessageIdGenerator,
             IAuthorizationUnitOfWork unitOfWork,
-            IOutboxWriter outboxWriter)
+            IDateTimeProvider dateTimeProvider)
         {
             _permissionRepository = permissionRepository;
             _requestContext = requestContext;
-            _outboxMessageIdGenerator = outboxMessageIdGenerator;
             _unitOfWork = unitOfWork;
-            _outboxWriter = outboxWriter;
+            _dateTimeProvider = dateTimeProvider;
         }
 
-        public async Task<UpdatePermissionResponseDto> ExecuteAsync(
+        public async Task<Result<UpdatePermissionResponseDto>> ExecuteAsync(
             UpdatePermissionRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (request.PermissionId <= 0)
             {
-                throw new ArgumentOutOfRangeException(nameof(request.PermissionId), "PermissionId must be greater than zero.");
+                return Result<UpdatePermissionResponseDto>.Failure(
+                    AuthorizationErrors.Permission.InvalidPermissionId);
             }
 
             if (string.IsNullOrWhiteSpace(request.Name))
             {
-                throw new ArgumentException("Permission name is required.", nameof(request.Name));
+                return Result<UpdatePermissionResponseDto>.Failure(
+                    AuthorizationErrors.Permission.NameRequired);
             }
-
-            var permission = await _permissionRepository.GetByIdAsync(
-                request.PermissionId,
-                cancellationToken);
-
-            if (permission is null)
-            {
-                throw new InvalidOperationException($"Permission with id {request.PermissionId} was not found.");
-            }
-
-            var normalizedName = AuthorizationNameNormalizer.Normalize(request.Name);
-
-            var existingPermission = await _permissionRepository.GetByNameNormalizedAsync(
-                normalizedName,
-                cancellationToken);
-
-            if (existingPermission is not null && existingPermission.PermissionId != permission.PermissionId)
-            {
-                throw new InvalidOperationException(
-                    $"Another permission with normalized name '{normalizedName}' already exists.");
-            }
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                var now = DateTime.UtcNow;
-                var actorUserId = _requestContext.CurrentUserId;
-
-                permission.Rename(
-                    request.Name.Trim(),
-                    normalizedName,
-                    now,
-                    actorUserId);
-
-                permission.ChangeDescription(
-                    request.Description,
-                    now,
-                    actorUserId);
-
-                permission.ChangeModule(
-                    request.Module,
-                    now,
-                    actorUserId);
-
-                var updatedPermission = await _permissionRepository.UpdateAsync(
-                    permission,
+                var permission = await _permissionRepository.GetByIdAsync(
+                    request.PermissionId,
                     cancellationToken);
 
-                var integrationEvent = new PermissionUpdatedEvent
+                if (permission is null)
                 {
-                    PermissionId = updatedPermission.PermissionId,
-                    PublicId = updatedPermission.PublicId,
-                    Name = updatedPermission.Name,
-                    NameNormalized = updatedPermission.NameNormalized,
-                    Description = updatedPermission.Description,
-                    Module = updatedPermission.Module,
-                    IsSystem = updatedPermission.IsSystem,
-                    IsActive = updatedPermission.IsActive,
-                    ActorUserId = actorUserId,
-                    OccurredAtUtc = now,
-                    CorrelationId = _requestContext.CorrelationId
-                };
+                    return Result<UpdatePermissionResponseDto>.Failure(
+                        AuthorizationErrors.Permission.NotFound);
+                }
 
-                await _outboxWriter.WriteAsync(
-                    messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.PermissionUpdated,
-                    aggregateType: AuthorizationOutboxConstants.AggregateTypes.Permission,
-                    aggregateId: updatedPermission.PermissionId.ToString(),
-                    aggregatePublicId: updatedPermission.PublicId,
-                    aggregateVersion: null,
-                    payload: JsonSerializer.Serialize(integrationEvent),
-                    headers: null,
-                    correlationId: _requestContext.CorrelationId,
-                    initiatorUserId: actorUserId,
-                    occurredAtUtc: now,
-                    cancellationToken: cancellationToken);
+                var normalizedName = AuthorizationNameNormalizer.Normalize(request.Name);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
+                var existingPermission = await _permissionRepository.GetByNameNormalizedAsync(
+                    normalizedName,
+                    cancellationToken);
 
-                return new UpdatePermissionResponseDto
+                if (existingPermission is not null &&
+                    existingPermission.PermissionId != permission.PermissionId)
                 {
-                    PermissionId = updatedPermission.PermissionId,
-                    PublicId = updatedPermission.PublicId,
-                    Name = updatedPermission.Name,
-                    NameNormalized = updatedPermission.NameNormalized,
-                    Description = updatedPermission.Description,
-                    Module = updatedPermission.Module,
-                    IsSystem = updatedPermission.IsSystem,
-                    IsActive = updatedPermission.IsActive,
-                    UpdatedAt = updatedPermission.UpdatedAt,
-                    UpdatedByUserId = updatedPermission.UpdatedByUserId
-                };
+                    return Result<UpdatePermissionResponseDto>.Failure(
+                        AuthorizationErrors.Permission.Exists);
+                }
+
+                var nowUtc = _dateTimeProvider.UtcNow;
+                var actorUserId = _requestContext.CurrentUserId;
+
+                permission.UpdateMetadata(
+                    name: request.Name.Trim(),
+                    nameNormalized: normalizedName,
+                    description: request.Description,
+                    module: request.Module,
+                    nowUtc: nowUtc,
+                    actorUserId: actorUserId);
+
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    var updatedPermission = await _permissionRepository.UpdateAsync(
+                        permission,
+                        cancellationToken);
+
+                    await _unitOfWork.CommitAsync(cancellationToken);
+
+                    return Result<UpdatePermissionResponseDto>.Success(
+                        new UpdatePermissionResponseDto
+                        {
+                            PermissionId = updatedPermission.PermissionId,
+                            PublicId = updatedPermission.PublicId,
+                            Name = updatedPermission.Name,
+                            NameNormalized = updatedPermission.NameNormalized,
+                            Description = updatedPermission.Description,
+                            Module = updatedPermission.Module,
+                            IsSystem = updatedPermission.IsSystem,
+                            IsActive = updatedPermission.IsActive,
+                            UpdatedAt = updatedPermission.UpdatedAt,
+                            UpdatedByUserId = updatedPermission.UpdatedByUserId
+                        });
+                }
+                catch
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
             }
-            catch
+            catch (PersistenceException exception)
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
+                return Result<UpdatePermissionResponseDto>.Failure(
+                    MapPersistenceException(exception));
             }
+            catch (AuthorizationDomainException exception)
+            {
+                return Result<UpdatePermissionResponseDto>.Failure(
+                    MapDomainException(exception));
+            }
+        }
+
+        private static Error MapDomainException(AuthorizationDomainException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.PERMISSION_PUBLIC_ID_REQUIRED" =>
+                    AuthorizationErrors.Permission.PublicIdRequired,
+
+                "AUTHORIZATION.PERMISSION_NAME_REQUIRED" =>
+                    AuthorizationErrors.Permission.NameRequired,
+
+                "AUTHORIZATION.PERMISSION_NAME_TOO_LONG" =>
+                    AuthorizationErrors.Permission.NameTooLong,
+
+                "AUTHORIZATION.PERMISSION_NAME_NORMALIZED_REQUIRED" =>
+                    AuthorizationErrors.Permission.NameNormalizedRequired,
+
+                "AUTHORIZATION.PERMISSION_NAME_NORMALIZED_TOO_LONG" =>
+                    AuthorizationErrors.Permission.NameNormalizedTooLong,
+
+                "AUTHORIZATION.PERMISSION_MODULE_TOO_LONG" =>
+                    AuthorizationErrors.Permission.ModuleTooLong,
+
+                "AUTHORIZATION.PERMISSION_INVALID_PERMISSION_ID" =>
+                    AuthorizationErrors.Permission.InvalidPermissionId,
+
+                "AUTHORIZATION.PERMISSION_INVALID_TIMESTAMP" =>
+                    AuthorizationErrors.Permission.InvalidTimestamp,
+
+                "AUTHORIZATION.PERMISSION_STALE_UPDATE_TIME" =>
+                    AuthorizationErrors.Permission.StaleUpdateTime,
+
+                "AUTHORIZATION.SYSTEM_PERMISSION_PROTECTED" =>
+                    AuthorizationErrors.Permission.SystemProtected,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.PERMISSION_EXISTS" =>
+                    AuthorizationErrors.Permission.Exists,
+
+                "AUTHORIZATION.PERMISSION_NOT_FOUND" =>
+                    AuthorizationErrors.Permission.NotFound,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
         }
     }
 }

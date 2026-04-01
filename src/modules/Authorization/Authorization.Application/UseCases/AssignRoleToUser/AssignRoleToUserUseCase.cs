@@ -1,10 +1,14 @@
-using System.Text.Json;
-using Authorization.Application.Contracts.Events;
-using Authorization.Application.Contracts.Ports;
 using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
+using Authorization.Application.Errors;
+using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
 using Authorization.Domain.Entities;
-using CommercialNews.BuildingBlocks.Messaging.Outbox;
+using Authorization.Domain.Exceptions;
+using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.Abstractions.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.Results;
 
 namespace Authorization.Application.UseCases.AssignRoleToUser
 {
@@ -13,132 +17,178 @@ namespace Authorization.Application.UseCases.AssignRoleToUser
         private readonly IAuthorizationUserLookupService _authorizationUserLookupService;
         private readonly IRoleRepository _roleRepository;
         private readonly IUserRoleRepository _userRoleRepository;
-        private readonly IRequestContext _requestContext;
         private readonly IAuthorizationUnitOfWork _unitOfWork;
-        private readonly IOutboxWriter _outboxWriter;
-        private readonly IOutboxMessageIdGenerator _outboxMessageIdGenerator;
+        private readonly IDateTimeProvider _dateTimeProvider;
+        private readonly IRequestContext _requestContext;
 
         public AssignRoleToUserUseCase(
             IAuthorizationUserLookupService authorizationUserLookupService,
             IRoleRepository roleRepository,
             IUserRoleRepository userRoleRepository,
-            IRequestContext requestContext,
             IAuthorizationUnitOfWork unitOfWork,
-            IOutboxWriter outboxWriter,
-            IOutboxMessageIdGenerator outboxMessageIdGenerator)
+            IDateTimeProvider dateTimeProvider,
+            IRequestContext requestContext)
         {
             _authorizationUserLookupService = authorizationUserLookupService;
             _roleRepository = roleRepository;
             _userRoleRepository = userRoleRepository;
-            _requestContext = requestContext;
             _unitOfWork = unitOfWork;
-            _outboxWriter = outboxWriter;
-            _outboxMessageIdGenerator = outboxMessageIdGenerator;
+            _dateTimeProvider = dateTimeProvider;
+            _requestContext = requestContext;
         }
 
-        public async Task<AssignRoleToUserResponseDto> ExecuteAsync(
+        public async Task<Result<AssignRoleToUserResponseDto>> ExecuteAsync(
             AssignRoleToUserRequestDto request,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(request);
 
             if (request.UserId <= 0)
-                throw new ArgumentOutOfRangeException(nameof(request.UserId), "UserId must be greater than zero.");
-
-            if (request.RoleId <= 0)
-                throw new ArgumentOutOfRangeException(nameof(request.RoleId), "RoleId must be greater than zero.");
-
-            var userExists = await _authorizationUserLookupService.ExistsAsync(
-                request.UserId,
-                cancellationToken);
-
-            if (!userExists)
-                throw new InvalidOperationException($"User with id {request.UserId} was not found.");
-
-            var role = await _roleRepository.GetByIdAsync(
-                request.RoleId,
-                cancellationToken);
-
-            if (role is null)
-                throw new InvalidOperationException($"Role with id {request.RoleId} was not found.");
-
-            if (!role.IsActive)
-                throw new InvalidOperationException($"Role with id {request.RoleId} is inactive.");
-
-            var existingAssignment = await _userRoleRepository.GetActiveByUserIdAndRoleIdAsync(
-                request.UserId,
-                request.RoleId,
-                cancellationToken);
-
-            if (existingAssignment is not null)
             {
-                return new AssignRoleToUserResponseDto
-                {
-                    UserRoleId = existingAssignment.UserRoleId,
-                    UserId = existingAssignment.UserId,
-                    RoleId = existingAssignment.RoleId,
-                    IsAssigned = true,
-                    WasAlreadyAssigned = true
-                };
+                return Result<AssignRoleToUserResponseDto>.Failure(
+                    AuthorizationErrors.UserRole.InvalidUserId);
             }
 
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            if (request.RoleId <= 0)
+            {
+                return Result<AssignRoleToUserResponseDto>.Failure(
+                    AuthorizationErrors.UserRole.InvalidRoleId);
+            }
 
             try
             {
-                var now = DateTime.UtcNow;
+                var userExists = await _authorizationUserLookupService.ExistsAsync(
+                    request.UserId,
+                    cancellationToken);
+
+                if (!userExists)
+                {
+                    return Result<AssignRoleToUserResponseDto>.Failure(
+                        AuthorizationErrors.User.NotFound);
+                }
+
+                var role = await _roleRepository.GetByIdAsync(
+                    request.RoleId,
+                    cancellationToken);
+
+                if (role is null)
+                {
+                    return Result<AssignRoleToUserResponseDto>.Failure(
+                        AuthorizationErrors.Role.NotFound);
+                }
+
+                if (!role.IsActive)
+                {
+                    return Result<AssignRoleToUserResponseDto>.Failure(
+                        AuthorizationErrors.Role.Inactive);
+                }
+
+                var existingAssignment = await _userRoleRepository.GetActiveByUserIdAndRoleIdAsync(
+                    request.UserId,
+                    request.RoleId,
+                    cancellationToken);
+
+                if (existingAssignment is not null)
+                {
+                    return Result<AssignRoleToUserResponseDto>.Success(
+                        new AssignRoleToUserResponseDto
+                        {
+                            UserRoleId = existingAssignment.UserRoleId,
+                            UserId = existingAssignment.UserId,
+                            RoleId = existingAssignment.RoleId,
+                            IsAssigned = true,
+                            WasAlreadyAssigned = true
+                        });
+                }
+
+                var nowUtc = _dateTimeProvider.UtcNow;
                 var actorUserId = _requestContext.CurrentUserId;
 
                 var newAssignment = UserRole.CreateNew(
                     userId: request.UserId,
                     roleId: request.RoleId,
-                    assignedAt: now,
+                    assignedAt: nowUtc,
                     assignedByUserId: actorUserId);
 
-                var createdAssignment = await _userRoleRepository.InsertAsync(
-                    newAssignment,
-                    cancellationToken);
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-                var integrationEvent = new UserRoleAssignedEvent
+                try
                 {
-                    UserRoleId = createdAssignment.UserRoleId,
-                    TargetUserId = createdAssignment.UserId,
-                    RoleId = createdAssignment.RoleId,
-                    ActorUserId = actorUserId,
-                    OccurredAtUtc = now,
-                    CorrelationId = _requestContext.CorrelationId
-                };
+                    var createdAssignment = await _userRoleRepository.InsertAsync(
+                        newAssignment,
+                        cancellationToken);
 
-                await _outboxWriter.WriteAsync(
-                    messageId: _outboxMessageIdGenerator.NewId(),
-                    eventType: AuthorizationOutboxConstants.EventTypes.UserRoleAssigned,
-                    aggregateType: AuthorizationOutboxConstants.AggregateTypes.UserRole,
-                    aggregateId: createdAssignment.UserRoleId.ToString(),
-                    aggregatePublicId: null,
-                    aggregateVersion: null,
-                    payload: JsonSerializer.Serialize(integrationEvent),
-                    headers: null,
-                    correlationId: _requestContext.CorrelationId,
-                    initiatorUserId: actorUserId,
-                    occurredAtUtc: now,
-                    cancellationToken: cancellationToken);
+                    await _unitOfWork.CommitAsync(cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-
-                return new AssignRoleToUserResponseDto
+                    return Result<AssignRoleToUserResponseDto>.Success(
+                        new AssignRoleToUserResponseDto
+                        {
+                            UserRoleId = createdAssignment.UserRoleId,
+                            UserId = createdAssignment.UserId,
+                            RoleId = createdAssignment.RoleId,
+                            IsAssigned = true,
+                            WasAlreadyAssigned = false
+                        });
+                }
+                catch
                 {
-                    UserRoleId = createdAssignment.UserRoleId,
-                    UserId = createdAssignment.UserId,
-                    RoleId = createdAssignment.RoleId,
-                    IsAssigned = true,
-                    WasAlreadyAssigned = false
-                };
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    throw;
+                }
             }
-            catch
+            catch (PersistenceException exception)
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
+                return Result<AssignRoleToUserResponseDto>.Failure(
+                    MapPersistenceException(exception));
             }
+            catch (AuthorizationDomainException exception)
+            {
+                return Result<AssignRoleToUserResponseDto>.Failure(
+                    MapDomainException(exception));
+            }
+        }
+
+        private static Error MapDomainException(AuthorizationDomainException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.USER_ROLE_INVALID_USER_ROLE_ID" =>
+                    AuthorizationErrors.UserRole.InvalidUserRoleId,
+
+                "AUTHORIZATION.USER_ROLE_INVALID_USER_ID" =>
+                    AuthorizationErrors.UserRole.InvalidUserId,
+
+                "AUTHORIZATION.USER_ROLE_INVALID_ROLE_ID" =>
+                    AuthorizationErrors.UserRole.InvalidRoleId,
+
+                "AUTHORIZATION.USER_ROLE_INVALID_REVOKE_TIME" =>
+                    AuthorizationErrors.UserRole.InvalidRevokeTime,
+
+                "AUTHORIZATION.USER_ROLE_INVALID_REVOKE_STATE" =>
+                    AuthorizationErrors.UserRole.InvalidRevokeState,
+
+                "AUTHORIZATION.USER_ROLE_ALREADY_REVOKED" =>
+                    AuthorizationErrors.UserRole.AlreadyRevoked,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
+        }
+
+        private static Error MapPersistenceException(PersistenceException exception)
+        {
+            return exception.Code switch
+            {
+                "AUTHORIZATION.USER_NOT_FOUND" =>
+                    AuthorizationErrors.User.NotFound,
+
+                "AUTHORIZATION.ROLE_NOT_FOUND" =>
+                    AuthorizationErrors.Role.NotFound,
+
+                "AUTHORIZATION.USER_ROLE_ALREADY_ASSIGNED" =>
+                    AuthorizationErrors.UserRole.AlreadyAssigned,
+
+                _ => AuthorizationErrors.ValidationFailed
+            };
         }
     }
 }
