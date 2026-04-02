@@ -39,6 +39,14 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Content.Application", "src\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Content.Infrastructure", "src\modules\Content\Content.Infrastructure\Content.Infrastructure.csproj", "{8F4A1702-3E65-43B0-AB2D-08F396CF7F56}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Media", "Media", "{0412C843-9AAC-4A3D-9DCB-75050E79E617}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Media.Domain", "src\modules\Media\Media.Domain\Media.Domain.csproj", "{614BD796-6AD7-4822-BDFA-E44BE7E97970}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Media.Application", "src\modules\Media\Media.Application\Media.Application.csproj", "{1870D06A-6240-4965-83A4-A9AA42012DB6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Media.Infrastructure", "src\modules\Media\Media.Infrastructure\Media.Infrastructure.csproj", "{DD2DA139-DF90-42CE-AB8B-DC7A0111C611}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -93,6 +101,18 @@ Global
 		{8F4A1702-3E65-43B0-AB2D-08F396CF7F56}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8F4A1702-3E65-43B0-AB2D-08F396CF7F56}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8F4A1702-3E65-43B0-AB2D-08F396CF7F56}.Release|Any CPU.Build.0 = Release|Any CPU
+		{614BD796-6AD7-4822-BDFA-E44BE7E97970}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{614BD796-6AD7-4822-BDFA-E44BE7E97970}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{614BD796-6AD7-4822-BDFA-E44BE7E97970}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{614BD796-6AD7-4822-BDFA-E44BE7E97970}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1870D06A-6240-4965-83A4-A9AA42012DB6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1870D06A-6240-4965-83A4-A9AA42012DB6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1870D06A-6240-4965-83A4-A9AA42012DB6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1870D06A-6240-4965-83A4-A9AA42012DB6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DD2DA139-DF90-42CE-AB8B-DC7A0111C611}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DD2DA139-DF90-42CE-AB8B-DC7A0111C611}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DD2DA139-DF90-42CE-AB8B-DC7A0111C611}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DD2DA139-DF90-42CE-AB8B-DC7A0111C611}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -111,6 +131,10 @@ Global
 		{7ED69AD8-5006-4380-B447-BFF05A0B618D} = {34869C52-955F-476B-AEBC-AB40B677B06B}
 		{5068104F-EEAC-446B-A787-AAF172B4212E} = {34869C52-955F-476B-AEBC-AB40B677B06B}
 		{8F4A1702-3E65-43B0-AB2D-08F396CF7F56} = {34869C52-955F-476B-AEBC-AB40B677B06B}
+		{0412C843-9AAC-4A3D-9DCB-75050E79E617} = {59981BE2-6486-41B3-AD1B-4C47D05BEBEF}
+		{614BD796-6AD7-4822-BDFA-E44BE7E97970} = {0412C843-9AAC-4A3D-9DCB-75050E79E617}
+		{1870D06A-6240-4965-83A4-A9AA42012DB6} = {0412C843-9AAC-4A3D-9DCB-75050E79E617}
+		{DD2DA139-DF90-42CE-AB8B-DC7A0111C611} = {0412C843-9AAC-4A3D-9DCB-75050E79E617}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {906BCB76-58DD-435C-B1B8-67D9499CE8A7}
