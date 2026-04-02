@@ -3,14 +3,26 @@
 // File: explanation/architecture/arc42/diagrams/erd/media-v1.dbml
 //
 // Purpose
-// - Manage media assets (metadata) + attach to articles with ordering & primary.
-// - Keep reusable file metadata in MediaAsset.
-// - Keep per-article concerns (ordering/primary/caption) in ArticleMedia.
+// - Manage media asset metadata.
+// - Attach media to articles with deterministic ordering and primary selection.
+// - Keep Media truth authoritative for:
+//   + asset metadata
+//   + attachment membership
+//   + primary selection
+//   + attachment ordering
+//   + soft delete / restore state
 //
-// Notes
-// - Primary-per-article is best enforced via SQL Server filtered unique index:
-//   UNIQUE (ArticleId) WHERE IsPrimary=1 AND IsDeleted=0
-// - Cross-module refs to Content/Identity are stubs for ERD readability only.
+// Design posture
+// - V1 truth-first OLTP model.
+// - Derived delivery (CDN/cache/variants) is not authoritative truth.
+// - Cross-module refs to Content/Identity are shown as ERD stubs only.
+// - Primary-per-article is enforced in SQL Server by filtered unique index:
+//   UNIQUE (ArticleId) WHERE IsPrimary = 1 AND IsDeleted = 0
+//
+// Recommended policy
+// - (ArticleId, MediaId) is a stable unique relationship.
+// - Re-attaching a soft-deleted relation should restore the existing row,
+//   not create a new duplicate relationship row.
 // =====================================================
 
 Enum MediaTypeEnum {
@@ -21,13 +33,14 @@ Enum MediaTypeEnum {
 
 Table MediaAsset {
   MediaId bigint [pk, increment]
+  PublicId varchar(26) [not null, unique] // ULID/public identifier
 
-  StorageProvider varchar(30) [not null, default: "local"] // local/gcs/s3...
-  Url nvarchar(800) [not null]          // public serving URL
-  StoragePath nvarchar(800) [null]      // internal key/path
+  StorageProvider varchar(30) [not null, default: "local"] // local/gcs/s3/...
+  Url nvarchar(800) [not null]            // public serving URL or stable delivery URL
+  StoragePath nvarchar(800) [null]        // object key / internal storage path
   FileName nvarchar(255) [null]
 
-  MediaType varchar(20) [not null]      // Image/Video/File (CHECK recommended)
+  MediaType varchar(20) [not null]        // CHECK IN ('Image','Video','File')
   MimeType nvarchar(100) [null]
 
   FileSizeBytes bigint [null]
@@ -35,33 +48,39 @@ Table MediaAsset {
   Height int [null]
   DurationSeconds int [null]
 
-  AltText nvarchar(300) [null]          // default alt
-  ContentHash varbinary(32) [null]      // dedup/integrity hook (V2 choice)
+  AltText nvarchar(300) [null]            // default alt text
+  MetadataJson nvarchar(max) [null]       // sanitized metadata only
+  ContentHash varbinary(32) [null]        // optional dedup/integrity hook
+
+  Version int [not null, default: 1]      // app-managed revision/version for stale-write protection
 
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  CreatedBy bigint [null]               // Identity.UserAccount (external)
+  CreatedBy bigint [null]                 // external: Identity.UserAccount
 
   UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedBy bigint [null]                 // external: Identity.UserAccount
 
   IsDeleted bit [not null, default: 0]
   DeletedAt datetime2(3) [null]
-  DeletedBy bigint [null]               // Identity.UserAccount (external)
-  RestoreUntil datetime2(3) [null]      // retention window hook
+  DeletedBy bigint [null]                 // external: Identity.UserAccount
+  RestoreUntil datetime2(3) [null]        // retention window hook
 
   Indexes {
     (IsDeleted, CreatedAt) [name: "IX_MediaAsset_IsDeleted_CreatedAt"]
-    (MimeType)             [name: "IX_MediaAsset_MimeType"]
-    (ContentHash)          [name: "IX_MediaAsset_ContentHash"] // make UNIQUE only if enforcing dedup (V2)
+    (MediaType, IsDeleted, CreatedAt) [name: "IX_MediaAsset_MediaType_IsDeleted_CreatedAt"]
+    (MimeType) [name: "IX_MediaAsset_MimeType"]
+    (ContentHash) [name: "IX_MediaAsset_ContentHash"]
+    (CreatedBy, CreatedAt) [name: "IX_MediaAsset_CreatedBy_CreatedAt"]
   }
 
-  Note: "Metadata only. Binary bytes live in object storage. Soft delete preferred."
+  Note: "Authoritative metadata only. Binary bytes live outside SQL. Soft delete preferred in V1."
 }
 
 Table ArticleMedia {
   ArticleMediaId bigint [pk, increment]
 
-  ArticleId bigint [not null] // cross-module ref -> Content.Article
-  MediaId bigint [not null]   // FK -> MediaAsset
+  ArticleId bigint [not null]             // external: Content.Article
+  MediaId bigint [not null]               // FK -> MediaAsset
 
   SortOrder int [not null, default: 0]
   IsPrimary bit [not null, default: 0]
@@ -69,35 +88,43 @@ Table ArticleMedia {
   AltTextOverride nvarchar(300) [null]
   Caption nvarchar(300) [null]
 
+  Version int [not null, default: 1]      // app-managed revision/version for stale-write protection
+
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  CreatedBy bigint [null] // Identity.UserAccount (external)
+  CreatedBy bigint [null]                 // external: Identity.UserAccount
+
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedBy bigint [null]                 // external: Identity.UserAccount
 
   IsDeleted bit [not null, default: 0]
   DeletedAt datetime2(3) [null]
+  DeletedBy bigint [null]                 // external: Identity.UserAccount
 
   Indexes {
-    // No duplicate attachment per article
+    // Stable unique relationship: re-attach should restore existing row, not create a new duplicate row
     (ArticleId, MediaId) [unique, name: "UQ_ArticleMedia_ArticleId_MediaId"]
 
-    // Stable ordering per article
-    (ArticleId, SortOrder) [name: "IX_ArticleMedia_ArticleId_SortOrder"]
+    // Hot path: list active attachments for one article in stable order
+    (ArticleId, IsDeleted, SortOrder) [name: "IX_ArticleMedia_ArticleId_IsDeleted_SortOrder"]
 
-    // Fast cover lookup (filtered unique is enforced in SQL Server)
-    (ArticleId, IsPrimary) [name: "IX_ArticleMedia_ArticleId_IsPrimary"]
+    // Fast primary lookup support (filtered unique enforced later in SQL Server)
+    (ArticleId, IsDeleted, IsPrimary) [name: "IX_ArticleMedia_ArticleId_IsDeleted_IsPrimary"]
 
-    // Ops: find all articles using a media asset
-    (MediaId, ArticleId) [name: "IX_ArticleMedia_MediaId_ArticleId"]
+    // Reverse usage lookup: which articles use this media
+    (MediaId, IsDeleted, ArticleId) [name: "IX_ArticleMedia_MediaId_IsDeleted_ArticleId"]
   }
 
-  Note: "Per-article attachment concerns: ordering, primary selection, per-article alt/caption."
+  Note: "Per-article attachment truth: membership, ordering, primary, caption/alt override, soft delete/restore."
 }
 
-// ----------- (V2) Variants -----------
+// --------------------------
+// V2 hook only — not required for V1 truth
+// --------------------------
 Table MediaVariant {
   VariantId bigint [pk, increment]
-  MediaId bigint [not null] // FK -> MediaAsset
+  MediaId bigint [not null]               // FK -> MediaAsset
 
-  VariantType varchar(30) [not null] // thumb/medium/large/webp...
+  VariantType varchar(30) [not null]      // thumb/medium/large/webp/...
   Url nvarchar(800) [not null]
 
   Width int [null]
@@ -110,10 +137,10 @@ Table MediaVariant {
     (MediaId, VariantType) [unique, name: "UQ_MediaVariant_MediaId_VariantType"]
   }
 
-  Note: "Optional V2. Store processed/derived versions."
+  Note: "Derived/processed media output. Optional V2+ only. Not authoritative truth for attachment/order/primary."
 }
 
-// ---------- External stubs (optional, for ERD readability) ----------
+// ---------- External stubs for ERD readability ----------
 Table ContentArticle {
   ArticleId bigint [pk]
   Note: "EXTERNAL (Content module). Stub for ERD readability only."
@@ -128,15 +155,24 @@ Table IdentityUserAccount {
 Ref: ArticleMedia.MediaId > MediaAsset.MediaId
 Ref: MediaVariant.MediaId > MediaAsset.MediaId
 
-// cross-module refs (visual only)
+// visual-only cross-module refs
 Ref: ArticleMedia.ArticleId > ContentArticle.ArticleId
 Ref: MediaAsset.CreatedBy > IdentityUserAccount.UserId
+Ref: MediaAsset.UpdatedBy > IdentityUserAccount.UserId
 Ref: MediaAsset.DeletedBy > IdentityUserAccount.UserId
 Ref: ArticleMedia.CreatedBy > IdentityUserAccount.UserId
+Ref: ArticleMedia.UpdatedBy > IdentityUserAccount.UserId
+Ref: ArticleMedia.DeletedBy > IdentityUserAccount.UserId
 
 // ---------- SQL Server enforcement notes ----------
 // 1) CHECK ArticleMedia.SortOrder >= 0
 // 2) CHECK MediaAsset.MediaType IN ('Image','Video','File')
-// 3) Primary-per-article (filtered unique index):
-//    UNIQUE (ArticleId) WHERE IsPrimary=1 AND IsDeleted=0
-// 4) Prefer soft delete; avoid cascading hard deletes.
+// 3) CHECK NOT (IsPrimary = 1 AND IsDeleted = 1) on ArticleMedia
+// 4) Primary-per-article filtered unique index:
+//    CREATE UNIQUE INDEX UX_ArticleMedia_ActivePrimaryPerArticle
+//    ON [media].[ArticleMedia](ArticleId)
+//    WHERE IsPrimary = 1 AND IsDeleted = 0;
+// 5) Prefer short truth transactions for attach / set-primary / reorder / delete / restore
+// 6) Reorder should be applied as a final-state set operation, not loose row-by-row updates
+// 7) Re-attaching a previously soft-deleted relation should restore the same row under V1 policy
+// 8) Avoid cascading hard deletes across module boundaries
