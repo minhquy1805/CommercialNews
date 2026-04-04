@@ -1,4 +1,5 @@
 using System.Data;
+using CommercialNews.BuildingBlocks.Contracts.Common;
 using CommercialNews.BuildingBlocks.Persistence.Sql;
 using Content.Application.Models.QueryModels;
 using Content.Application.Ports.Persistence;
