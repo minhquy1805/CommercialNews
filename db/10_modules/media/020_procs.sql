@@ -772,3 +772,93 @@ BEGIN
     ORDER BY AM.[ArticleId] ASC, AM.[SortOrder] ASC, AM.[ArticleMediaId] ASC;
 END;
 GO
+
+CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_GetRecordCountByArticleId]
+    @ArticleId BIGINT,
+    @IncludeDeleted BIT = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SELECT COUNT(1) AS [TotalRecords]
+    FROM [media].[ArticleMedia] AM
+    WHERE AM.[ArticleId] = @ArticleId
+      AND (@IncludeDeleted = 1 OR AM.[IsDeleted] = 0);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_SelectSkipAndTakeByArticleId]
+    @ArticleId BIGINT,
+    @Skip INT,
+    @Take INT,
+    @IncludeDeleted BIT = 0,
+    @SortBy NVARCHAR(50) = N'SortOrder',
+    @SortDirection NVARCHAR(4) = N'ASC'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @Skip < 0
+        SET @Skip = 0;
+
+    IF @Take IS NULL OR @Take <= 0
+        SET @Take = 20;
+
+    IF @Take > 200
+        SET @Take = 200;
+
+    IF @SortBy NOT IN (N'SortOrder', N'CreatedAt', N'UpdatedAt', N'MediaId')
+        SET @SortBy = N'SortOrder';
+
+    IF UPPER(@SortDirection) NOT IN (N'ASC', N'DESC')
+        SET @SortDirection = N'ASC';
+
+    DECLARE @Sql NVARCHAR(MAX) =
+    N'
+    SELECT
+        AM.[ArticleMediaId],
+        AM.[ArticleId],
+        AM.[MediaId],
+        MA.[PublicId],
+        MA.[StorageProvider],
+        MA.[Url],
+        MA.[StoragePath],
+        MA.[FileName],
+        MA.[MediaType],
+        MA.[MimeType],
+        MA.[FileSizeBytes],
+        MA.[Width],
+        MA.[Height],
+        MA.[DurationSeconds],
+        MA.[AltText] AS [DefaultAltText],
+        AM.[AltTextOverride],
+        AM.[Caption],
+        AM.[SortOrder],
+        AM.[IsPrimary],
+        AM.[CreatedAt],
+        AM.[CreatedBy],
+        AM.[UpdatedAt],
+        AM.[UpdatedBy],
+        AM.[Version],
+        AM.[IsDeleted],
+        AM.[DeletedAt],
+        AM.[DeletedBy]
+    FROM [media].[ArticleMedia] AM
+    INNER JOIN [media].[MediaAsset] MA
+        ON MA.[MediaId] = AM.[MediaId]
+    WHERE AM.[ArticleId] = @ArticleId
+      AND (@IncludeDeleted = 1 OR AM.[IsDeleted] = 0)
+    ORDER BY ' + QUOTENAME(@SortBy) + N' ' + @SortDirection + N', AM.[ArticleMediaId] ASC
+    OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;';
+
+    EXEC sp_executesql
+        @Sql,
+        N'@ArticleId BIGINT, @IncludeDeleted BIT, @Skip INT, @Take INT',
+        @ArticleId = @ArticleId,
+        @IncludeDeleted = @IncludeDeleted,
+        @Skip = @Skip,
+        @Take = @Take;
+END;
+GO
