@@ -1,5 +1,6 @@
 using Authorization.Application.Models.QueryModels;
 using Authorization.Domain.Entities;
+using CommercialNews.BuildingBlocks.Contracts.Common;
 
 namespace Authorization.Application.Ports.Persistence;
 

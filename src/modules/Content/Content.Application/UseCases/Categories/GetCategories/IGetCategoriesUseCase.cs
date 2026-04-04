@@ -1,3 +1,4 @@
+using CommercialNews.BuildingBlocks.Contracts.Common;
 using CommercialNews.BuildingBlocks.Results;
 using Content.Application.Models.QueryModels;
 
