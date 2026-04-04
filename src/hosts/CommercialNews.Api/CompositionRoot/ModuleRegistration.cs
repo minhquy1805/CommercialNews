@@ -4,6 +4,7 @@ using Content.Application.DependencyInjection;
 using Content.Infrastructure.DependencyInjection;
 using Identity.Application.DependencyInjection;
 using Identity.Infrastructure.DependencyInjection;
+using Media.Application.DependencyInjection;
 
 namespace CommercialNews.Api.CompositionRoot;
 
@@ -25,6 +26,8 @@ public static class ModuleRegistration
 
         services.AddAuthorizationApplication();
         services.AddAuthorizationInfrastructure();
+
+        services.AddMediaApplication();
 
         return services;
     }
