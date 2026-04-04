@@ -1,0 +1,11 @@
+namespace Media.Application.Contracts.ArticleMedia.Responses;
+
+public sealed class DetachMediaFromArticleResponse
+{
+    public long ArticleId { get; init; }
+    public long MediaId { get; init; }
+
+    public bool Detached { get; init; }
+
+    public int AffectedRows { get; init; }
+}

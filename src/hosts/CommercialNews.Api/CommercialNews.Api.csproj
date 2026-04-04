@@ -21,13 +21,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
-    <ProjectReference Include="..\..\modules\Identity\Identity.Application\Identity.Application.csproj" />
-    <ProjectReference Include="..\..\modules\Identity\Identity.Infrastructure\Identity.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\modules\Authorization\Authorization.Application\Authorization.Application.csproj" />
-    <ProjectReference Include="..\..\modules\Authorization\Authorization.Infrastructure\Authorization.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\modules\Content\Content.Application\Content.Application.csproj" />
-    <ProjectReference Include="..\..\modules\Content\Content.Infrastructure\Content.Infrastructure.csproj" />
-  </ItemGroup>
+  <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
+  <ProjectReference Include="..\..\modules\Identity\Identity.Application\Identity.Application.csproj" />
+  <ProjectReference Include="..\..\modules\Identity\Identity.Infrastructure\Identity.Infrastructure.csproj" />
+  <ProjectReference Include="..\..\modules\Authorization\Authorization.Application\Authorization.Application.csproj" />
+  <ProjectReference Include="..\..\modules\Authorization\Authorization.Infrastructure\Authorization.Infrastructure.csproj" />
+  <ProjectReference Include="..\..\modules\Content\Content.Application\Content.Application.csproj" />
+  <ProjectReference Include="..\..\modules\Content\Content.Infrastructure\Content.Infrastructure.csproj" />
+  <ProjectReference Include="..\..\modules\Media\Media.Application\Media.Application.csproj" />
+  <ProjectReference Include="..\..\modules\Media\Media.Infrastructure\Media.Infrastructure.csproj" />
+</ItemGroup>
 
 </Project>
