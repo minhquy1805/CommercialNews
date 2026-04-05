@@ -141,11 +141,14 @@ CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_Update]
     @TwitterDescription     NVARCHAR(500) = NULL,
     @TwitterImageUrl        NVARCHAR(800) = NULL,
     @UpdatedByUserId        BIGINT = NULL,
-    @ExpectedVersion        INT
+    @ExpectedVersion        INT,
+    @AffectedRows           INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    SET @AffectedRows = 0;
 
     IF @SeoId IS NULL OR @SeoId <= 0
         THROW 57220, 'SeoId must be > 0.', 1;
@@ -167,8 +170,10 @@ BEGIN
     WHERE [SeoId] = @SeoId
       AND [Version] = @ExpectedVersion;
 
-    IF @@ROWCOUNT = 0
-        THROW 57221, 'SeoMetadata update failed. Record not found or version mismatch.', 1;
+    SET @AffectedRows = @@ROWCOUNT;
+
+    IF @AffectedRows = 0
+        RETURN;
 
     SELECT TOP (1) *
     FROM [seo].[SeoMetadata]
@@ -403,11 +408,14 @@ CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_Update]
     @IsIndexable            BIT,
     @IsActive               BIT,
     @UpdatedByUserId        BIGINT = NULL,
-    @ExpectedVersion        INT
+    @ExpectedVersion        INT,
+    @AffectedRows           INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    SET @AffectedRows = 0;
 
     IF @SlugId IS NULL OR @SlugId <= 0
         THROW 57250, 'SlugId must be > 0.', 1;
@@ -461,8 +469,10 @@ BEGIN
     WHERE [SlugId] = @SlugId
       AND [Version] = @ExpectedVersion;
 
-    IF @@ROWCOUNT = 0
-        THROW 57256, 'SlugRegistry update failed. Record not found or version mismatch.', 1;
+    SET @AffectedRows = @@ROWCOUNT;
+
+    IF @AffectedRows = 0
+        RETURN;
 
     SELECT TOP (1) *
     FROM [seo].[SlugRegistry]
@@ -478,11 +488,14 @@ GO
 CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_Activate]
     @SlugId                 BIGINT,
     @UpdatedByUserId        BIGINT = NULL,
-    @ExpectedVersion        INT
+    @ExpectedVersion        INT,
+    @AffectedRows           INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    SET @AffectedRows = 0;
 
     DECLARE @ArticleId BIGINT;
     DECLARE @Scope VARCHAR(30);
@@ -494,7 +507,7 @@ BEGIN
     WHERE [SlugId] = @SlugId;
 
     IF @ArticleId IS NULL
-        THROW 57260, 'SlugRegistry record not found.', 1;
+        RETURN;
 
     IF EXISTS
     (
@@ -517,8 +530,10 @@ BEGIN
       AND [IsActive] = 0
       AND [Version] = @ExpectedVersion;
 
-    IF @@ROWCOUNT = 0
-        THROW 57262, 'Slug activate failed. Record not found, already active, or version mismatch.', 1;
+    SET @AffectedRows = @@ROWCOUNT;
+
+    IF @AffectedRows = 0
+        RETURN;
 
     SELECT TOP (1) *
     FROM [seo].[SlugRegistry]
@@ -534,11 +549,14 @@ GO
 CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_Deactivate]
     @SlugId                 BIGINT,
     @UpdatedByUserId        BIGINT = NULL,
-    @ExpectedVersion        INT
+    @ExpectedVersion        INT,
+    @AffectedRows           INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    SET @AffectedRows = 0;
 
     UPDATE [seo].[SlugRegistry]
     SET
@@ -550,8 +568,10 @@ BEGIN
       AND [IsActive] = 1
       AND [Version] = @ExpectedVersion;
 
-    IF @@ROWCOUNT = 0
-        THROW 57270, 'Slug deactivate failed. Record not found, already inactive, or version mismatch.', 1;
+    SET @AffectedRows = @@ROWCOUNT;
+
+    IF @AffectedRows = 0
+        RETURN;
 
     SELECT TOP (1) *
     FROM [seo].[SlugRegistry]
