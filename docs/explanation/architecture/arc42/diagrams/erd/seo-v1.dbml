@@ -5,43 +5,53 @@
 // Purpose
 // - Fast slug routing: (Scope, Slug) -> ArticleId (hot path).
 // - Optional SEO metadata: canonical/meta/social fields (safe defaults if missing).
+// - Support SEO admin truth writes, public /resolve, public /metadata,
+//   optimistic concurrency/version-aware updates, and future async propagation.
 //
 // Design notes
-// - SlugRegistry must stay small, heavily indexed, and cache-friendly.
-// - SeoMetadata is optional (0..1 per article).
-// - Visibility is owned by Content: Reading must still validate Article.Status/IsDeleted.
+// - SlugRegistry is the routing truth entry point and must stay small,
+//   heavily indexed, and cache-friendly.
+// - SeoMetadata is optional (0..1 per article) and heavier than SlugRegistry.
+// - Visibility is owned by Content: Reading must still validate
+//   Article.Status / public visibility truth before serving.
+// - Redis/cache is derived acceleration only, never the source of truth.
+// - Version is included to support stale-write protection, async ordering,
+//   cache refresh freshness, and future rebuild/reconciliation safety.
+// - V1 stays Article-centric in storage for simplicity, while API/domain
+//   contracts may still expose ResourceType = "Article" for future evolution.
 // =====================================================
 
 Table SeoMetadata {
   SeoId bigint [pk, increment]
   ArticleId bigint [not null] // cross-module ref -> Content.Article
 
-  CanonicalUrl nvarchar(500) [null]
-  MetaTitle nvarchar(300) [null]
-  MetaDescription nvarchar(500) [null]
+  CanonicalUrl nvarchar(500) [null]      // optional; if null, application may derive by policy
+  MetaTitle nvarchar(300) [null]         // fallback may come from Article.Title
+  MetaDescription nvarchar(500) [null]   // fallback may come from Article.Summary
 
   OgTitle nvarchar(300) [null]
   OgDescription nvarchar(500) [null]
-  OgImageUrl nvarchar(800) [null]       // may point to Media (by URL in V1)
+  OgImageUrl nvarchar(800) [null]        // V1: external/media URL only
 
   TwitterTitle nvarchar(300) [null]
   TwitterDescription nvarchar(500) [null]
   TwitterImageUrl nvarchar(800) [null]
 
+  Version bigint [not null, default: 1]  // authoritative freshness marker; preferred over timestamps
   UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  UpdatedBy bigint [null] // cross-module ref -> Identity.UserAccount
+  UpdatedBy bigint [null]                 // logical cross-module ref -> Identity.UserAccount
 
   // V2 hooks:
   // RobotsIndex bit [not null, default: 1]
   // RobotsFollow bit [not null, default: 1]
   // StructuredDataJson nvarchar(max) [null]
+  // Localized metadata or site-scoped variants if multi-locale SEO is introduced
 
   Indexes {
-    (ArticleId) [unique, name: "UQ_SeoMetadata_ArticleId"] // 0..1 per article
-    (ArticleId) [name: "IX_SeoMetadata_ArticleId"]         // may be redundant if unique index exists
+    (ArticleId) [unique, name: "UQ_SeoMetadata_ArticleId"] // 0..1 metadata row per article
   }
 
-  Note: "Heavier metadata. Missing row must not break reads; defaults are applied by policy."
+  Note: "Optional SEO metadata truth. Missing row must not break reads; safe defaults are applied by policy. Version supports optimistic concurrency and future async freshness checks."
 }
 
 Table SlugRegistry {
@@ -49,22 +59,35 @@ Table SlugRegistry {
   ArticleId bigint [not null] // cross-module ref -> Content.Article
 
   Slug nvarchar(200) [not null]
-  Scope varchar(30) [not null, default: "global"] // V1 policy: global unique
-  IsActive bit [not null, default: 1]
+  Scope varchar(30) [not null, default: "public"] // V1 practical policy: public route scope
+  CanonicalUrl nvarchar(500) [null]               // lightweight route-level canonical for hot-path response
+  IsIndexable bit [not null, default: 0]          // follows Content publication policy; SEO does not own publication truth
+  IsActive bit [not null, default: 1]             // prefer deactivate over delete in V1
 
+  Version bigint [not null, default: 1]           // authoritative freshness marker for route changes
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  CreatedBy bigint [null] // cross-module ref -> Identity.UserAccount
+  CreatedBy bigint [null]                         // logical cross-module ref -> Identity.UserAccount
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedBy bigint [null]                         // logical cross-module ref -> Identity.UserAccount
 
   Indexes {
-    (Scope, Slug) [unique, name: "UQ_SlugRegistry_Scope_Slug"] // routing key
-    (Scope, Slug) [name: "IX_SlugRegistry_Scope_Slug"]         // often covered by unique index
-    (ArticleId)   [name: "IX_SlugRegistry_ArticleId"]          // maintenance/update/deactivate
+    (Scope, Slug) [unique, name: "UQ_SlugRegistry_Scope_Slug"] // routing key; zero collision tolerance
+    (ArticleId) [name: "IX_SlugRegistry_ArticleId"]            // maintenance / admin get / deactivate / switch route
+
+    // NOTE:
+    // dbdiagram.io cannot express SQL Server filtered unique indexes.
+    // In real SQL, add:
+    // UNIQUE (ArticleId, Scope) WHERE IsActive = 1
+    //
+    // Purpose:
+    // - enforce V1 policy: one active slug per article per scope
+    // - prevent multiple active routes for the same article in the same scope
   }
 
-  Note: "Public entry point: (Scope,Slug)->ArticleId. Keep small & cache-friendly."
+  Note: "Routing truth entry point: (Scope,Slug)->ArticleId. Keep small and hot-path optimized. Cache may accelerate this, but DB truth remains authoritative."
 }
 
-// ---------- Cross-module stubs (optional, for ERD readability) ----------
+// ---------- Cross-module stubs (optional, ERD readability only) ----------
 Table ContentArticle {
   ArticleId bigint [pk]
   Note: "EXTERNAL (Content module). Stub for ERD readability only."
@@ -81,8 +104,48 @@ Ref: SlugRegistry.ArticleId > ContentArticle.ArticleId
 
 Ref: SeoMetadata.UpdatedBy > IdentityUserAccount.UserId
 Ref: SlugRegistry.CreatedBy > IdentityUserAccount.UserId
+Ref: SlugRegistry.UpdatedBy > IdentityUserAccount.UserId
 
 // ---------- SQL Server enforcement notes ----------
-// 1) CHECK Slug not empty: LEN(LTRIM(RTRIM(Slug))) > 0
-// 2) CHECK Scope enum whitelist (global/category/locale/site) as policy.
-// 3) Routing safety: even if SlugRegistry resolves, Reading must validate Content visibility.
+// 1) CHECK Slug not empty:
+//    LEN(LTRIM(RTRIM(Slug))) > 0
+//
+// 2) CHECK Scope whitelist for V1:
+//    Scope IN ('public')
+//    - Keep this tight in V1.
+//    - Expand later only when scope semantics are truly introduced.
+//
+// 3) CHECK Version positive:
+//    Version > 0
+//
+// 4) Optional CHECK CanonicalUrl non-empty when not null:
+//    CanonicalUrl IS NULL OR LEN(LTRIM(RTRIM(CanonicalUrl))) > 0
+//
+// 5) Add real SQL filtered unique index for active-route policy:
+//    UNIQUE (ArticleId, Scope) WHERE IsActive = 1
+//
+// 6) Slug uniqueness must be enforced by database truth boundary,
+//    not only by application-side "check then insert".
+//
+// 7) Version/revision is authoritative for stale-write protection;
+//    UpdatedAt is informational/observability only.
+//
+// 8) Routing safety:
+//    even if SlugRegistry resolves successfully,
+//    Reading must validate Content visibility truth before public serve.
+//
+// 9) SEO owns routing truth and metadata truth;
+//    Content owns publication truth;
+//    derived cache/projections must never override either truth boundary.
+//
+// 10) Prefer deactivate/reactivate route semantics over hard delete in V1.
+//     This keeps future alias/history and reconciliation options open.
+//
+// 11) SeoMetadata intentionally does NOT duplicate Slug as stored truth.
+//     Slug truth lives in SlugRegistry.
+//     Admin/article aggregate reads can join by ArticleId.
+//
+// 12) If DB-level foreign keys to Content.Article are allowed in your deployment,
+//     they can be added in SQL.
+//     For actor columns (CreatedBy/UpdatedBy), logical references are often safer
+//     than hard FKs to avoid unnecessary coupling/failure amplification.
