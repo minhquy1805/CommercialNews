@@ -30,6 +30,8 @@
   <ProjectReference Include="..\..\modules\Content\Content.Infrastructure\Content.Infrastructure.csproj" />
   <ProjectReference Include="..\..\modules\Media\Media.Application\Media.Application.csproj" />
   <ProjectReference Include="..\..\modules\Media\Media.Infrastructure\Media.Infrastructure.csproj" />
+  <ProjectReference Include="..\..\modules\Seo\Seo.Application\Seo.Application.csproj" />
+  <ProjectReference Include="..\..\modules\Seo\Seo.Infrastructure\Seo.Infrastructure.csproj" />
 </ItemGroup>
 
 </Project>
