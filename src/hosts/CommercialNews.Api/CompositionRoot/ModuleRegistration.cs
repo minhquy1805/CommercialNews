@@ -6,6 +6,7 @@ using Identity.Application.DependencyInjection;
 using Identity.Infrastructure.DependencyInjection;
 using Media.Application.DependencyInjection;
 using Media.Infrastructure.DependencyInjection;
+using Reading.Application.DependencyInjection;
 using Seo.Application.DependencyInjection;
 using Seo.Infrastructure.DependencyInjection;
 
@@ -35,6 +36,8 @@ public static class ModuleRegistration
 
         services.AddSeoApplication();
         services.AddSeoInfrastructure();
+
+        services.AddReadingApplication();
 
         return services;
     }
