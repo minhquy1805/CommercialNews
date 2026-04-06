@@ -7,6 +7,7 @@ using Identity.Infrastructure.DependencyInjection;
 using Media.Application.DependencyInjection;
 using Media.Infrastructure.DependencyInjection;
 using Seo.Application.DependencyInjection;
+using Seo.Infrastructure.DependencyInjection;
 
 namespace CommercialNews.Api.CompositionRoot;
 
@@ -33,6 +34,7 @@ public static class ModuleRegistration
         services.AddMediaInfrastructure();
 
         services.AddSeoApplication();
+        services.AddSeoInfrastructure();
 
         return services;
     }
