@@ -69,9 +69,6 @@ BEGIN
     IF @ArticleId IS NULL OR @ArticleId <= 0
         THROW 57210, 'ArticleId must be > 0.', 1;
 
-    IF [content].[Article] IS NULL
-        PRINT N''; -- no-op; keeps parser calm in some editors
-
     IF NOT EXISTS
     (
         SELECT 1
