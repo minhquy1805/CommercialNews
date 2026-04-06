@@ -93,4 +93,13 @@ BEGIN
 END
 ELSE
     PRINT N'Schema exists: [seo]';
+
+IF SCHEMA_ID(N'reading') IS NULL
+BEGIN
+    EXEC(N'CREATE SCHEMA [reading]');
+    PRINT N'Created schema: [reading]';
+END
+ELSE
+    PRINT N'Schema exists: [reading]';
+
 GO
