@@ -34,6 +34,8 @@
     <ProjectReference Include="..\..\modules\Seo\Seo.Infrastructure\Seo.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\Reading\Reading.Application\Reading.Application.csproj" />
     <ProjectReference Include="..\..\modules\Reading\Reading.Infrastructure\Reading.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\Interaction\Interaction.Application\Interaction.Application.csproj" />
+    <ProjectReference Include="..\..\modules\Interaction\Interaction.Infrastructure\Interaction.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
