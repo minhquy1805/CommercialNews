@@ -4,7 +4,7 @@
   Purpose:
   - Create stored procedures for Reading V1 public query facade in CommercialNews.
   - Reading owns no physical truth tables in V1.
-  - Reading may own read-composition stored procedures over Content + SEO + Media truth.
+  - Reading may own read-composition stored procedures over Content + SEO + Media + Interaction derived stats.
 
   Support:
       * public article detail by id
@@ -19,8 +19,8 @@
       * [content].[Article].[IsDeleted] = 0
   - SEO resolves routing truth, but SEO does not decide publication visibility.
   - Media enriches cover/attachments.
-  - Interaction is not yet available in this V1 script.
-    Therefore:
+  - Interaction enriches reading with derived counters from [interaction].[ArticleInteractionStats].
+  - If interaction stats are missing:
       * [Views] = 0
       * [Likes] = 0
       * [CountersPartial] = 1
@@ -112,6 +112,18 @@ BEGIN
 END
 GO
 
+IF SCHEMA_ID(N'interaction') IS NULL
+BEGIN
+    THROW 58206, 'Schema [interaction] does not exist. Run bootstrap scripts first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[interaction].[ArticleInteractionStats]', N'U') IS NULL
+BEGIN
+    THROW 58214, 'Table [interaction].[ArticleInteractionStats] does not exist. Run interaction/001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
    PUBLIC ARTICLE DETAIL
    ========================================================= */
@@ -157,9 +169,9 @@ BEGIN
         [sm].[MetaTitle],
         [sm].[MetaDescription],
 
-        CAST(0 AS BIGINT) AS [Views],
-        CAST(0 AS BIGINT) AS [Likes],
-        CAST(1 AS BIT) AS [CountersPartial]
+        ISNULL([s].[ViewsTotal], 0) AS [Views],
+        ISNULL([s].[LikesTotal], 0) AS [Likes],
+        CAST(CASE WHEN [s].[ArticleId] IS NULL THEN 1 ELSE 0 END AS BIT) AS [CountersPartial]
     FROM [content].[Article] AS [a]
     LEFT JOIN [content].[Category] AS [c]
         ON [c].[CategoryId] = [a].[CategoryId]
@@ -171,6 +183,8 @@ BEGIN
        AND [sr].[IsActive] = 1
     LEFT JOIN [seo].[SeoMetadata] AS [sm]
         ON [sm].[ArticleId] = [a].[ArticleId]
+    LEFT JOIN [interaction].[ArticleInteractionStats] AS [s]
+        ON [s].[ArticleId] = [a].[ArticleId]
     WHERE [a].[ArticleId] = @ArticleId
       AND [a].[Status] = N'Published'
       AND [a].[IsDeleted] = 0;
@@ -345,10 +359,10 @@ BEGIN
             [am].[IsPrimary] AS [CoverIsPrimary],
             [am].[SortOrder] AS [CoverDisplayOrder],
 
-            CAST(0 AS BIGINT) AS [Views],
-            CAST(0 AS BIGINT) AS [Likes],
-            CAST(1 AS BIT) AS [CountersPartial],
-            CAST(0 AS DECIMAL(18,4)) AS [PopularityScore],
+            ISNULL([s].[ViewsTotal], 0) AS [Views],
+            ISNULL([s].[LikesTotal], 0) AS [Likes],
+            CAST(CASE WHEN [s].[ArticleId] IS NULL THEN 1 ELSE 0 END AS BIT) AS [CountersPartial],
+            ISNULL([s].[PopularityScore], CAST(0 AS DECIMAL(18,4))) AS [PopularityScore],
 
             COUNT(1) OVER() AS [TotalCount]
         FROM [content].[Article] AS [a]
@@ -367,6 +381,8 @@ BEGIN
         LEFT JOIN [media].[MediaAsset] AS [ma]
             ON [ma].[MediaId] = [am].[MediaId]
            AND [ma].[IsDeleted] = 0
+        LEFT JOIN [interaction].[ArticleInteractionStats] AS [s]
+            ON [s].[ArticleId] = [a].[ArticleId]
         WHERE [a].[Status] = N'Published'
           AND [a].[IsDeleted] = 0
           AND (@CategoryId IS NULL OR [a].[CategoryId] = @CategoryId)
@@ -476,9 +492,9 @@ BEGIN
             [am].[IsPrimary] AS [CoverIsPrimary],
             [am].[SortOrder] AS [CoverDisplayOrder],
 
-            CAST(0 AS BIGINT) AS [Views],
-            CAST(0 AS BIGINT) AS [Likes],
-            CAST(1 AS BIT) AS [CountersPartial],
+            ISNULL([s].[ViewsTotal], 0) AS [Views],
+            ISNULL([s].[LikesTotal], 0) AS [Likes],
+            CAST(CASE WHEN [s].[ArticleId] IS NULL THEN 1 ELSE 0 END AS BIT) AS [CountersPartial],
 
             CASE
                 WHEN @CategoryId IS NOT NULL AND [a].[CategoryId] = @CategoryId THEN 1
@@ -521,6 +537,8 @@ BEGIN
         LEFT JOIN [media].[MediaAsset] AS [ma]
             ON [ma].[MediaId] = [am].[MediaId]
            AND [ma].[IsDeleted] = 0
+        LEFT JOIN [interaction].[ArticleInteractionStats] AS [s]
+            ON [s].[ArticleId] = [a].[ArticleId]
         WHERE [a].[ArticleId] <> @ArticleId
           AND [a].[Status] = N'Published'
           AND [a].[IsDeleted] = 0
