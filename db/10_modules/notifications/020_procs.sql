@@ -4,13 +4,16 @@
   Purpose:
   - Create stored procedures for Notifications V1.
   - Includes:
-      * shared outbox operations ([notifications].[OutboxMessage])
-      * email delivery operations ([notifications].[EmailDelivery])
+      * [notifications].[OutboxMessage]
+      * [notifications].[EmailDelivery]
+      * [notifications].[EmailDeliveryAttempt]
+      * [notifications].[EmailRateLimitLog]
 
   Notes:
   - Broker is transport only; SQL remains durable truth.
-  - Outbox is shared across modules (Identity, Content, etc.).
-  - Application/service layer still owns orchestration and payload construction.
+  - Outbox is durable async intent.
+  - EmailDelivery is canonical delivery-state truth.
+  - Mutating procedures return @AffectedRows OUTPUT where appropriate.
 */
 
 SET ANSI_NULLS ON;
@@ -18,13 +21,13 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-USE [CommercialNews];
-GO
-
 IF DB_ID(N'CommercialNews') IS NULL
 BEGIN
     THROW 52201, 'Database [CommercialNews] does not exist. Run bootstrap scripts first.', 1;
 END
+GO
+
+USE [CommercialNews];
 GO
 
 IF SCHEMA_ID(N'notifications') IS NULL
@@ -45,8 +48,20 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'[notifications].[EmailDeliveryAttempt]', N'U') IS NULL
+BEGIN
+    THROW 52205, 'Table [notifications].[EmailDeliveryAttempt] does not exist. Run notifications 001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[notifications].[EmailRateLimitLog]', N'U') IS NULL
+BEGIN
+    THROW 52206, 'Table [notifications].[EmailRateLimitLog] does not exist. Run notifications 001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
-   OutboxMessage
+   [notifications].[OutboxMessage]
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_Insert]
@@ -60,6 +75,7 @@ CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_Insert]
     @Headers           NVARCHAR(MAX) = NULL,
     @CorrelationId     NVARCHAR(100) = NULL,
     @InitiatorUserId   BIGINT = NULL,
+    @Priority          TINYINT = 5,
     @OccurredAt        DATETIME2(3),
     @OutboxMessageId   BIGINT OUTPUT
 AS
@@ -79,6 +95,7 @@ BEGIN
         [Headers],
         [CorrelationId],
         [InitiatorUserId],
+        [Priority],
         [OccurredAt]
     )
     VALUES
@@ -93,6 +110,7 @@ BEGIN
         @Headers,
         @CorrelationId,
         @InitiatorUserId,
+        @Priority,
         @OccurredAt
     );
 
@@ -118,12 +136,15 @@ BEGIN
         [Headers],
         [CorrelationId],
         [InitiatorUserId],
+        [Priority],
         [Status],
         [AttemptCount],
         [NextRetryAt],
         [LastAttemptAt],
         [PublishedAt],
         [LastError],
+        [LastErrorCode],
+        [LastErrorClass],
         [OccurredAt],
         [CreatedAt],
         [UpdatedAt]
@@ -150,12 +171,15 @@ BEGIN
         [Headers],
         [CorrelationId],
         [InitiatorUserId],
+        [Priority],
         [Status],
         [AttemptCount],
         [NextRetryAt],
         [LastAttemptAt],
         [PublishedAt],
         [LastError],
+        [LastErrorCode],
+        [LastErrorClass],
         [OccurredAt],
         [CreatedAt],
         [UpdatedAt]
@@ -164,12 +188,13 @@ BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_SelectPending]
+CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_ClaimPending]
     @TopN INT = 100,
     @Now DATETIME2(3) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
+    SET XACT_ABORT ON;
 
     IF @TopN IS NULL OR @TopN <= 0
         SET @TopN = 100;
@@ -177,65 +202,66 @@ BEGIN
     IF @Now IS NULL
         SET @Now = SYSUTCDATETIME();
 
-    SELECT TOP (@TopN)
-        [OutboxMessageId],
-        [MessageId],
-        [EventType],
-        [AggregateType],
-        [AggregateId],
-        [AggregatePublicId],
-        [AggregateVersion],
-        [Payload],
-        [Headers],
-        [CorrelationId],
-        [InitiatorUserId],
-        [Status],
-        [AttemptCount],
-        [NextRetryAt],
-        [LastAttemptAt],
-        [PublishedAt],
-        [LastError],
-        [OccurredAt],
-        [CreatedAt],
-        [UpdatedAt]
-    FROM [notifications].[OutboxMessage]
-    WHERE
-        (
-            [Status] = 'Pending'
-            AND ([NextRetryAt] IS NULL OR [NextRetryAt] <= @Now)
-        )
-        OR
-        (
-            [Status] = 'Failed'
-            AND [NextRetryAt] IS NOT NULL
-            AND [NextRetryAt] <= @Now
-        )
-    ORDER BY
-        CASE WHEN [NextRetryAt] IS NULL THEN [OccurredAt] ELSE [NextRetryAt] END ASC,
-        [OccurredAt] ASC,
-        [OutboxMessageId] ASC;
-END;
-GO
-
-CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_MarkProcessing]
-    @OutboxMessageId BIGINT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-
-    UPDATE [notifications].[OutboxMessage]
+    ;WITH [ClaimSet] AS
+    (
+        SELECT TOP (@TopN)
+            [OutboxMessageId]
+        FROM [notifications].[OutboxMessage] WITH (READPAST, UPDLOCK, ROWLOCK)
+        WHERE
+            (
+                [Status] = 'Pending'
+                AND ([NextRetryAt] IS NULL OR [NextRetryAt] <= @Now)
+            )
+            OR
+            (
+                [Status] = 'Failed'
+                AND [NextRetryAt] IS NOT NULL
+                AND [NextRetryAt] <= @Now
+            )
+        ORDER BY
+            [Priority] ASC,
+            CASE WHEN [NextRetryAt] IS NULL THEN [OccurredAt] ELSE [NextRetryAt] END ASC,
+            [OccurredAt] ASC,
+            [OutboxMessageId] ASC
+    )
+    UPDATE o
     SET
         [Status] = 'Processing',
-        [LastAttemptAt] = SYSUTCDATETIME(),
-        [UpdatedAt] = SYSUTCDATETIME()
-    WHERE [OutboxMessageId] = @OutboxMessageId
-      AND [Status] IN ('Pending', 'Failed');
+        [LastAttemptAt] = @Now,
+        [UpdatedAt] = @Now
+    OUTPUT
+        INSERTED.[OutboxMessageId],
+        INSERTED.[MessageId],
+        INSERTED.[EventType],
+        INSERTED.[AggregateType],
+        INSERTED.[AggregateId],
+        INSERTED.[AggregatePublicId],
+        INSERTED.[AggregateVersion],
+        INSERTED.[Payload],
+        INSERTED.[Headers],
+        INSERTED.[CorrelationId],
+        INSERTED.[InitiatorUserId],
+        INSERTED.[Priority],
+        INSERTED.[Status],
+        INSERTED.[AttemptCount],
+        INSERTED.[NextRetryAt],
+        INSERTED.[LastAttemptAt],
+        INSERTED.[PublishedAt],
+        INSERTED.[LastError],
+        INSERTED.[LastErrorCode],
+        INSERTED.[LastErrorClass],
+        INSERTED.[OccurredAt],
+        INSERTED.[CreatedAt],
+        INSERTED.[UpdatedAt]
+    FROM [notifications].[OutboxMessage] o
+    INNER JOIN [ClaimSet] c
+        ON o.[OutboxMessageId] = c.[OutboxMessageId];
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_MarkPublished]
-    @OutboxMessageId BIGINT
+    @OutboxMessageId BIGINT,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -246,16 +272,23 @@ BEGIN
         [Status] = 'Published',
         [PublishedAt] = SYSUTCDATETIME(),
         [LastError] = NULL,
+        [LastErrorCode] = NULL,
+        [LastErrorClass] = NULL,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [OutboxMessageId] = @OutboxMessageId
       AND [Status] IN ('Pending', 'Processing', 'Failed');
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_MarkFailed]
     @OutboxMessageId BIGINT,
     @NextRetryAt DATETIME2(3) = NULL,
-    @LastError NVARCHAR(2000) = NULL
+    @LastError NVARCHAR(2000) = NULL,
+    @LastErrorCode NVARCHAR(100) = NULL,
+    @LastErrorClass VARCHAR(30) = NULL,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -267,15 +300,22 @@ BEGIN
         [AttemptCount] = [AttemptCount] + 1,
         [NextRetryAt] = @NextRetryAt,
         [LastError] = @LastError,
+        [LastErrorCode] = @LastErrorCode,
+        [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [OutboxMessageId] = @OutboxMessageId
       AND [Status] IN ('Pending', 'Processing', 'Failed');
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_MarkDeadLetter]
     @OutboxMessageId BIGINT,
-    @LastError NVARCHAR(2000) = NULL
+    @LastError NVARCHAR(2000) = NULL,
+    @LastErrorCode NVARCHAR(100) = NULL,
+    @LastErrorClass VARCHAR(30) = NULL,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -287,14 +327,19 @@ BEGIN
         [AttemptCount] = [AttemptCount] + 1,
         [NextRetryAt] = NULL,
         [LastError] = @LastError,
+        [LastErrorCode] = @LastErrorCode,
+        [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [OutboxMessageId] = @OutboxMessageId
       AND [Status] IN ('Pending', 'Processing', 'Failed');
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_ResetToPending]
-    @OutboxMessageId BIGINT
+    @OutboxMessageId BIGINT,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -305,9 +350,13 @@ BEGIN
         [Status] = 'Pending',
         [NextRetryAt] = NULL,
         [LastError] = NULL,
+        [LastErrorCode] = NULL,
+        [LastErrorClass] = NULL,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [OutboxMessageId] = @OutboxMessageId
       AND [Status] IN ('Failed', 'DeadLetter', 'Processing');
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
@@ -327,12 +376,15 @@ BEGIN
         [AggregatePublicId],
         [AggregateVersion],
         [CorrelationId],
+        [Priority],
         [Status],
         [AttemptCount],
         [NextRetryAt],
         [LastAttemptAt],
         [PublishedAt],
         [LastError],
+        [LastErrorCode],
+        [LastErrorClass],
         [OccurredAt],
         [CreatedAt],
         [UpdatedAt]
@@ -366,6 +418,8 @@ BEGIN
         [LastAttemptAt],
         [PublishedAt],
         [LastError],
+        [LastErrorCode],
+        [LastErrorClass],
         [OccurredAt],
         [CreatedAt],
         [UpdatedAt]
@@ -375,77 +429,9 @@ BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_SelectByStatus]
-    @Status VARCHAR(20),
-    @TopN INT = 100
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    IF @TopN IS NULL OR @TopN <= 0
-        SET @TopN = 100;
-
-    SELECT TOP (@TopN)
-        [OutboxMessageId],
-        [MessageId],
-        [EventType],
-        [AggregateType],
-        [AggregateId],
-        [AggregatePublicId],
-        [AggregateVersion],
-        [CorrelationId],
-        [Status],
-        [AttemptCount],
-        [NextRetryAt],
-        [LastAttemptAt],
-        [PublishedAt],
-        [LastError],
-        [OccurredAt],
-        [CreatedAt],
-        [UpdatedAt]
-    FROM [notifications].[OutboxMessage]
-    WHERE [Status] = @Status
-    ORDER BY [OccurredAt] ASC, [OutboxMessageId] ASC;
-END;
-GO
-
-CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_SelectRangeByOccurredAt]
-    @FromOccurredAt DATETIME2(3),
-    @ToOccurredAt DATETIME2(3)
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    SELECT
-        [OutboxMessageId],
-        [MessageId],
-        [EventType],
-        [AggregateType],
-        [AggregateId],
-        [AggregatePublicId],
-        [AggregateVersion],
-        [Payload],
-        [Headers],
-        [CorrelationId],
-        [InitiatorUserId],
-        [Status],
-        [AttemptCount],
-        [NextRetryAt],
-        [LastAttemptAt],
-        [PublishedAt],
-        [LastError],
-        [OccurredAt],
-        [CreatedAt],
-        [UpdatedAt]
-    FROM [notifications].[OutboxMessage]
-    WHERE [OccurredAt] >= @FromOccurredAt
-      AND [OccurredAt] < @ToOccurredAt
-    ORDER BY [OccurredAt] ASC, [OutboxMessageId] ASC;
-END;
-GO
-
 CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_DeletePublishedBefore]
-    @PublishedBefore DATETIME2(3)
+    @PublishedBefore DATETIME2(3),
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -455,21 +441,27 @@ BEGIN
     WHERE [Status] = 'Published'
       AND [PublishedAt] IS NOT NULL
       AND [PublishedAt] < @PublishedBefore;
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 /* =========================================================
-   EmailDelivery
+   [notifications].[EmailDelivery]
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_Insert]
-    @MessageId         CHAR(26),
-    @UserId            BIGINT = NULL,
-    @ToEmail           NVARCHAR(320),
-    @TemplateKey       NVARCHAR(100),
-    @Subject           NVARCHAR(300) = NULL,
-    @CorrelationId     NVARCHAR(100) = NULL,
-    @EmailDeliveryId   BIGINT OUTPUT
+    @MessageId          CHAR(26),
+    @BusinessDedupeKey  NVARCHAR(300),
+    @RecipientUserId    BIGINT = NULL,
+    @ToEmail            NVARCHAR(320),
+    @ToEmailHash        VARCHAR(64) = NULL,
+    @TemplateKey        NVARCHAR(100),
+    @TemplateVersion    INT = NULL,
+    @Subject            NVARCHAR(300) = NULL,
+    @Provider           VARCHAR(30) = 'smtp',
+    @CorrelationId      NVARCHAR(100) = NULL,
+    @EmailDeliveryId    BIGINT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -478,23 +470,69 @@ BEGIN
     INSERT INTO [notifications].[EmailDelivery]
     (
         [MessageId],
-        [UserId],
+        [BusinessDedupeKey],
+        [RecipientUserId],
         [ToEmail],
+        [ToEmailHash],
         [TemplateKey],
+        [TemplateVersion],
         [Subject],
+        [Provider],
         [CorrelationId]
     )
     VALUES
     (
         @MessageId,
-        @UserId,
+        @BusinessDedupeKey,
+        @RecipientUserId,
         @ToEmail,
+        @ToEmailHash,
         @TemplateKey,
+        @TemplateVersion,
         @Subject,
+        @Provider,
         @CorrelationId
     );
 
     SET @EmailDeliveryId = SCOPE_IDENTITY();
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_SelectById]
+    @EmailDeliveryId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        [EmailDeliveryId],
+        [MessageId],
+        [BusinessDedupeKey],
+        [RecipientUserId],
+        [ToEmail],
+        [ToEmailHash],
+        [TemplateKey],
+        [TemplateVersion],
+        [Subject],
+        [Provider],
+        [ProviderMessageId],
+        [Status],
+        [AttemptCount],
+        [LastAttemptAt],
+        [NextRetryAt],
+        [SentAt],
+        [FailedAt],
+        [DeadAt],
+        [SuppressedAt],
+        [AmbiguousAt],
+        [LastError],
+        [LastErrorCode],
+        [LastErrorClass],
+        [CorrelationId],
+        [CreatedAt],
+        [UpdatedAt]
+    FROM [notifications].[EmailDelivery]
+    WHERE [EmailDeliveryId] = @EmailDeliveryId;
 END;
 GO
 
@@ -507,17 +545,27 @@ BEGIN
     SELECT
         [EmailDeliveryId],
         [MessageId],
-        [UserId],
+        [BusinessDedupeKey],
+        [RecipientUserId],
         [ToEmail],
+        [ToEmailHash],
         [TemplateKey],
+        [TemplateVersion],
         [Subject],
+        [Provider],
+        [ProviderMessageId],
         [Status],
         [AttemptCount],
-        [ProviderMessageId],
         [LastAttemptAt],
-        [SentAt],
         [NextRetryAt],
+        [SentAt],
+        [FailedAt],
+        [DeadAt],
+        [SuppressedAt],
+        [AmbiguousAt],
         [LastError],
+        [LastErrorCode],
+        [LastErrorClass],
         [CorrelationId],
         [CreatedAt],
         [UpdatedAt]
@@ -526,12 +574,145 @@ BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_SelectPending]
+CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_SelectByBusinessDedupeKey]
+    @BusinessDedupeKey NVARCHAR(300)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        [EmailDeliveryId],
+        [MessageId],
+        [BusinessDedupeKey],
+        [RecipientUserId],
+        [ToEmail],
+        [ToEmailHash],
+        [TemplateKey],
+        [TemplateVersion],
+        [Subject],
+        [Provider],
+        [ProviderMessageId],
+        [Status],
+        [AttemptCount],
+        [LastAttemptAt],
+        [NextRetryAt],
+        [SentAt],
+        [FailedAt],
+        [DeadAt],
+        [SuppressedAt],
+        [AmbiguousAt],
+        [LastError],
+        [LastErrorCode],
+        [LastErrorClass],
+        [CorrelationId],
+        [CreatedAt],
+        [UpdatedAt]
+    FROM [notifications].[EmailDelivery]
+    WHERE [BusinessDedupeKey] = @BusinessDedupeKey;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_Search]
+    @Page INT = 1,
+    @PageSize INT = 20,
+    @FromCreatedAt DATETIME2(3) = NULL,
+    @ToCreatedAt DATETIME2(3) = NULL,
+    @RecipientUserId BIGINT = NULL,
+    @ToEmailHash VARCHAR(64) = NULL,
+    @TemplateKey NVARCHAR(100) = NULL,
+    @Status VARCHAR(20) = NULL,
+    @CorrelationId NVARCHAR(100) = NULL,
+    @MessageId CHAR(26) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Page IS NULL OR @Page <= 0
+        SET @Page = 1;
+
+    IF @PageSize IS NULL OR @PageSize <= 0
+        SET @PageSize = 20;
+
+    ;WITH [Filtered] AS
+    (
+        SELECT
+            [EmailDeliveryId],
+            [MessageId],
+            [BusinessDedupeKey],
+            [RecipientUserId],
+            [ToEmail],
+            [ToEmailHash],
+            [TemplateKey],
+            [TemplateVersion],
+            [Subject],
+            [Provider],
+            [ProviderMessageId],
+            [Status],
+            [AttemptCount],
+            [LastAttemptAt],
+            [NextRetryAt],
+            [SentAt],
+            [FailedAt],
+            [DeadAt],
+            [SuppressedAt],
+            [AmbiguousAt],
+            [LastErrorCode],
+            [LastErrorClass],
+            [CorrelationId],
+            [CreatedAt],
+            [UpdatedAt]
+        FROM [notifications].[EmailDelivery]
+        WHERE
+            (@FromCreatedAt IS NULL OR [CreatedAt] >= @FromCreatedAt)
+            AND (@ToCreatedAt IS NULL OR [CreatedAt] < @ToCreatedAt)
+            AND (@RecipientUserId IS NULL OR [RecipientUserId] = @RecipientUserId)
+            AND (@ToEmailHash IS NULL OR [ToEmailHash] = @ToEmailHash)
+            AND (@TemplateKey IS NULL OR [TemplateKey] = @TemplateKey)
+            AND (@Status IS NULL OR [Status] = @Status)
+            AND (@CorrelationId IS NULL OR [CorrelationId] = @CorrelationId)
+            AND (@MessageId IS NULL OR [MessageId] = @MessageId)
+    )
+    SELECT
+        [EmailDeliveryId],
+        [MessageId],
+        [BusinessDedupeKey],
+        [RecipientUserId],
+        [ToEmail],
+        [ToEmailHash],
+        [TemplateKey],
+        [TemplateVersion],
+        [Subject],
+        [Provider],
+        [ProviderMessageId],
+        [Status],
+        [AttemptCount],
+        [LastAttemptAt],
+        [NextRetryAt],
+        [SentAt],
+        [FailedAt],
+        [DeadAt],
+        [SuppressedAt],
+        [AmbiguousAt],
+        [LastErrorCode],
+        [LastErrorClass],
+        [CorrelationId],
+        [CreatedAt],
+        [UpdatedAt],
+        COUNT(1) OVER() AS [TotalCount]
+    FROM [Filtered]
+    ORDER BY [CreatedAt] DESC, [EmailDeliveryId] DESC
+    OFFSET ((@Page - 1) * @PageSize) ROWS
+    FETCH NEXT @PageSize ROWS ONLY;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_ClaimPending]
     @TopN INT = 100,
     @Now DATETIME2(3) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
+    SET XACT_ABORT ON;
 
     IF @TopN IS NULL OR @TopN <= 0
         SET @TopN = 100;
@@ -539,62 +720,69 @@ BEGIN
     IF @Now IS NULL
         SET @Now = SYSUTCDATETIME();
 
-    SELECT TOP (@TopN)
-        [EmailDeliveryId],
-        [MessageId],
-        [UserId],
-        [ToEmail],
-        [TemplateKey],
-        [Subject],
-        [Status],
-        [AttemptCount],
-        [ProviderMessageId],
-        [LastAttemptAt],
-        [SentAt],
-        [NextRetryAt],
-        [LastError],
-        [CorrelationId],
-        [CreatedAt],
-        [UpdatedAt]
-    FROM [notifications].[EmailDelivery]
-    WHERE
-        (
-            [Status] = 'Pending'
-            AND ([NextRetryAt] IS NULL OR [NextRetryAt] <= @Now)
-        )
-        OR
-        (
-            [Status] = 'Failed'
-            AND [NextRetryAt] IS NOT NULL
-            AND [NextRetryAt] <= @Now
-        )
-    ORDER BY
-        CASE WHEN [NextRetryAt] IS NULL THEN [CreatedAt] ELSE [NextRetryAt] END ASC,
-        [CreatedAt] ASC,
-        [EmailDeliveryId] ASC;
-END;
-GO
-
-CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkProcessing]
-    @EmailDeliveryId BIGINT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-
-    UPDATE [notifications].[EmailDelivery]
+    ;WITH [ClaimSet] AS
+    (
+        SELECT TOP (@TopN)
+            [EmailDeliveryId]
+        FROM [notifications].[EmailDelivery] WITH (READPAST, UPDLOCK, ROWLOCK)
+        WHERE
+            (
+                [Status] = 'Queued'
+                AND ([NextRetryAt] IS NULL OR [NextRetryAt] <= @Now)
+            )
+            OR
+            (
+                [Status] IN ('Failed', 'Ambiguous')
+                AND [NextRetryAt] IS NOT NULL
+                AND [NextRetryAt] <= @Now
+            )
+        ORDER BY
+            CASE WHEN [NextRetryAt] IS NULL THEN [CreatedAt] ELSE [NextRetryAt] END ASC,
+            [CreatedAt] ASC,
+            [EmailDeliveryId] ASC
+    )
+    UPDATE d
     SET
-        [Status] = 'Processing',
-        [LastAttemptAt] = SYSUTCDATETIME(),
-        [UpdatedAt] = SYSUTCDATETIME()
-    WHERE [EmailDeliveryId] = @EmailDeliveryId
-      AND [Status] IN ('Pending', 'Failed');
+        [Status] = 'Sending',
+        [LastAttemptAt] = @Now,
+        [UpdatedAt] = @Now
+    OUTPUT
+        INSERTED.[EmailDeliveryId],
+        INSERTED.[MessageId],
+        INSERTED.[BusinessDedupeKey],
+        INSERTED.[RecipientUserId],
+        INSERTED.[ToEmail],
+        INSERTED.[ToEmailHash],
+        INSERTED.[TemplateKey],
+        INSERTED.[TemplateVersion],
+        INSERTED.[Subject],
+        INSERTED.[Provider],
+        INSERTED.[ProviderMessageId],
+        INSERTED.[Status],
+        INSERTED.[AttemptCount],
+        INSERTED.[LastAttemptAt],
+        INSERTED.[NextRetryAt],
+        INSERTED.[SentAt],
+        INSERTED.[FailedAt],
+        INSERTED.[DeadAt],
+        INSERTED.[SuppressedAt],
+        INSERTED.[AmbiguousAt],
+        INSERTED.[LastError],
+        INSERTED.[LastErrorCode],
+        INSERTED.[LastErrorClass],
+        INSERTED.[CorrelationId],
+        INSERTED.[CreatedAt],
+        INSERTED.[UpdatedAt]
+    FROM [notifications].[EmailDelivery] d
+    INNER JOIN [ClaimSet] c
+        ON d.[EmailDeliveryId] = c.[EmailDeliveryId];
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkSent]
-    @EmailDeliveryId   BIGINT,
-    @ProviderMessageId NVARCHAR(200) = NULL
+    @EmailDeliveryId BIGINT,
+    @ProviderMessageId NVARCHAR(200) = NULL,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -603,19 +791,32 @@ BEGIN
     UPDATE [notifications].[EmailDelivery]
     SET
         [Status] = 'Sent',
+        [AttemptCount] = [AttemptCount] + 1,
         [ProviderMessageId] = @ProviderMessageId,
         [SentAt] = SYSUTCDATETIME(),
+        [FailedAt] = NULL,
+        [DeadAt] = NULL,
+        [SuppressedAt] = NULL,
+        [AmbiguousAt] = NULL,
+        [NextRetryAt] = NULL,
         [LastError] = NULL,
+        [LastErrorCode] = NULL,
+        [LastErrorClass] = NULL,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [EmailDeliveryId] = @EmailDeliveryId
-      AND [Status] IN ('Pending', 'Processing', 'Failed');
+      AND [Status] IN ('Queued', 'Sending', 'Failed', 'Ambiguous');
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkFailed]
     @EmailDeliveryId BIGINT,
     @NextRetryAt DATETIME2(3) = NULL,
-    @LastError NVARCHAR(2000) = NULL
+    @LastError NVARCHAR(2000) = NULL,
+    @LastErrorCode NVARCHAR(100) = NULL,
+    @LastErrorClass VARCHAR(30) = NULL,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -625,17 +826,25 @@ BEGIN
     SET
         [Status] = 'Failed',
         [AttemptCount] = [AttemptCount] + 1,
+        [FailedAt] = SYSUTCDATETIME(),
         [NextRetryAt] = @NextRetryAt,
         [LastError] = @LastError,
+        [LastErrorCode] = @LastErrorCode,
+        [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [EmailDeliveryId] = @EmailDeliveryId
-      AND [Status] IN ('Pending', 'Processing', 'Failed');
+      AND [Status] IN ('Queued', 'Sending', 'Failed', 'Ambiguous');
+
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkDeadLetter]
+CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkDead]
     @EmailDeliveryId BIGINT,
-    @LastError NVARCHAR(2000) = NULL
+    @LastError NVARCHAR(2000) = NULL,
+    @LastErrorCode NVARCHAR(100) = NULL,
+    @LastErrorClass VARCHAR(30) = NULL,
+    @AffectedRows INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -643,12 +852,263 @@ BEGIN
 
     UPDATE [notifications].[EmailDelivery]
     SET
-        [Status] = 'DeadLetter',
+        [Status] = 'Dead',
         [AttemptCount] = [AttemptCount] + 1,
+        [DeadAt] = SYSUTCDATETIME(),
         [NextRetryAt] = NULL,
         [LastError] = @LastError,
+        [LastErrorCode] = @LastErrorCode,
+        [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [EmailDeliveryId] = @EmailDeliveryId
-      AND [Status] IN ('Pending', 'Processing', 'Failed');
+      AND [Status] IN ('Queued', 'Sending', 'Failed', 'Ambiguous');
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkSuppressed]
+    @EmailDeliveryId BIGINT,
+    @LastError NVARCHAR(2000) = NULL,
+    @LastErrorCode NVARCHAR(100) = NULL,
+    @LastErrorClass VARCHAR(30) = 'Policy',
+    @AffectedRows INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    UPDATE [notifications].[EmailDelivery]
+    SET
+        [Status] = 'Suppressed',
+        [SuppressedAt] = SYSUTCDATETIME(),
+        [NextRetryAt] = NULL,
+        [LastError] = @LastError,
+        [LastErrorCode] = @LastErrorCode,
+        [LastErrorClass] = @LastErrorClass,
+        [UpdatedAt] = SYSUTCDATETIME()
+    WHERE [EmailDeliveryId] = @EmailDeliveryId
+      AND [Status] IN ('Queued', 'Sending', 'Failed', 'Ambiguous');
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkAmbiguous]
+    @EmailDeliveryId BIGINT,
+    @NextRetryAt DATETIME2(3) = NULL,
+    @LastError NVARCHAR(2000) = NULL,
+    @LastErrorCode NVARCHAR(100) = NULL,
+    @LastErrorClass VARCHAR(30) = 'Ambiguous',
+    @AffectedRows INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    UPDATE [notifications].[EmailDelivery]
+    SET
+        [Status] = 'Ambiguous',
+        [AttemptCount] = [AttemptCount] + 1,
+        [AmbiguousAt] = SYSUTCDATETIME(),
+        [NextRetryAt] = @NextRetryAt,
+        [LastError] = @LastError,
+        [LastErrorCode] = @LastErrorCode,
+        [LastErrorClass] = @LastErrorClass,
+        [UpdatedAt] = SYSUTCDATETIME()
+    WHERE [EmailDeliveryId] = @EmailDeliveryId
+      AND [Status] IN ('Queued', 'Sending', 'Failed', 'Ambiguous');
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_ResetToQueued]
+    @EmailDeliveryId BIGINT,
+    @AffectedRows INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    UPDATE [notifications].[EmailDelivery]
+    SET
+        [Status] = 'Queued',
+        [NextRetryAt] = NULL,
+        [LastError] = NULL,
+        [LastErrorCode] = NULL,
+        [LastErrorClass] = NULL,
+        [UpdatedAt] = SYSUTCDATETIME()
+    WHERE [EmailDeliveryId] = @EmailDeliveryId
+      AND [Status] IN ('Failed', 'Dead', 'Ambiguous', 'Suppressed', 'Sending');
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+/* =========================================================
+   [notifications].[EmailDeliveryAttempt]
+   ========================================================= */
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDeliveryAttempt_Insert]
+    @EmailDeliveryId BIGINT,
+    @AttemptNumber INT,
+    @StartedAt DATETIME2(3) = NULL,
+    @FinishedAt DATETIME2(3) = NULL,
+    @Outcome VARCHAR(30),
+    @IsAmbiguous BIT = 0,
+    @ProviderMessageId NVARCHAR(200) = NULL,
+    @ProviderErrorCode NVARCHAR(100) = NULL,
+    @ErrorClass VARCHAR(30) = NULL,
+    @ErrorDetail NVARCHAR(2000) = NULL,
+    @CorrelationId NVARCHAR(100) = NULL,
+    @EmailDeliveryAttemptId BIGINT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @StartedAt IS NULL
+        SET @StartedAt = SYSUTCDATETIME();
+
+    INSERT INTO [notifications].[EmailDeliveryAttempt]
+    (
+        [EmailDeliveryId],
+        [AttemptNumber],
+        [StartedAt],
+        [FinishedAt],
+        [Outcome],
+        [IsAmbiguous],
+        [ProviderMessageId],
+        [ProviderErrorCode],
+        [ErrorClass],
+        [ErrorDetail],
+        [CorrelationId]
+    )
+    VALUES
+    (
+        @EmailDeliveryId,
+        @AttemptNumber,
+        @StartedAt,
+        @FinishedAt,
+        @Outcome,
+        @IsAmbiguous,
+        @ProviderMessageId,
+        @ProviderErrorCode,
+        @ErrorClass,
+        @ErrorDetail,
+        @CorrelationId
+    );
+
+    SET @EmailDeliveryAttemptId = SCOPE_IDENTITY();
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDeliveryAttempt_SelectByEmailDeliveryId]
+    @EmailDeliveryId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        [EmailDeliveryAttemptId],
+        [EmailDeliveryId],
+        [AttemptNumber],
+        [StartedAt],
+        [FinishedAt],
+        [Outcome],
+        [IsAmbiguous],
+        [ProviderMessageId],
+        [ProviderErrorCode],
+        [ErrorClass],
+        [ErrorDetail],
+        [CorrelationId],
+        [CreatedAt]
+    FROM [notifications].[EmailDeliveryAttempt]
+    WHERE [EmailDeliveryId] = @EmailDeliveryId
+    ORDER BY [AttemptNumber] ASC, [EmailDeliveryAttemptId] ASC;
+END;
+GO
+
+/* =========================================================
+   [notifications].[EmailRateLimitLog]
+   ========================================================= */
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailRateLimitLog_Insert]
+    @RecipientUserId BIGINT = NULL,
+    @Endpoint NVARCHAR(60),
+    @ToEmail NVARCHAR(320) = NULL,
+    @ToEmailHash VARCHAR(64) = NULL,
+    @IpAddress NVARCHAR(45) = NULL,
+    @Allowed BIT,
+    @Reason NVARCHAR(120) = NULL,
+    @DecisionKey NVARCHAR(150) = NULL,
+    @CorrelationId NVARCHAR(100) = NULL,
+    @EmailRateLimitLogId BIGINT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    INSERT INTO [notifications].[EmailRateLimitLog]
+    (
+        [RecipientUserId],
+        [Endpoint],
+        [ToEmail],
+        [ToEmailHash],
+        [IpAddress],
+        [Allowed],
+        [Reason],
+        [DecisionKey],
+        [CorrelationId]
+    )
+    VALUES
+    (
+        @RecipientUserId,
+        @Endpoint,
+        @ToEmail,
+        @ToEmailHash,
+        @IpAddress,
+        @Allowed,
+        @Reason,
+        @DecisionKey,
+        @CorrelationId
+    );
+
+    SET @EmailRateLimitLogId = SCOPE_IDENTITY();
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailRateLimitLog_SelectRange]
+    @FromOccurredAt DATETIME2(3),
+    @ToOccurredAt DATETIME2(3),
+    @Endpoint NVARCHAR(60) = NULL,
+    @RecipientUserId BIGINT = NULL,
+    @ToEmailHash VARCHAR(64) = NULL,
+    @Allowed BIT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        [EmailRateLimitLogId],
+        [RecipientUserId],
+        [Endpoint],
+        [ToEmail],
+        [ToEmailHash],
+        [IpAddress],
+        [Allowed],
+        [Reason],
+        [DecisionKey],
+        [CorrelationId],
+        [OccurredAt]
+    FROM [notifications].[EmailRateLimitLog]
+    WHERE [OccurredAt] >= @FromOccurredAt
+      AND [OccurredAt] < @ToOccurredAt
+      AND (@Endpoint IS NULL OR [Endpoint] = @Endpoint)
+      AND (@RecipientUserId IS NULL OR [RecipientUserId] = @RecipientUserId)
+      AND (@ToEmailHash IS NULL OR [ToEmailHash] = @ToEmailHash)
+      AND (@Allowed IS NULL OR [Allowed] = @Allowed)
+    ORDER BY [OccurredAt] DESC, [EmailRateLimitLogId] DESC;
 END;
 GO
