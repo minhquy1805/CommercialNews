@@ -4,6 +4,8 @@ using Content.Application.DependencyInjection;
 using Content.Infrastructure.DependencyInjection;
 using Identity.Application.DependencyInjection;
 using Identity.Infrastructure.DependencyInjection;
+using Interaction.Application.DependencyInjection;
+using Interaction.Infrastructure.DependencyInjection;
 using Media.Application.DependencyInjection;
 using Media.Infrastructure.DependencyInjection;
 using Reading.Application.DependencyInjection;
@@ -25,7 +27,6 @@ public static class ModuleRegistration
         services.AddContentApplication();
         services.AddContentInfrastructure();
 
-
         services.AddIdentityApplication();
         services.AddIdentityInfrastructure();
 
@@ -40,6 +41,9 @@ public static class ModuleRegistration
 
         services.AddReadingApplication();
         services.AddReadingInfrastructure();
+
+        services.AddInteractionApplication();
+        services.AddInteractionInfrastructure();
 
         return services;
     }
