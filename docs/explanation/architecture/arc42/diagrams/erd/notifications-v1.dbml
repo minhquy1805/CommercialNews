@@ -4,12 +4,21 @@
 //
 // Purpose
 // - Reliable async emails using Outbox + delivery state machine.
-// - Core flows write to Outbox only; worker drives sending & retries.
+// - Core flows write business truth + outbox only; worker drives sending & retries.
+// - Two-layer idempotency:
+//   1) message-level dedupe
+//   2) business-intent dedupe
 //
-// Design notes
-// - Idempotency via unique MessageKey.
-// - EmailDelivery is 1 workflow per MessageKey (dedup).
-// - Never store raw secrets/tokens in payloads or errors (redaction required).
+// V1 goals
+// - Non-blocking notification delivery
+// - Durable delivery-state truth
+// - Safe retry / dead / ambiguous handling
+// - Minimal ops visibility + future-ready design
+//
+// Important rules
+// - Never store raw secrets/tokens in payloads/errors.
+// - Provider timeout is ambiguous; do not assume "not sent".
+// - Redis is supplementary only, not canonical harmful-duplicate protection.
 // =====================================================
 
 Enum OutboxStatusEnum {
@@ -24,110 +33,222 @@ Enum EmailDeliveryStatusEnum {
   Sending
   Sent
   Failed
+  Dead
+  Suppressed
+  Ambiguous
+}
+
+Enum EmailAttemptOutcomeEnum {
+  Sent
+  Failed
+  Timeout
+  Suppressed
+  Skipped
+  ProviderRejected
+}
+
+Enum EmailErrorClassEnum {
+  Transient
+  Permanent
+  Ambiguous
+  Policy
+  Template
+  Provider
+  Validation
 }
 
 Table OutboxMessage {
   OutboxId bigint [pk, increment]
 
-  MessageKey uniqueidentifier [not null, default: `NEWID()`] // idempotency key
+  // Message-level dedupe / event identity
+  MessageKey uniqueidentifier [not null, default: `NEWID()`]
+  EventId uniqueidentifier [not null]
 
-  EventType nvarchar(120) [not null]        // Auth.EmailVerificationRequested, Auth.PasswordResetRequested, ...
+  EventType nvarchar(120) [not null]        // Auth.EmailVerificationRequested, Auth.PasswordResetRequested, Content.ArticlePublished
   AggregateType nvarchar(60) [not null]     // User, Article
-  AggregateId nvarchar(100) [not null]      // string for cross-module ids
+  AggregateId nvarchar(100) [not null]      // cross-module id as string
 
-  PayloadJson nvarchar(max) [not null]      // minimal + redacted (no raw tokens)
-  Priority tinyint [not null, default: 5]   // 1=highest (verify/reset)
+  CorrelationId nvarchar(100) [null]
 
+  PayloadJson nvarchar(max) [not null]      // minimal + redacted (no raw tokens/secrets)
+  Priority tinyint [not null, default: 5]   // 1 = highest
   OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
 
   Status varchar(20) [not null, default: "Pending"] // Pending/Processing/Processed/Failed
   RetryCount int [not null, default: 0]
   NextRetryAt datetime2(3) [null]
-  LastError nvarchar(500) [null]            // redacted
+  LastError nvarchar(500) [null]            // redacted/sanitized
+  LastErrorCode nvarchar(100) [null]
+  LastErrorClass varchar(30) [null]         // EmailErrorClassEnum
   ProcessedAt datetime2(3) [null]
 
-  // V2 hooks (not used in V1 but safe to add later):
-  // PartitionKey nvarchar(100) [null]
-  // ExpiresAt datetime2(3) [null]
+  // V2 hooks
+  PartitionKey nvarchar(100) [null]
+  ExpiresAt datetime2(3) [null]
 
   Indexes {
     (MessageKey) [unique, name: "UQ_Outbox_MessageKey"]
+    (EventId) [unique, name: "UQ_Outbox_EventId"]
 
-    // worker pulling backlog efficiently (priority + retry time)
+    // worker backlog pull
     (Status, Priority, NextRetryAt) [name: "IX_Outbox_Status_Priority_NextRetryAt"]
 
     (OccurredAt) [name: "IX_Outbox_OccurredAt"]
     (AggregateType, AggregateId, OccurredAt) [name: "IX_Outbox_Aggregate"]
+    (CorrelationId, OccurredAt) [name: "IX_Outbox_CorrelationId_OccurredAt"]
   }
 
-  Note: "Durable async intent. Do not store raw verification/reset/refresh tokens in PayloadJson."
+  Note: "Durable async intent. Raw verification/reset tokens must never be stored here."
 }
 
 Table EmailDelivery {
   EmailDeliveryId bigint [pk, increment]
 
-  MessageKey uniqueidentifier [not null] // link to OutboxMessage.MessageKey (dedup)
+  // Message-level identity
+  MessageKey uniqueidentifier [not null]
+  EventId uniqueidentifier [not null]
 
-  UserId bigint [null]                   // optional (cross-module ref -> Identity.UserAccount)
-  ToEmail nvarchar(320) [not null]
+  // Business-intent dedupe (canonical harmful-duplicate protection)
+  // Example:
+  // - verify-email|user:123|token:abc-hash
+  // - reset-password|user:123|token:def-hash
+  // - new-article|user:123|article:456|pubver:7
+  BusinessDedupeKey nvarchar(300) [not null]
 
-  TemplateKey nvarchar(80) [not null]    // VerifyEmail/ResetPassword/NewArticle
-  TemplateVersion int [null]             // V2-ready
+  CorrelationId nvarchar(100) [null]
+
+  RecipientUserId bigint [null]             // external ref -> Identity.UserAccount
+  ToEmail nvarchar(320) [not null]          // actual recipient (PII)
+  ToEmailHash varchar(64) [null]            // sha-256/hex or similar for safer ops lookups
+
+  TemplateKey nvarchar(80) [not null]       // VerifyEmail/ResetPassword/NewArticle
+  TemplateVersion int [null]                // V2-ready
   Subject nvarchar(200) [null]
 
   Provider varchar(30) [not null, default: "smtp"] // smtp/sendgrid/...
-  Status varchar(20) [not null, default: "Queued"] // Queued/Sending/Sent/Failed
+  ProviderMessageId nvarchar(120) [null]           // V2/V1.1 helpful for ops if policy allows
+
+  Status varchar(20) [not null, default: "Queued"] // Queued/Sending/Sent/Failed/Dead/Suppressed/Ambiguous
 
   AttemptCount int [not null, default: 0]
   LastAttemptAt datetime2(3) [null]
-  SentAt datetime2(3) [null]             // terminal when Sent
-  LastError nvarchar(500) [null]         // redacted
+  NextRetryAt datetime2(3) [null]
 
-  CorrelationId nvarchar(100) [null]
+  SentAt datetime2(3) [null]
+  FailedAt datetime2(3) [null]
+  DeadAt datetime2(3) [null]
+  SuppressedAt datetime2(3) [null]
+  AmbiguousAt datetime2(3) [null]
+
+  LastError nvarchar(500) [null]            // redacted only
+  LastErrorCode nvarchar(100) [null]
+  LastErrorClass varchar(30) [null]         // EmailErrorClassEnum
 
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
   UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
 
-  // V2 hooks:
-  // ProviderMessageId nvarchar(120) [null]
-  // OpenCount int [not null, default: 0]
-  // ClickCount int [not null, default: 0]
+  // V2 hooks
+  PublishedVersion bigint [null]            // useful for article-publish notification intents
+  ExpiresAt datetime2(3) [null]             // retention / staleness hook
 
   Indexes {
-    (MessageKey) [unique, name: "UQ_EmailDelivery_MessageKey"] // one workflow per MessageKey
+    (MessageKey) [unique, name: "UQ_EmailDelivery_MessageKey"]
+    (BusinessDedupeKey) [unique, name: "UQ_EmailDelivery_BusinessDedupeKey"]
 
-    (Status, LastAttemptAt) [name: "IX_EmailDelivery_Status_LastAttemptAt"]
-    (UserId, CreatedAt) [name: "IX_EmailDelivery_UserId_CreatedAt"]
+    (Status, NextRetryAt, LastAttemptAt) [name: "IX_EmailDelivery_Status_NextRetryAt_LastAttemptAt"]
+    (RecipientUserId, CreatedAt) [name: "IX_EmailDelivery_RecipientUserId_CreatedAt"]
     (TemplateKey, CreatedAt) [name: "IX_EmailDelivery_TemplateKey_CreatedAt"]
-    (ToEmail, CreatedAt) [name: "IX_EmailDelivery_ToEmail_CreatedAt"] // optional (PII)
+    (EventId, CreatedAt) [name: "IX_EmailDelivery_EventId_CreatedAt"]
+    (CorrelationId, CreatedAt) [name: "IX_EmailDelivery_CorrelationId_CreatedAt"]
+    (ToEmailHash, CreatedAt) [name: "IX_EmailDelivery_ToEmailHash_CreatedAt"]
+    (Provider, Status, LastAttemptAt) [name: "IX_EmailDelivery_Provider_Status_LastAttemptAt"]
   }
 
-  Note: "Delivery state machine: Queued -> Sending -> Sent/Failed. Sent is terminal."
+  Note: "Canonical delivery-state truth. MessageKey = message-level identity; BusinessDedupeKey = harmful-duplicate protection."
+}
+
+Table EmailDeliveryAttempt {
+  EmailDeliveryAttemptId bigint [pk, increment]
+
+  EmailDeliveryId bigint [not null]
+  AttemptNumber int [not null]
+
+  StartedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  FinishedAt datetime2(3) [null]
+
+  Outcome varchar(30) [not null]            // EmailAttemptOutcomeEnum
+  IsAmbiguous bit [not null, default: 0]
+
+  ProviderMessageId nvarchar(120) [null]
+  ProviderErrorCode nvarchar(100) [null]
+  ErrorClass varchar(30) [null]             // EmailErrorClassEnum
+  ErrorDetail nvarchar(500) [null]          // redacted/sanitized only
+
+  CorrelationId nvarchar(100) [null]
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  Indexes {
+    (EmailDeliveryId, AttemptNumber) [unique, name: "UQ_EmailDeliveryAttempt_EmailDeliveryId_AttemptNumber"]
+    (EmailDeliveryId, StartedAt) [name: "IX_EmailDeliveryAttempt_EmailDeliveryId_StartedAt"]
+    (Outcome, StartedAt) [name: "IX_EmailDeliveryAttempt_Outcome_StartedAt"]
+    (IsAmbiguous, StartedAt) [name: "IX_EmailDeliveryAttempt_IsAmbiguous_StartedAt"]
+  }
+
+  Note: "Attempt-level operational history. Useful for admin detail API and incident investigation."
+}
+
+Table EmailSuppression {
+  EmailSuppressionId bigint [pk, increment]
+
+  RecipientUserId bigint [null]
+  ToEmailHash varchar(64) [not null]
+
+  Reason nvarchar(120) [null]               // Bounce/Complaint/Manual/Policy/...
+  IsActive bit [not null, default: 1]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  ExpiresAt datetime2(3) [null]
+
+  CreatedByUserId bigint [null]             // operator/admin if manual
+  RemovedAt datetime2(3) [null]
+  RemovedByUserId bigint [null]
+
+  CorrelationId nvarchar(100) [null]
+
+  Indexes {
+    (ToEmailHash, IsActive) [name: "IX_EmailSuppression_ToEmailHash_IsActive"]
+    (RecipientUserId, IsActive) [name: "IX_EmailSuppression_RecipientUserId_IsActive"]
+  }
+
+  Note: "Optional but recommended. Supports suppressed delivery outcome and admin unsuppress operation."
 }
 
 Table EmailRateLimitLog {
   RateLogId bigint [pk, increment]
 
-  UserId bigint [null]                   // optional (cross-module ref)
-  Endpoint nvarchar(60) [not null]       // register/forgot/resend
+  RecipientUserId bigint [null]
+  Endpoint nvarchar(60) [not null]          // register/forgot/resend
   ToEmail nvarchar(320) [null]
+  ToEmailHash varchar(64) [null]
   IpAddress nvarchar(45) [null]
 
   Allowed bit [not null, default: 1]
-  Reason nvarchar(120) [null]            // RateLimited/Blocked/...
+  Reason nvarchar(120) [null]               // RateLimited/Blocked/...
+  DecisionKey nvarchar(150) [null]          // helpful for investigations
   OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
   CorrelationId nvarchar(100) [null]
 
   Indexes {
-    (UserId, OccurredAt) [name: "IX_RateLog_UserId_OccurredAt"]
+    (RecipientUserId, OccurredAt) [name: "IX_RateLog_RecipientUserId_OccurredAt"]
     (IpAddress, OccurredAt) [name: "IX_RateLog_IpAddress_OccurredAt"]
     (Endpoint, OccurredAt) [name: "IX_RateLog_Endpoint_OccurredAt"]
+    (ToEmailHash, OccurredAt) [name: "IX_RateLog_ToEmailHash_OccurredAt"]
   }
 
-  Note: "Optional. Rate limiting is primarily Redis/app; DB log supports investigations."
+  Note: "Optional. Rate limiting remains primarily Redis/app-layer; DB log is for investigations."
 }
 
-// ---------- External stub (optional, for ERD readability) ----------
+// ---------- External stubs (ERD readability only) ----------
 Table IdentityUserAccount {
   UserId bigint [pk]
   Note: "EXTERNAL (Identity module). Stub for ERD readability only."
@@ -135,12 +256,19 @@ Table IdentityUserAccount {
 
 // ---------- Relationships ----------
 Ref: EmailDelivery.MessageKey > OutboxMessage.MessageKey
-Ref: EmailDelivery.UserId > IdentityUserAccount.UserId
-Ref: EmailRateLimitLog.UserId > IdentityUserAccount.UserId
+Ref: EmailDelivery.EventId > OutboxMessage.EventId
+Ref: EmailDeliveryAttempt.EmailDeliveryId > EmailDelivery.EmailDeliveryId
+Ref: EmailDelivery.RecipientUserId > IdentityUserAccount.UserId
+Ref: EmailSuppression.RecipientUserId > IdentityUserAccount.UserId
+Ref: EmailRateLimitLog.RecipientUserId > IdentityUserAccount.UserId
 
 // ---------- SQL Server enforcement notes ----------
 // 1) CHECK OutboxMessage.Status IN ('Pending','Processing','Processed','Failed')
-// 2) CHECK EmailDelivery.Status IN ('Queued','Sending','Sent','Failed')
-// 3) CHECK AttemptCount >= 0 and RetryCount >= 0
-// 4) Idempotency: unique MessageKey prevents duplicate workflow / duplicate sends under retries.
-// 5) PayloadJson and LastError must be redacted (no raw tokens/secrets/PII beyond policy).
+// 2) CHECK EmailDelivery.Status IN ('Queued','Sending','Sent','Failed','Dead','Suppressed','Ambiguous')
+// 3) CHECK EmailDeliveryAttempt.Outcome IN ('Sent','Failed','Timeout','Suppressed','Skipped','ProviderRejected')
+// 4) CHECK LastErrorClass / ErrorClass values follow EmailErrorClassEnum
+// 5) CHECK AttemptCount >= 0 and RetryCount >= 0 and AttemptNumber > 0
+// 6) Sent is terminal. Dead is terminal. Suppressed is terminal by policy.
+// 7) PayloadJson, ErrorDetail, LastError must be redacted (no raw tokens/secrets).
+// 8) Redis may be used for hot dedupe/rate limit, but durable duplicate protection lives in SQL.
+// 9) BusinessDedupeKey must be canonical and stable per notification type.
