@@ -6,12 +6,19 @@
   - Includes:
       * [notifications].[OutboxMessage]
       * [notifications].[EmailDelivery]
+      * [notifications].[EmailDeliveryAttempt]
+      * [notifications].[EmailRateLimitLog]
 
   Notes:
   - Idempotent: safe to re-run.
-  - Unique constraints on [MessageId] are already defined in 001_tables.sql.
+  - PK / UQ / FK / CHECK constraints are defined in 001_tables.sql.
+  - Index design focuses on:
+      * worker polling / retry scheduling
+      * replay / remediation / cleanup
+      * admin ops inspection
+      * correlation-based troubleshooting
+      * privacy-safer recipient lookups
 */
-
 
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
@@ -34,16 +41,34 @@ GO
 
 IF OBJECT_ID(N'[notifications].[OutboxMessage]', N'U') IS NULL
 BEGIN
-    THROW 52103, 'Table [notifications].[OutboxMessage] does not exist. Run 001_tables.sql first.', 1;
+    THROW 52103, 'Table [notifications].[OutboxMessage] does not exist. Run notifications 001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[notifications].[EmailDelivery]', N'U') IS NULL
+BEGIN
+    THROW 52104, 'Table [notifications].[EmailDelivery] does not exist. Run notifications 001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[notifications].[EmailDeliveryAttempt]', N'U') IS NULL
+BEGIN
+    THROW 52105, 'Table [notifications].[EmailDeliveryAttempt] does not exist. Run notifications 001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[notifications].[EmailRateLimitLog]', N'U') IS NULL
+BEGIN
+    THROW 52106, 'Table [notifications].[EmailRateLimitLog] does not exist. Run notifications 001_tables.sql first.', 1;
 END
 GO
 
 /* =========================================================
-   1) Worker polling / retry scheduling
+   1) [notifications].[OutboxMessage]
    ========================================================= */
 
 -- Main worker pull path:
--- Pending / Failed messages ordered by retry schedule and occurrence time.
+-- Pending / Failed / DeadLetter candidates ordered by retry schedule and occurrence time.
 IF NOT EXISTS
 (
     SELECT 1
@@ -62,12 +87,14 @@ BEGIN
     INCLUDE
     (
         [MessageId],
+        [Priority],
         [EventType],
         [AggregateType],
         [AggregateId],
         [AggregateVersion],
         [CorrelationId],
-        [AttemptCount]
+        [AttemptCount],
+        [PublishedAt]
     );
 
     PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_NextRetryAt_OccurredAt]';
@@ -78,11 +105,7 @@ BEGIN
 END
 GO
 
-/* =========================================================
-   2) Per-aggregate ordering / troubleshooting
-   ========================================================= */
-
--- Investigate event ordering for a single aggregate.
+-- Per-aggregate troubleshooting / ordering investigation.
 IF NOT EXISTS
 (
     SELECT 1
@@ -116,11 +139,7 @@ BEGIN
 END
 GO
 
-/* =========================================================
-   3) Replay / time-range queries
-   ========================================================= */
-
--- Time-ordered replay / rebuild / audit support
+-- Time-range replay / rebuild / audit support.
 IF NOT EXISTS
 (
     SELECT 1
@@ -137,7 +156,8 @@ BEGIN
         [EventType],
         [AggregateType],
         [AggregateId],
-        [Status]
+        [Status],
+        [Priority]
     );
 
     PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_OccurredAt]';
@@ -148,11 +168,7 @@ BEGIN
 END
 GO
 
-/* =========================================================
-   4) Published / retention / cleanup support
-   ========================================================= */
-
--- Retention and cleanup for published messages
+-- Cleanup / retention / publication investigation.
 IF NOT EXISTS
 (
     SELECT 1
@@ -168,7 +184,8 @@ BEGIN
         [MessageId],
         [Status],
         [OccurredAt],
-        [EventType]
+        [EventType],
+        [AttemptCount]
     );
 
     PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_PublishedAt]';
@@ -179,11 +196,7 @@ BEGIN
 END
 GO
 
-/* =========================================================
-   5) Failed / dead-letter investigation
-   ========================================================= */
-
--- Troubleshoot repeated failures / poison messages
+-- Poison-message / repeated failure investigation.
 IF NOT EXISTS
 (
     SELECT 1
@@ -206,7 +219,9 @@ BEGIN
         [AggregateType],
         [AggregateId],
         [LastAttemptAt],
-        [LastError]
+        [LastError],
+        [LastErrorCode],
+        [LastErrorClass]
     );
 
     PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_AttemptCount_OccurredAt]';
@@ -217,11 +232,7 @@ BEGIN
 END
 GO
 
-/* =========================================================
-   6) Correlation-based troubleshooting
-   ========================================================= */
-
--- Trace a flow end-to-end by CorrelationId
+-- Correlation-based end-to-end tracing.
 IF NOT EXISTS
 (
     SELECT 1
@@ -242,7 +253,8 @@ BEGIN
         [EventType],
         [AggregateType],
         [AggregateId],
-        [Status]
+        [Status],
+        [Priority]
     );
 
     PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_CorrelationId_OccurredAt]';
@@ -254,17 +266,10 @@ END
 GO
 
 /* =========================================================
-   EmailDelivery indexes
+   2) [notifications].[EmailDelivery]
    ========================================================= */
 
--- Worker retry / send queue
-
-IF OBJECT_ID(N'[notifications].[EmailDelivery]', N'U') IS NULL
-BEGIN
-    THROW 52104, 'Table [notifications].[EmailDelivery] does not exist. Run notifications 001_tables.sql first.', 1;
-END
-GO
-
+-- Main delivery queue / retry worker path.
 IF NOT EXISTS
 (
     SELECT 1
@@ -283,10 +288,13 @@ BEGIN
     INCLUDE
     (
         [MessageId],
-        [ToEmail],
+        [RecipientUserId],
+        [ToEmailHash],
         [TemplateKey],
         [AttemptCount],
-        [CorrelationId]
+        [CorrelationId],
+        [LastAttemptAt],
+        [Provider]
     );
 
     PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_Status_NextRetryAt_CreatedAt]';
@@ -297,51 +305,19 @@ BEGIN
 END
 GO
 
--- Per-user delivery review
+-- Per-recipient-user ops review.
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE [name] = N'IX_EmailDelivery_UserId_CreatedAt'
+    WHERE [name] = N'IX_EmailDelivery_RecipientUserId_CreatedAt'
       AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_UserId_CreatedAt]
+    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_RecipientUserId_CreatedAt]
     ON [notifications].[EmailDelivery]
     (
-        [UserId] ASC,
-        [CreatedAt] ASC
-    )
-    INCLUDE
-    (
-        [MessageId],
-        [ToEmail],
-        [TemplateKey],
-        [Status],
-        [SentAt]
-    );
-
-    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_UserId_CreatedAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_UserId_CreatedAt]';
-END
-GO
-
--- Troubleshooting by email + time
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_EmailDelivery_ToEmail_CreatedAt'
-      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_ToEmail_CreatedAt]
-    ON [notifications].[EmailDelivery]
-    (
-        [ToEmail] ASC,
+        [RecipientUserId] ASC,
         [CreatedAt] ASC
     )
     INCLUDE
@@ -350,19 +326,118 @@ BEGIN
         [TemplateKey],
         [Status],
         [AttemptCount],
-        [SentAt]
+        [SentAt],
+        [CorrelationId]
     );
 
-    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_ToEmail_CreatedAt]';
+    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_RecipientUserId_CreatedAt]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_ToEmail_CreatedAt]';
+    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_RecipientUserId_CreatedAt]';
 END
 GO
 
--- Sent mail retention / cleanup / reporting
+-- Privacy-safer recipient lookup.
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDelivery_ToEmailHash_CreatedAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_ToEmailHash_CreatedAt]
+    ON [notifications].[EmailDelivery]
+    (
+        [ToEmailHash] ASC,
+        [CreatedAt] ASC
+    )
+    INCLUDE
+    (
+        [MessageId],
+        [TemplateKey],
+        [Status],
+        [AttemptCount],
+        [SentAt],
+        [CorrelationId]
+    );
 
+    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_ToEmailHash_CreatedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_ToEmailHash_CreatedAt]';
+END
+GO
+
+-- Template-based reporting / dashboard queries.
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDelivery_TemplateKey_CreatedAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_TemplateKey_CreatedAt]
+    ON [notifications].[EmailDelivery]
+    (
+        [TemplateKey] ASC,
+        [CreatedAt] ASC
+    )
+    INCLUDE
+    (
+        [MessageId],
+        [Status],
+        [AttemptCount],
+        [SentAt],
+        [LastErrorCode],
+        [LastErrorClass]
+    );
+
+    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_TemplateKey_CreatedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_TemplateKey_CreatedAt]';
+END
+GO
+
+-- Correlation-based troubleshooting.
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDelivery_CorrelationId_CreatedAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_CorrelationId_CreatedAt]
+    ON [notifications].[EmailDelivery]
+    (
+        [CorrelationId] ASC,
+        [CreatedAt] ASC
+    )
+    INCLUDE
+    (
+        [MessageId],
+        [TemplateKey],
+        [Status],
+        [AttemptCount],
+        [RecipientUserId],
+        [ToEmailHash]
+    );
+
+    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_CorrelationId_CreatedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_CorrelationId_CreatedAt]';
+END
+GO
+
+-- Delivery cleanup / retention / sent-mail reporting.
 IF NOT EXISTS
 (
     SELECT 1
@@ -376,9 +451,10 @@ BEGIN
     INCLUDE
     (
         [MessageId],
-        [Status],
         [TemplateKey],
-        [ToEmail]
+        [Status],
+        [RecipientUserId],
+        [ToEmailHash]
     );
 
     PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_SentAt]';
@@ -386,5 +462,264 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_SentAt]';
+END
+GO
+
+-- Failed / ambiguous / dead investigation.
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDelivery_Status_LastAttemptAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_Status_LastAttemptAt]
+    ON [notifications].[EmailDelivery]
+    (
+        [Status] ASC,
+        [LastAttemptAt] DESC
+    )
+    INCLUDE
+    (
+        [MessageId],
+        [TemplateKey],
+        [AttemptCount],
+        [LastErrorCode],
+        [LastErrorClass],
+        [CorrelationId]
+    );
+
+    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_Status_LastAttemptAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_Status_LastAttemptAt]';
+END
+GO
+
+/* =========================================================
+   3) [notifications].[EmailDeliveryAttempt]
+   ========================================================= */
+
+-- Detail history lookup for a delivery.
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDeliveryAttempt_EmailDeliveryId_StartedAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDeliveryAttempt]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDeliveryAttempt_EmailDeliveryId_StartedAt]
+    ON [notifications].[EmailDeliveryAttempt]
+    (
+        [EmailDeliveryId] ASC,
+        [StartedAt] ASC
+    )
+    INCLUDE
+    (
+        [AttemptNumber],
+        [Outcome],
+        [IsAmbiguous],
+        [FinishedAt],
+        [ProviderMessageId],
+        [ProviderErrorCode],
+        [ErrorClass]
+    );
+
+    PRINT N'Created index: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_EmailDeliveryId_StartedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_EmailDeliveryId_StartedAt]';
+END
+GO
+
+-- Outcome-based ops investigation.
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDeliveryAttempt_Outcome_StartedAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDeliveryAttempt]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDeliveryAttempt_Outcome_StartedAt]
+    ON [notifications].[EmailDeliveryAttempt]
+    (
+        [Outcome] ASC,
+        [StartedAt] ASC
+    )
+    INCLUDE
+    (
+        [EmailDeliveryId],
+        [AttemptNumber],
+        [IsAmbiguous],
+        [ErrorClass],
+        [ProviderErrorCode]
+    );
+
+    PRINT N'Created index: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_Outcome_StartedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_Outcome_StartedAt]';
+END
+GO
+
+-- Ambiguity / timeout investigation.
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDeliveryAttempt_IsAmbiguous_StartedAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDeliveryAttempt]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDeliveryAttempt_IsAmbiguous_StartedAt]
+    ON [notifications].[EmailDeliveryAttempt]
+    (
+        [IsAmbiguous] ASC,
+        [StartedAt] ASC
+    )
+    INCLUDE
+    (
+        [EmailDeliveryId],
+        [AttemptNumber],
+        [Outcome],
+        [ErrorClass],
+        [ProviderErrorCode]
+    );
+
+    PRINT N'Created index: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_IsAmbiguous_StartedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_IsAmbiguous_StartedAt]';
+END
+GO
+
+/* =========================================================
+   4) [notifications].[EmailRateLimitLog]
+   ========================================================= */
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailRateLimitLog_RecipientUserId_OccurredAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailRateLimitLog]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailRateLimitLog_RecipientUserId_OccurredAt]
+    ON [notifications].[EmailRateLimitLog]
+    (
+        [RecipientUserId] ASC,
+        [OccurredAt] ASC
+    )
+    INCLUDE
+    (
+        [Endpoint],
+        [Allowed],
+        [Reason],
+        [CorrelationId]
+    );
+
+    PRINT N'Created index: [notifications].[EmailRateLimitLog].[IX_EmailRateLimitLog_RecipientUserId_OccurredAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailRateLimitLog].[IX_EmailRateLimitLog_RecipientUserId_OccurredAt]';
+END
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailRateLimitLog_IpAddress_OccurredAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailRateLimitLog]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailRateLimitLog_IpAddress_OccurredAt]
+    ON [notifications].[EmailRateLimitLog]
+    (
+        [IpAddress] ASC,
+        [OccurredAt] ASC
+    )
+    INCLUDE
+    (
+        [Endpoint],
+        [Allowed],
+        [Reason],
+        [CorrelationId]
+    );
+
+    PRINT N'Created index: [notifications].[EmailRateLimitLog].[IX_EmailRateLimitLog_IpAddress_OccurredAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailRateLimitLog].[IX_EmailRateLimitLog_IpAddress_OccurredAt]';
+END
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailRateLimitLog_Endpoint_OccurredAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailRateLimitLog]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailRateLimitLog_Endpoint_OccurredAt]
+    ON [notifications].[EmailRateLimitLog]
+    (
+        [Endpoint] ASC,
+        [OccurredAt] ASC
+    )
+    INCLUDE
+    (
+        [RecipientUserId],
+        [Allowed],
+        [Reason],
+        [CorrelationId]
+    );
+
+    PRINT N'Created index: [notifications].[EmailRateLimitLog].[IX_EmailRateLimitLog_Endpoint_OccurredAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailRateLimitLog].[IX_EmailRateLimitLog_Endpoint_OccurredAt]';
+END
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailRateLimitLog_ToEmailHash_OccurredAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailRateLimitLog]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailRateLimitLog_ToEmailHash_OccurredAt]
+    ON [notifications].[EmailRateLimitLog]
+    (
+        [ToEmailHash] ASC,
+        [OccurredAt] ASC
+    )
+    INCLUDE
+    (
+        [Endpoint],
+        [Allowed],
+        [Reason],
+        [CorrelationId]
+    );
+
+    PRINT N'Created index: [notifications].[EmailRateLimitLog].[IX_EmailRateLimitLog_ToEmailHash_OccurredAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailRateLimitLog].[IX_EmailRateLimitLog_ToEmailHash_OccurredAt]';
 END
 GO
