@@ -19,6 +19,7 @@ namespace Identity.Application.UseCases.ChangePassword
         private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly IIdentityUnitOfWork _unitOfWork;
         private readonly IDateTimeProvider _dateTimeProvider;
+        private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
 
         public ChangePasswordUseCase(
             IRequestContext requestContext,
@@ -26,7 +27,8 @@ namespace Identity.Application.UseCases.ChangePassword
             IPasswordHasher passwordHasher,
             IRefreshTokenRepository refreshTokenRepository,
             IIdentityUnitOfWork unitOfWork,
-            IDateTimeProvider dateTimeProvider)
+            IDateTimeProvider dateTimeProvider,
+            IIdentityNotificationOutboxWriter notificationOutboxWriter)
         {
             _requestContext = requestContext;
             _userAccountRepository = userAccountRepository;
@@ -34,6 +36,7 @@ namespace Identity.Application.UseCases.ChangePassword
             _refreshTokenRepository = refreshTokenRepository;
             _unitOfWork = unitOfWork;
             _dateTimeProvider = dateTimeProvider;
+            _notificationOutboxWriter = notificationOutboxWriter;
         }
 
         public async Task<Result<ChangePasswordResponseDto>> ExecuteAsync(
@@ -103,6 +106,7 @@ namespace Identity.Application.UseCases.ChangePassword
                 }
 
                 string newPasswordHash = _passwordHasher.Hash(request.NewPassword);
+                DateTime nowUtc = _dateTimeProvider.UtcNow;
 
                 await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
@@ -123,6 +127,14 @@ namespace Identity.Application.UseCases.ChangePassword
                         user.UserId,
                         "PasswordChanged",
                         cancellationToken);
+
+                    await _notificationOutboxWriter.EnqueuePasswordChangedEmailAsync(
+                        userId: user.UserId,
+                        userPublicId: user.PublicId,
+                        email: user.Email,
+                        fullName: user.FullName,
+                        occurredAtUtc: nowUtc,
+                        cancellationToken: cancellationToken);
 
                     await _unitOfWork.CommitAsync(cancellationToken);
 

@@ -19,6 +19,7 @@ namespace Identity.Application.UseCases.ForgotPassword
         private readonly ITokenHashProvider _tokenHashProvider;
         private readonly IDateTimeProvider _dateTimeProvider;
         private readonly IIdentityUnitOfWork _unitOfWork;
+        private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
 
         public ForgotPasswordUseCase(
             IUserAccountRepository userAccountRepository,
@@ -26,7 +27,8 @@ namespace Identity.Application.UseCases.ForgotPassword
             IRawTokenGenerator rawTokenGenerator,
             ITokenHashProvider tokenHashProvider,
             IDateTimeProvider dateTimeProvider,
-            IIdentityUnitOfWork unitOfWork)
+            IIdentityUnitOfWork unitOfWork,
+            IIdentityNotificationOutboxWriter notificationOutboxWriter)
         {
             _userAccountRepository = userAccountRepository;
             _passwordResetTokenRepository = passwordResetTokenRepository;
@@ -34,6 +36,7 @@ namespace Identity.Application.UseCases.ForgotPassword
             _tokenHashProvider = tokenHashProvider;
             _dateTimeProvider = dateTimeProvider;
             _unitOfWork = unitOfWork;
+            _notificationOutboxWriter = notificationOutboxWriter;
         }
 
         public async Task<Result<ForgotPasswordResponseDto>> ExecuteAsync(
@@ -91,6 +94,15 @@ namespace Identity.Application.UseCases.ForgotPassword
                     await _passwordResetTokenRepository.InsertAsync(
                         resetToken,
                         cancellationToken);
+
+                    await _notificationOutboxWriter.EnqueuePasswordResetEmailAsync(
+                        userId: user.UserId,
+                        userPublicId: user.PublicId,
+                        email: user.Email,
+                        fullName: user.FullName,
+                        rawResetToken: rawResetToken,
+                        occurredAtUtc: nowUtc,
+                        cancellationToken: cancellationToken);
 
                     await _unitOfWork.CommitAsync(cancellationToken);
 

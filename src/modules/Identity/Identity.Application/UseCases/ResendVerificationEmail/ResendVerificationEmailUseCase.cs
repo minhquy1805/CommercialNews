@@ -19,6 +19,7 @@ namespace Identity.Application.UseCases.ResendVerificationEmail
         private readonly ITokenHashProvider _tokenHashProvider;
         private readonly IDateTimeProvider _dateTimeProvider;
         private readonly IIdentityUnitOfWork _unitOfWork;
+        private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
 
         public ResendVerificationEmailUseCase(
             IUserAccountRepository userAccountRepository,
@@ -26,7 +27,8 @@ namespace Identity.Application.UseCases.ResendVerificationEmail
             IRawTokenGenerator rawTokenGenerator,
             ITokenHashProvider tokenHashProvider,
             IDateTimeProvider dateTimeProvider,
-            IIdentityUnitOfWork unitOfWork)
+            IIdentityUnitOfWork unitOfWork,
+            IIdentityNotificationOutboxWriter notificationOutboxWriter)
         {
             _userAccountRepository = userAccountRepository;
             _emailVerificationTokenRepository = emailVerificationTokenRepository;
@@ -34,6 +36,7 @@ namespace Identity.Application.UseCases.ResendVerificationEmail
             _tokenHashProvider = tokenHashProvider;
             _dateTimeProvider = dateTimeProvider;
             _unitOfWork = unitOfWork;
+            _notificationOutboxWriter = notificationOutboxWriter;
         }
 
         public async Task<Result<ResendVerificationEmailResponseDto>> ExecuteAsync(
@@ -92,6 +95,15 @@ namespace Identity.Application.UseCases.ResendVerificationEmail
                     await _emailVerificationTokenRepository.InsertAsync(
                         verificationToken,
                         cancellationToken);
+
+                    await _notificationOutboxWriter.EnqueueVerificationEmailAsync(
+                        userId: user.UserId,
+                        userPublicId: user.PublicId,
+                        email: user.Email,
+                        fullName: user.FullName,
+                        rawVerificationToken: rawVerificationToken,
+                        occurredAtUtc: nowUtc,
+                        cancellationToken: cancellationToken);
 
                     await _unitOfWork.CommitAsync(cancellationToken);
 
