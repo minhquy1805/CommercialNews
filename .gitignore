@@ -63,6 +63,7 @@ coverage.cobertura.xml
 # Keep templates, ignore local secret overrides
 # --------------------------------------------------
 appsettings.Local.json
+appsettings.Development.json
 appsettings.*.local.json
 appsettings.Secrets.json
 secrets.json
