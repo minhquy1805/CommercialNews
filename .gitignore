@@ -62,6 +62,11 @@ coverage.cobertura.xml
 # Local app settings / secrets
 # Keep templates, ignore local secret overrides
 # --------------------------------------------------
+src/hosts/CommercialNews.Api/appsettings.json
+src/hosts/CommercialNews.Api/appsettings.Development.json
+src/hosts/CommercialNews.Worker/appsettings.json
+src/hosts/CommercialNews.Worker/appsettings.Development.json
+
 appsettings.Local.json
 appsettings.Development.json
 appsettings.*.local.json
