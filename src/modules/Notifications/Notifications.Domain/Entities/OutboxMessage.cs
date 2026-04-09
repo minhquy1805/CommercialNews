@@ -7,19 +7,19 @@ public sealed class OutboxMessage
 {
     public long OutboxMessageId { get; private set; }
 
-    public string MessageId { get; private set; }
+    public string MessageId { get; private set; } = null!;
 
-    public string EventType { get; private set; }
+    public string EventType { get; private set; } = null!;
 
-    public string AggregateType { get; private set; }
+    public string AggregateType { get; private set; } = null!;
 
-    public string AggregateId { get; private set; }
+    public string AggregateId { get; private set; } = null!;
 
     public string? AggregatePublicId { get; private set; }
 
     public int? AggregateVersion { get; private set; }
 
-    public string Payload { get; private set; }
+    public string Payload { get; private set; } = null!;
 
     public string? Headers { get; private set; }
 
@@ -29,7 +29,7 @@ public sealed class OutboxMessage
 
     public byte Priority { get; private set; }
 
-    public string Status { get; private set; }
+    public string Status { get; private set; } = null!;
 
     public int AttemptCount { get; private set; }
 
