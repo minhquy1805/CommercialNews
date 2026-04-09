@@ -18,6 +18,7 @@ namespace Identity.Application.UseCases.ResetPassword
         private readonly IUserAccountRepository _userAccountRepository;
         private readonly IRefreshTokenRepository _refreshTokenRepository;
         private readonly IIdentityUnitOfWork _unitOfWork;
+        private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
 
         public ResetPasswordUseCase(
             ITokenHashProvider tokenHashProvider,
@@ -25,7 +26,8 @@ namespace Identity.Application.UseCases.ResetPassword
             IPasswordResetTokenRepository passwordResetTokenRepository,
             IUserAccountRepository userAccountRepository,
             IRefreshTokenRepository refreshTokenRepository,
-            IIdentityUnitOfWork unitOfWork)
+            IIdentityUnitOfWork unitOfWork,
+            IIdentityNotificationOutboxWriter notificationOutboxWriter)
         {
             _tokenHashProvider = tokenHashProvider;
             _passwordHasher = passwordHasher;
@@ -33,6 +35,7 @@ namespace Identity.Application.UseCases.ResetPassword
             _userAccountRepository = userAccountRepository;
             _refreshTokenRepository = refreshTokenRepository;
             _unitOfWork = unitOfWork;
+            _notificationOutboxWriter = notificationOutboxWriter;
         }
 
         public async Task<Result<ResetPasswordResponseDto>> ExecuteAsync(
@@ -74,6 +77,16 @@ namespace Identity.Application.UseCases.ResetPassword
                         IdentityErrors.PasswordReset.TokenNotFound);
                 }
 
+                UserAccount? user = await _userAccountRepository.GetByIdAsync(
+                    resetToken.UserId,
+                    cancellationToken);
+
+                if (user is null)
+                {
+                    return Result<ResetPasswordResponseDto>.Failure(
+                        IdentityErrors.User.NotFound);
+                }
+
                 string newPasswordHash = _passwordHasher.Hash(request.NewPassword);
 
                 resetToken.MarkUsed(DateTime.UtcNow);
@@ -109,6 +122,14 @@ namespace Identity.Application.UseCases.ResetPassword
                         resetToken.UserId,
                         "PasswordReset",
                         cancellationToken);
+
+                    await _notificationOutboxWriter.EnqueuePasswordChangedEmailAsync(
+                        userId: user.UserId,
+                        userPublicId: user.PublicId,
+                        email: user.Email,
+                        fullName: user.FullName,
+                        occurredAtUtc: DateTime.UtcNow,
+                        cancellationToken: cancellationToken);
 
                     await _unitOfWork.CommitAsync(cancellationToken);
 
