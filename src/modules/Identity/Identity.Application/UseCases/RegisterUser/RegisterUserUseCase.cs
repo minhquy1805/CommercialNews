@@ -22,6 +22,7 @@ namespace Identity.Application.UseCases.RegisterUser
         private readonly IRawTokenGenerator _rawTokenGenerator;
         private readonly ITokenHashProvider _tokenHashProvider;
         private readonly IDateTimeProvider _dateTimeProvider;
+        private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
 
         public RegisterUserUseCase(
             IUserAccountRepository userAccountRepository,
@@ -31,7 +32,8 @@ namespace Identity.Application.UseCases.RegisterUser
             IPublicIdGenerator publicIdGenerator,
             IRawTokenGenerator rawTokenGenerator,
             ITokenHashProvider tokenHashProvider,
-            IDateTimeProvider dateTimeProvider)
+            IDateTimeProvider dateTimeProvider,
+            IIdentityNotificationOutboxWriter notificationOutboxWriter)
         {
             _userAccountRepository = userAccountRepository;
             _emailVerificationTokenRepository = emailVerificationTokenRepository;
@@ -41,6 +43,7 @@ namespace Identity.Application.UseCases.RegisterUser
             _rawTokenGenerator = rawTokenGenerator;
             _tokenHashProvider = tokenHashProvider;
             _dateTimeProvider = dateTimeProvider;
+            _notificationOutboxWriter = notificationOutboxWriter;
         }
 
         public async Task<Result<RegisterUserResponseDto>> ExecuteAsync(
@@ -126,6 +129,18 @@ namespace Identity.Application.UseCases.RegisterUser
                     await _emailVerificationTokenRepository.InsertAsync(
                         verificationToken,
                         cancellationToken);
+
+                    // Important:
+                    // Phase 1 writes an outbox message here so Notifications worker can
+                    // send the verification email asynchronously after the identity truth commits.
+                    await _notificationOutboxWriter.EnqueueVerificationEmailAsync(
+                        userId: userId,
+                        userPublicId: user.PublicId,
+                        email: user.Email,
+                        fullName: user.FullName,
+                        rawVerificationToken: rawVerificationToken,
+                        occurredAtUtc: nowUtc,
+                        cancellationToken: cancellationToken);
 
                     await _unitOfWork.CommitAsync(cancellationToken);
 

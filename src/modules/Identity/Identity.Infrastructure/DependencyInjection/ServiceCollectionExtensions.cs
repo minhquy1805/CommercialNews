@@ -4,6 +4,7 @@ using Identity.Infrastructure.Persistence.Exceptions;
 using Identity.Infrastructure.Persistence.Repositories;
 using Identity.Infrastructure.Persistence.Sql;
 using Identity.Infrastructure.Security;
+using Identity.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Identity.Infrastructure.DependencyInjection
@@ -29,6 +30,8 @@ namespace Identity.Infrastructure.DependencyInjection
             services.AddSingleton<IRawTokenGenerator, RawTokenGenerator>();
             services.AddSingleton<ITokenHashProvider, TokenHashProvider>();
             services.AddSingleton<IAccessTokenGenerator, AccessTokenGenerator>();
+
+            services.AddScoped<IIdentityNotificationOutboxWriter, IdentityNotificationOutboxWriter>();
 
             return services;
         }
