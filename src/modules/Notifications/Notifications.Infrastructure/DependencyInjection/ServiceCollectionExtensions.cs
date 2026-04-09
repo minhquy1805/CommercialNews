@@ -1,19 +1,28 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Notifications.Application.Ports.Persistence.Read;
 using Notifications.Application.Ports.Persistence.Transactions;
 using Notifications.Application.Ports.Persistence.Write;
+using Notifications.Application.Ports.Services;
 using Notifications.Infrastructure.Persistence.Exceptions;
 using Notifications.Infrastructure.Persistence.Repositories.Read;
 using Notifications.Infrastructure.Persistence.Repositories.Write;
 using Notifications.Infrastructure.Persistence.Sql;
+using Notifications.Infrastructure.Services;
 
 namespace Notifications.Infrastructure.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddNotificationsInfrastructure(this IServiceCollection services)
+    public static IServiceCollection AddNotificationsInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        services.Configure<NotificationEmailOptions>(
+            configuration.GetSection("Notifications:Email"));
 
         services.AddScoped<NotificationsUnitOfWork>();
         services.AddScoped<INotificationsUnitOfWork>(sp => sp.GetRequiredService<NotificationsUnitOfWork>());
@@ -26,6 +35,12 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IOutboxMessageQueryRepository, OutboxMessageQueryRepository>();
         services.AddScoped<IEmailDeliveryQueryRepository, EmailDeliveryQueryRepository>();
+
+        services.AddScoped<INotificationRetryPolicy, NotificationRetryPolicy>();
+        services.AddScoped<IProviderResultClassifier, ProviderResultClassifier>();
+        services.AddScoped<INotificationTemplateRenderer, NotificationTemplateRenderer>();
+        services.AddScoped<IEmailSender, EmailSender>();
+        services.AddScoped<INotificationDedupeService, NotificationDedupeService>();
 
         return services;
     }
