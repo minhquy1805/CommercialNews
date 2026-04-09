@@ -15,7 +15,7 @@ public sealed class EmailDeliveryAttempt
 
     public DateTime? FinishedAt { get; private set; }
 
-    public string Outcome { get; private set; }
+    public string Outcome { get; private set; } = null!;
 
     public bool IsAmbiguous { get; private set; }
 

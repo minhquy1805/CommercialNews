@@ -7,27 +7,27 @@ public sealed class EmailDelivery
 {
     public long EmailDeliveryId { get; private set; }
 
-    public string MessageId { get; private set; }
+    public string MessageId { get; private set; } = null!;
 
-    public string BusinessDedupeKey { get; private set; }
+    public string BusinessDedupeKey { get; private set; } = null!;
 
     public long? RecipientUserId { get; private set; }
 
-    public string ToEmail { get; private set; }
+    public string ToEmail { get; private set; } = null!;
 
     public string? ToEmailHash { get; private set; }
 
-    public string TemplateKey { get; private set; }
+    public string TemplateKey { get; private set; } = null!;
 
     public int? TemplateVersion { get; private set; }
 
     public string? Subject { get; private set; }
 
-    public string Provider { get; private set; }
+    public string Provider { get; private set; } = null!;
 
     public string? ProviderMessageId { get; private set; }
 
-    public string Status { get; private set; }
+    public string Status { get; private set; } = null!;
 
     public int AttemptCount { get; private set; }
 
