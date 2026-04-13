@@ -38,6 +38,8 @@
     <ProjectReference Include="..\..\modules\Interaction\Interaction.Infrastructure\Interaction.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Application\Notifications.Application.csproj" />
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Infrastructure\Notifications.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\Audit\Audit.Application\Audit.Application.csproj" />
+    <ProjectReference Include="..\..\modules\Audit\Audit.Infrastructure\Audit.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
