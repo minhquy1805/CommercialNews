@@ -1,8 +1,8 @@
-using CommercialNews.BuildingBlocks.Time;
+using CommercialNews.Worker.Messaging.Outbox.Notifications;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Notifications.Application.DependencyInjection;
 using Notifications.Infrastructure.DependencyInjection;
-using CommercialNews.Worker.Messaging.Outbox.Notifications;
-using CommercialNews.BuildingBlocks.Abstractions.Time;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -14,8 +14,6 @@ public static class WorkerModuleRegistration
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
-
-        services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
 
         services.AddNotificationsApplication();
         services.AddNotificationsInfrastructure(configuration);
