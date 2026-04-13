@@ -1,6 +1,4 @@
 using CommercialNews.BuildingBlocks.Abstractions.Time;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Notifications.Application.Contracts.Outbox.Requests;
 using Notifications.Application.Ports.Persistence.Write;
@@ -80,7 +78,7 @@ public sealed class NotificationOutboxPollingService : BackgroundService
 
     private async Task<int> ProcessBatchAsync(CancellationToken cancellationToken)
     {
-        using IServiceScope scope = _serviceScopeFactory.CreateScope();
+        await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
 
         IOutboxMessageRepository outboxMessageRepository =
             scope.ServiceProvider.GetRequiredService<IOutboxMessageRepository>();
