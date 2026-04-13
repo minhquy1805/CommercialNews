@@ -8,6 +8,8 @@ using Interaction.Application.DependencyInjection;
 using Interaction.Infrastructure.DependencyInjection;
 using Media.Application.DependencyInjection;
 using Media.Infrastructure.DependencyInjection;
+using Notifications.Application.DependencyInjection;
+using Notifications.Infrastructure.DependencyInjection;
 using Reading.Application.DependencyInjection;
 using Reading.Infrastructure.DependencyInjection;
 using Seo.Application.DependencyInjection;
@@ -44,6 +46,9 @@ public static class ModuleRegistration
 
         services.AddInteractionApplication();
         services.AddInteractionInfrastructure();
+
+        services.AddNotificationsApplication();
+        services.AddNotificationsInfrastructure(configuration);
 
         return services;
     }
