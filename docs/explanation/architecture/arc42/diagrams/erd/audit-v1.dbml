@@ -10,22 +10,27 @@
 // - ResourceType/ResourceId stored as strings (no hard FK).
 // - Idempotency via unique AuditEventId.
 // - ActorUserId is nullable for system actions.
+// - Summary is a short, safe, investigation-friendly text.
+// - Outcome is optional and reflects business evidence outcome,
+//   not ingestion pipeline outcome.
 //
 // Notes
 // - dbdiagram cannot enforce triggers/permissions.
 // - Enforce append-only in SQL Server via deny UPDATE/DELETE or trigger.
 // =====================================================
 
-Table AuditLog {
+Table audit.AuditLog {
   AuditId bigint [pk, increment]
-  AuditEventId uniqueidentifier [not null, default: `NEWID()`] // idempotency key
+  AuditEventId uniqueidentifier [not null, default: `NEWID()`] // canonical idempotency key
 
-  ActorUserId bigint [null] // Identity.UserAccount (nullable for system actions)
+  ActorUserId bigint [null] // identity.UserAccount (nullable for system actions)
 
   Action nvarchar(120) [not null]        // e.g. Content.Publish, Auth.RoleGrant
   ResourceType nvarchar(60) [not null]   // Article/User/Comment/...
   ResourceId nvarchar(100) [not null]    // string for cross-module ids
 
+  Outcome nvarchar(30) [null]            // optional: Success / Failure
+  Summary nvarchar(300) [not null]       // short, safe text for list/investigation views
   Reason nvarchar(500) [null]            // required by policy for some actions
 
   OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
@@ -36,7 +41,7 @@ Table AuditLog {
 
   OldValuesJson nvarchar(max) [null]     // redacted/minimized
   NewValuesJson nvarchar(max) [null]     // redacted/minimized
-  MetadataJson nvarchar(max) [null]      // module info, policy version...
+  MetadataJson nvarchar(max) [null]      // module info, policy version, safe extras
 
   Indexes {
     (AuditEventId) [unique, name: "UQ_AuditLog_AuditEventId"]
@@ -48,18 +53,20 @@ Table AuditLog {
     (CorrelationId) [name: "IX_AuditLog_CorrelationId"]
   }
 
-  Note: "Append-only. Never store secrets/raw tokens/password hashes in payload."
+  Note: "Append-only canonical audit evidence. Never store secrets, raw tokens, password hashes, or unsafe PII."
 }
 
-// ---------- External stub (optional, for ERD readability) ----------
-Table IdentityUserAccount {
+// ---------- External stub (optional, for ERD readability only) ----------
+Table identity.UserAccount {
   UserId bigint [pk]
-  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+  Note: "EXTERNAL STUB (Identity module). Readability only; Audit does not own Identity truth."
 }
 
-Ref: AuditLog.ActorUserId > IdentityUserAccount.UserId
+Ref: audit.AuditLog.ActorUserId > identity.UserAccount.UserId
 
 // ---------- Notes for SQL Server enforcement ----------
 // 1) Append-only enforcement via DB permissions (deny UPDATE/DELETE) or trigger.
-// 2) Optional CHECK: Action/ResourceType/ResourceId not empty.
-// 3) Idempotent ingestion: unique AuditEventId prevents duplicates under retries.
+// 2) Optional CHECK: Action/ResourceType/ResourceId/Summary not empty.
+// 3) Idempotent ingestion: unique AuditEventId prevents duplicates under retries/replay.
+// 4) Outcome is business evidence outcome, not consumer processing outcome.
+// 5) Derived summaries/reports are NOT canonical evidence truth.
