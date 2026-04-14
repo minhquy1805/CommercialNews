@@ -8,7 +8,7 @@ public sealed class GetAuditLogsResponse
 
     public int PageSize { get; init; }
 
-    public long TotalCount { get; init; }
+    public int TotalCount { get; init; }
 
     public int TotalPages { get; init; }
 }
