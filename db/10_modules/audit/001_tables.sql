@@ -10,7 +10,7 @@
 
   Notes:
   - Audit owns evidence truth, not originating business truth.
-  - AuditEventId is the canonical idempotency key.
+  - AuditEventId is the canonical idempotency key and follows the system outbox message identity format.
   - ActorUserId is nullable for system actions.
   - ResourceType/ResourceId are stored as strings (no hard FK to business resources).
   - Append-only enforcement via deny UPDATE/DELETE or trigger belongs to policy / later hardening.
@@ -57,8 +57,7 @@ BEGIN
     CREATE TABLE [audit].[AuditLog]
     (
         [AuditId]             BIGINT IDENTITY(1,1) NOT NULL,
-        [AuditEventId]        UNIQUEIDENTIFIER     NOT NULL
-            CONSTRAINT [DF_AuditLog_AuditEventId] DEFAULT (NEWID()),
+        [AuditEventId]        CHAR(26)             NOT NULL,
 
         [ActorUserId]         BIGINT               NULL,
 
@@ -90,6 +89,9 @@ BEGIN
         CONSTRAINT [FK_AuditLog_ActorUser]
             FOREIGN KEY ([ActorUserId])
             REFERENCES [identity].[UserAccount]([UserId]),
+
+        CONSTRAINT [CK_AuditLog_AuditEventId_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([AuditEventId]))) > 0),
 
         CONSTRAINT [CK_AuditLog_Action_NotBlank]
             CHECK (LEN(LTRIM(RTRIM([Action]))) > 0),
