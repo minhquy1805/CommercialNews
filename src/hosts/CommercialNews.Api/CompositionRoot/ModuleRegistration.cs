@@ -1,3 +1,5 @@
+using Audit.Application.DependencyInjection;
+using Audit.Infrastructure.DependencyInjection;
 using Authorization.Application.DependencyInjection;
 using Authorization.Infrastructure.DependencyInjection;
 using Content.Application.DependencyInjection;
@@ -49,6 +51,9 @@ public static class ModuleRegistration
 
         services.AddNotificationsApplication();
         services.AddNotificationsInfrastructure(configuration);
+
+        services.AddAuditApplication();
+        services.AddAuditInfrastructure();
 
         return services;
     }
