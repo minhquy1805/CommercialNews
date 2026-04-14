@@ -1,0 +1,22 @@
+using Audit.Application.UseCases.GetAuditLogByEventId;
+using Audit.Application.UseCases.GetAuditLogById;
+using Audit.Application.UseCases.GetAuditLogs;
+using Audit.Application.UseCases.GetAuditLogsByCorrelationId;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Audit.Application.DependencyInjection;
+
+public static class ServiceCollectionExtensions
+{
+    public static IServiceCollection AddAuditApplication(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IGetAuditLogsUseCase, GetAuditLogsUseCase>();
+        services.AddScoped<IGetAuditLogByIdUseCase, GetAuditLogByIdUseCase>();
+        services.AddScoped<IGetAuditLogsByCorrelationIdUseCase, GetAuditLogsByCorrelationIdUseCase>();
+        services.AddScoped<IGetAuditLogByEventIdUseCase, GetAuditLogByEventIdUseCase>();
+
+        return services;
+    }
+}
