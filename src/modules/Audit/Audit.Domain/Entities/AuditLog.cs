@@ -7,7 +7,7 @@ public sealed class AuditLog
 {
     public long AuditId { get; private set; }
 
-    public Guid AuditEventId { get; private set; }
+    public string AuditEventId { get; private set; } = string.Empty;
 
     public long? ActorUserId { get; private set; }
 
@@ -42,7 +42,7 @@ public sealed class AuditLog
     }
 
     public static AuditLog Create(
-        Guid auditEventId,
+        string auditEventId,
         long? actorUserId,
         string action,
         string resourceType,
@@ -73,13 +73,13 @@ public sealed class AuditLog
 
         return new AuditLog
         {
-            AuditEventId = auditEventId,
+            AuditEventId = NormalizeRequired(auditEventId),
             ActorUserId = actorUserId,
-            Action = action.Trim(),
-            ResourceType = resourceType.Trim(),
-            ResourceId = resourceId.Trim(),
+            Action = NormalizeRequired(action),
+            ResourceType = NormalizeRequired(resourceType),
+            ResourceId = NormalizeRequired(resourceId),
             Outcome = NormalizeOptional(outcome),
-            Summary = summary.Trim(),
+            Summary = NormalizeRequired(summary),
             Reason = NormalizeOptional(reason),
             OccurredAt = occurredAt,
             CorrelationId = NormalizeOptional(correlationId),
@@ -93,7 +93,7 @@ public sealed class AuditLog
 
     public static AuditLog Rehydrate(
         long auditId,
-        Guid auditEventId,
+        string auditEventId,
         long? actorUserId,
         string action,
         string resourceType,
@@ -132,13 +132,13 @@ public sealed class AuditLog
         return new AuditLog
         {
             AuditId = auditId,
-            AuditEventId = auditEventId,
+            AuditEventId = NormalizeRequired(auditEventId),
             ActorUserId = actorUserId,
-            Action = action.Trim(),
-            ResourceType = resourceType.Trim(),
-            ResourceId = resourceId.Trim(),
+            Action = NormalizeRequired(action),
+            ResourceType = NormalizeRequired(resourceType),
+            ResourceId = NormalizeRequired(resourceId),
             Outcome = NormalizeOptional(outcome),
-            Summary = summary.Trim(),
+            Summary = NormalizeRequired(summary),
             Reason = NormalizeOptional(reason),
             OccurredAt = occurredAt,
             CorrelationId = NormalizeOptional(correlationId),
@@ -150,13 +150,20 @@ public sealed class AuditLog
         };
     }
 
-    private static void ValidateAuditEventId(Guid auditEventId)
+    private static void ValidateAuditEventId(string? auditEventId)
     {
-        if (auditEventId == Guid.Empty)
+        if (string.IsNullOrWhiteSpace(auditEventId))
         {
             throw new AuditDomainException(
                 "AUDIT.AUDIT_LOG_INVALID_EVENT_ID",
-                "Audit event id must not be empty.");
+                "Audit event id is required.");
+        }
+
+        if (auditEventId.Trim().Length > 26)
+        {
+            throw new AuditDomainException(
+                "AUDIT.AUDIT_LOG_EVENT_ID_TOO_LONG",
+                "Audit event id must not exceed 26 characters.");
         }
     }
 
@@ -170,7 +177,7 @@ public sealed class AuditLog
         }
     }
 
-    private static void ValidateAction(string action)
+    private static void ValidateAction(string? action)
     {
         if (string.IsNullOrWhiteSpace(action))
         {
@@ -187,7 +194,7 @@ public sealed class AuditLog
         }
     }
 
-    private static void ValidateResourceType(string resourceType)
+    private static void ValidateResourceType(string? resourceType)
     {
         if (string.IsNullOrWhiteSpace(resourceType))
         {
@@ -204,7 +211,7 @@ public sealed class AuditLog
         }
     }
 
-    private static void ValidateResourceId(string resourceId)
+    private static void ValidateResourceId(string? resourceId)
     {
         if (string.IsNullOrWhiteSpace(resourceId))
         {
@@ -236,7 +243,7 @@ public sealed class AuditLog
         }
     }
 
-    private static void ValidateSummary(string summary)
+    private static void ValidateSummary(string? summary)
     {
         if (string.IsNullOrWhiteSpace(summary))
         {
@@ -323,8 +330,18 @@ public sealed class AuditLog
         }
     }
 
+    private static string NormalizeRequired(string value)
+    {
+        return value.Trim();
+    }
+
     private static string? NormalizeOptional(string? value)
     {
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        return value.Trim();
     }
 }
