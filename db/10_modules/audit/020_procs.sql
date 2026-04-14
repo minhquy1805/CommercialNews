@@ -13,6 +13,7 @@
   - Audit is append-only: no UPDATE/DELETE procedures in V1.
   - Insert is idempotent on [AuditEventId].
   - Investigation queries are bounded and ordered newest-first by default.
+  - AuditEventId follows system outbox message identity format (CHAR(26)).
 */
 
 SET ANSI_NULLS ON;
@@ -46,7 +47,7 @@ GO
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [audit].[AuditLog_Insert]
-    @AuditEventId      UNIQUEIDENTIFIER,
+    @AuditEventId      CHAR(26),
     @ActorUserId       BIGINT = NULL,
     @Action            NVARCHAR(120),
     @ResourceType      NVARCHAR(60),
@@ -68,8 +69,11 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF @AuditEventId IS NULL
+    IF NULLIF(LTRIM(RTRIM(@AuditEventId)), N'') IS NULL
         THROW 56310, 'Audit event id is required.', 1;
+
+    IF LEN(LTRIM(RTRIM(@AuditEventId))) > 26
+        THROW 56318, 'Audit event id must not exceed 26 characters.', 1;
 
     IF NULLIF(LTRIM(RTRIM(@Action)), N'') IS NULL
         THROW 56311, 'Audit action is required.', 1;
@@ -91,12 +95,12 @@ BEGIN
     (
         SELECT 1
         FROM [audit].[AuditLog]
-        WHERE [AuditEventId] = @AuditEventId
+        WHERE [AuditEventId] = LTRIM(RTRIM(@AuditEventId))
     )
     BEGIN
         SELECT @AuditId = [AuditId]
         FROM [audit].[AuditLog]
-        WHERE [AuditEventId] = @AuditEventId;
+        WHERE [AuditEventId] = LTRIM(RTRIM(@AuditEventId));
 
         SET @WasInserted = 0;
         RETURN;
@@ -122,7 +126,7 @@ BEGIN
     )
     VALUES
     (
-        @AuditEventId,
+        LTRIM(RTRIM(@AuditEventId)),
         @ActorUserId,
         @Action,
         @ResourceType,
@@ -173,10 +177,13 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [audit].[AuditLog_SelectByAuditEventId]
-    @AuditEventId UNIQUEIDENTIFIER
+    @AuditEventId CHAR(26)
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    IF NULLIF(LTRIM(RTRIM(@AuditEventId)), N'') IS NULL
+        THROW 56310, 'Audit event id is required.', 1;
 
     SELECT
         [AuditId],
@@ -196,7 +203,7 @@ BEGIN
         [NewValuesJson],
         [MetadataJson]
     FROM [audit].[AuditLog]
-    WHERE [AuditEventId] = @AuditEventId;
+    WHERE [AuditEventId] = LTRIM(RTRIM(@AuditEventId));
 END;
 GO
 
@@ -268,7 +275,7 @@ CREATE OR ALTER PROCEDURE [audit].[AuditLog_SelectSkipAndTakeWhereDynamic]
     @ResourceType       NVARCHAR(60) = NULL,
     @ResourceId         NVARCHAR(100) = NULL,
     @CorrelationId      NVARCHAR(100) = NULL,
-    @AuditEventId       UNIQUEIDENTIFIER = NULL,
+    @AuditEventId       CHAR(26) = NULL,
     @Outcome            NVARCHAR(30) = NULL,
     @Skip               INT = 0,
     @Take               INT = 20
@@ -283,6 +290,10 @@ BEGIN
        AND @ToOccurredAt IS NOT NULL
        AND @FromOccurredAt > @ToOccurredAt
         THROW 56316, 'Audit time range is invalid.', 1;
+
+    IF @AuditEventId IS NOT NULL
+       AND NULLIF(LTRIM(RTRIM(@AuditEventId)), N'') IS NULL
+        SET @AuditEventId = NULL;
 
     SELECT
         [AuditId],
@@ -310,7 +321,7 @@ BEGIN
         AND (@ResourceType IS NULL OR [ResourceType] = @ResourceType)
         AND (@ResourceId IS NULL OR [ResourceId] = @ResourceId)
         AND (@CorrelationId IS NULL OR [CorrelationId] = @CorrelationId)
-        AND (@AuditEventId IS NULL OR [AuditEventId] = @AuditEventId)
+        AND (@AuditEventId IS NULL OR [AuditEventId] = LTRIM(RTRIM(@AuditEventId)))
         AND (@Outcome IS NULL OR [Outcome] = @Outcome)
     ORDER BY [OccurredAt] DESC, [AuditId] DESC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
@@ -373,7 +384,7 @@ CREATE OR ALTER PROCEDURE [audit].[AuditLog_GetRecordCountWhereDynamic]
     @ResourceType       NVARCHAR(60) = NULL,
     @ResourceId         NVARCHAR(100) = NULL,
     @CorrelationId      NVARCHAR(100) = NULL,
-    @AuditEventId       UNIQUEIDENTIFIER = NULL,
+    @AuditEventId       CHAR(26) = NULL,
     @Outcome            NVARCHAR(30) = NULL
 AS
 BEGIN
@@ -383,6 +394,10 @@ BEGIN
        AND @ToOccurredAt IS NOT NULL
        AND @FromOccurredAt > @ToOccurredAt
         THROW 56316, 'Audit time range is invalid.', 1;
+
+    IF @AuditEventId IS NOT NULL
+       AND NULLIF(LTRIM(RTRIM(@AuditEventId)), N'') IS NULL
+        SET @AuditEventId = NULL;
 
     SELECT COUNT_BIG(1) AS [RecordCount]
     FROM [audit].[AuditLog]
@@ -394,7 +409,7 @@ BEGIN
         AND (@ResourceType IS NULL OR [ResourceType] = @ResourceType)
         AND (@ResourceId IS NULL OR [ResourceId] = @ResourceId)
         AND (@CorrelationId IS NULL OR [CorrelationId] = @CorrelationId)
-        AND (@AuditEventId IS NULL OR [AuditEventId] = @AuditEventId)
+        AND (@AuditEventId IS NULL OR [AuditEventId] = LTRIM(RTRIM(@AuditEventId)))
         AND (@Outcome IS NULL OR [Outcome] = @Outcome);
 END;
 GO
