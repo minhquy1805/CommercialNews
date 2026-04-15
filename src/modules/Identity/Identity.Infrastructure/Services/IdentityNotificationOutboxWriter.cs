@@ -1,6 +1,6 @@
 using System.Data;
 using System.Text.Json;
-using CommercialNews.BuildingBlocks.Abstractions.Identifiers;
+using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
 using Identity.Application.Ports.Services;
 using Identity.Infrastructure.Persistence.Exceptions;
 using Identity.Infrastructure.Persistence.Sql;

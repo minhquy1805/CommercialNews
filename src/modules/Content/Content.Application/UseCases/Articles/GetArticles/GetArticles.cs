@@ -1,5 +1,5 @@
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Models.QueryModels;
@@ -23,13 +23,13 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
         _articleRepository = articleRepository;
     }
 
-    public async Task<Result<PagedResponse<ArticleListItemDto>>> ExecuteAsync(
+    public async Task<Result<PagedQueryResult<ArticleListItemDto>>> ExecuteAsync(
         GetArticlesRequestDto request,
         CancellationToken cancellationToken = default)
     {
         if (request.Page <= 0)
         {
-            return Result<PagedResponse<ArticleListItemDto>>.Failure(
+            return Result<PagedQueryResult<ArticleListItemDto>>.Failure(
                 Error.Validation(
                     code: "CONTENT.INVALID_PAGE",
                     message: "Page must be greater than zero."));
@@ -37,7 +37,7 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
 
         if (request.PageSize <= 0)
         {
-            return Result<PagedResponse<ArticleListItemDto>>.Failure(
+            return Result<PagedQueryResult<ArticleListItemDto>>.Failure(
                 Error.Validation(
                     code: "CONTENT.INVALID_PAGE_SIZE",
                     message: "PageSize must be greater than zero."));
@@ -45,7 +45,7 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
 
         if (request.PageSize > 100)
         {
-            return Result<PagedResponse<ArticleListItemDto>>.Failure(
+            return Result<PagedQueryResult<ArticleListItemDto>>.Failure(
                 Error.Validation(
                     code: "CONTENT.INVALID_PAGE_SIZE",
                     message: "PageSize must not exceed 100."));
@@ -55,7 +55,7 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
 
         if (!AllowedSorts.Contains(normalizedSort))
         {
-            return Result<PagedResponse<ArticleListItemDto>>.Failure(
+            return Result<PagedQueryResult<ArticleListItemDto>>.Failure(
                 Error.Validation(
                     code: "CONTENT.INVALID_SORT",
                     message: "Sort is not supported.",
@@ -76,11 +76,7 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
             query,
             cancellationToken);
 
-        int totalPages = result.TotalItems == 0
-            ? 0
-            : (int)Math.Ceiling(result.TotalItems / (double)result.PageSize);
-
-        var response = new PagedResponse<ArticleListItemDto>
+        var response = new PagedQueryResult<ArticleListItemDto>
         {
             Items = result.Items.Select(static item => new ArticleListItemDto
             {
@@ -97,16 +93,12 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
                 PublishedAt = item.PublishedAt,
                 Version = item.Version
             }).ToArray(),
-            PageInfo = new PageInfo
-            {
-                Page = result.Page,
-                PageSize = result.PageSize,
-                TotalItems = result.TotalItems,
-                TotalPages = totalPages
-            }
+            Page = result.Page,
+            PageSize = result.PageSize,
+            TotalItems = result.TotalItems
         };
 
-        return Result<PagedResponse<ArticleListItemDto>>.Success(response);
+        return Result<PagedQueryResult<ArticleListItemDto>>.Success(response);
     }
 
     private static string NormalizeSort(string? sort)

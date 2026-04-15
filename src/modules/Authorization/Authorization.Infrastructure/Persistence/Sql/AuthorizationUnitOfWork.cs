@@ -1,5 +1,6 @@
 using Authorization.Application.Ports.Persistence;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
 
 namespace Authorization.Infrastructure.Persistence.Sql
 {

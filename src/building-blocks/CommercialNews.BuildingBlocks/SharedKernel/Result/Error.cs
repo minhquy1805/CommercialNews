@@ -1,5 +1,5 @@
-namespace CommercialNews.BuildingBlocks.Results
-{
+namespace CommercialNews.BuildingBlocks.SharedKernel.Results;
+
     public sealed record Error
     {
         public string Code { get; init; } = string.Empty;
@@ -84,4 +84,3 @@ namespace CommercialNews.BuildingBlocks.Results
                 .ToArray();
         }
     }
-}

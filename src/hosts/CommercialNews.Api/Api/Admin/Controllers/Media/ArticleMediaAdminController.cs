@@ -1,8 +1,8 @@
 using CommercialNews.Api.Api.Admin.Contracts.Media.ArticleMedia.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Media.ArticleMedia.Responses;
+using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Media.Application.Contracts.ArticleMedia.Requests;
 using Media.Application.Contracts.ArticleMedia.Responses;
 using Media.Application.UseCases.ArticleMedia.AttachMediaToArticle;

@@ -2,9 +2,9 @@ using Authorization.Application.Contracts.Requests;
 using Authorization.Application.Contracts.Responses;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
-using CommercialNews.BuildingBlocks.Abstractions.Execution;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace Authorization.Application.UseCases.RevokePermissionFromRole
 {

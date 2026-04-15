@@ -1,8 +1,9 @@
 using CommercialNews.Api.Api.Admin.Contracts.Seo.SlugRoutes.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Seo.SlugRoutes.Responses;
+using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Microsoft.AspNetCore.Mvc;
 using Seo.Application.Contracts.SlugRegistry.Requests;
 using Seo.Application.Contracts.SlugRegistry.Responses;

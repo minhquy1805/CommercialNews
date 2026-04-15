@@ -1,8 +1,8 @@
 using CommercialNews.Api.Api.Common.RequestContext;
 using CommercialNews.Api.Health;
 using CommercialNews.Api.OpenApi;
-using CommercialNews.BuildingBlocks.Abstractions.Execution;
 using CommercialNews.BuildingBlocks.DependencyInjection;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 
 namespace CommercialNews.Api.CompositionRoot
 {

@@ -7,7 +7,7 @@ using Authorization.Application.UseCases.UpdateRole;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.Roles.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.Roles.Responses;
 using CommercialNews.Api.Api.ErrorHandling;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Authorization

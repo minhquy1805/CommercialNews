@@ -1,4 +1,4 @@
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace Identity.Application.Errors
 {

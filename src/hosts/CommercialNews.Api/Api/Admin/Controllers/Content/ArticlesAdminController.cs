@@ -1,8 +1,10 @@
 using CommercialNews.Api.Api.Admin.Contracts.Content.Articles.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Content.Articles.Responses;
+using CommercialNews.Api.Api.Common.Contracts;
+using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.UseCases.Articles.ArchiveArticle;
@@ -176,17 +178,22 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 Sort = sort
             };
 
-            Result<PagedResponse<ArticleListItemDto>> result =
+            Result<PagedQueryResult<ArticleListItemDto>> result =
                 await _getArticlesUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<PagedResponse<ArticleListItemResponse>>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<PagedResponse<ArticleListItemResponse>>.Failure(result.Error!));
             }
+
+            int totalPages = result.Value!.TotalItems == 0
+                ? 0
+                : (int)Math.Ceiling(result.Value.TotalItems / (double)result.Value.PageSize);
 
             var response = new PagedResponse<ArticleListItemResponse>
             {
-                Items = result.Value!.Items.Select(static item => new ArticleListItemResponse
+                Items = result.Value.Items.Select(static item => new ArticleListItemResponse
                 {
                     ArticleId = item.ArticleId,
                     PublicId = item.PublicId,
@@ -201,10 +208,17 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                     PublishedAt = item.PublishedAt,
                     Version = item.Version
                 }).ToArray(),
-                PageInfo = result.Value.PageInfo
+                PageInfo = new PageInfo
+                {
+                    Page = result.Value.Page,
+                    PageSize = result.Value.PageSize,
+                    TotalItems = result.Value.TotalItems,
+                    TotalPages = totalPages
+                }
             };
 
-            return this.ToActionResult(Result<PagedResponse<ArticleListItemResponse>>.Success(response));
+            return this.ToActionResult(
+                Result<PagedResponse<ArticleListItemResponse>>.Success(response));
         }
 
         [HttpPut("{articleId:long}")]
@@ -271,17 +285,22 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 PageSize = pageSize
             };
 
-            Result<PagedResponse<ArticleRevisionListItemDto>> result =
+            Result<PagedQueryResult<ArticleRevisionListItemDto>> result =
                 await _getArticleRevisionsUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<PagedResponse<ArticleRevisionItemResponse>>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<PagedResponse<ArticleRevisionItemResponse>>.Failure(result.Error!));
             }
+
+            int totalPages = result.Value!.TotalItems == 0
+                ? 0
+                : (int)Math.Ceiling(result.Value.TotalItems / (double)result.Value.PageSize);
 
             var response = new PagedResponse<ArticleRevisionItemResponse>
             {
-                Items = result.Value!.Items.Select(static item => new ArticleRevisionItemResponse
+                Items = result.Value.Items.Select(static item => new ArticleRevisionItemResponse
                 {
                     RevisionId = item.RevisionId,
                     RevisionNumber = item.RevisionNumber,
@@ -296,7 +315,13 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                     ChangeType = item.ChangeType,
                     ChangeSummary = item.ChangeSummary
                 }).ToArray(),
-                PageInfo = result.Value.PageInfo
+                PageInfo = new PageInfo
+                {
+                    Page = result.Value.Page,
+                    PageSize = result.Value.PageSize,
+                    TotalItems = result.Value.TotalItems,
+                    TotalPages = totalPages
+                }
             };
 
             return this.ToActionResult(Result<PagedResponse<ArticleRevisionItemResponse>>.Success(response));

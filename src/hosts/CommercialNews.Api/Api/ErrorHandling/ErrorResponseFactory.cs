@@ -1,5 +1,5 @@
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.Api.Api.Common.ErrorHandling;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace CommercialNews.Api.Api.ErrorHandling
 {
@@ -17,7 +17,7 @@ namespace CommercialNews.Api.Api.ErrorHandling
                 {
                     Code = error.Code,
                     Message = error.Message,
-                    Details = error.Details
+                    Details = error.Details.ToArray()
                 }
             };
         }

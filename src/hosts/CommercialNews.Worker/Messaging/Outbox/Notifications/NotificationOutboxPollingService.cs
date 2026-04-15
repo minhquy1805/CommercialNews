@@ -1,4 +1,5 @@
-using CommercialNews.BuildingBlocks.Abstractions.Time;
+
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Microsoft.Extensions.Options;
 using Notifications.Application.Contracts.Outbox.Requests;
 using Notifications.Application.Ports.Persistence.Write;
