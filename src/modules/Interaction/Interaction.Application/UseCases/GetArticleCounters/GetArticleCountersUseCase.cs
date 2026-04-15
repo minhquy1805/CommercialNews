@@ -1,4 +1,4 @@
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Interaction.Application.Contracts.Counters.Requests;
 using Interaction.Application.Contracts.Counters.Responses;
 using Interaction.Application.Errors;

@@ -1,5 +1,5 @@
 using System.Data;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
 using Notifications.Application.Models.QueryModels;
 using Notifications.Application.Ports.Persistence.Read;

@@ -1,4 +1,5 @@
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
 using Interaction.Application.Ports.Persistence.Transactions;
 
 namespace Interaction.Infrastructure.Persistence.Sql;

@@ -1,5 +1,5 @@
 using System.Data;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Interaction.Application.Models.QueryModels;
 using Interaction.Application.Ports.Persistence.Read;
 using Interaction.Infrastructure.Persistence.Exceptions;

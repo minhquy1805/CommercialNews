@@ -4,8 +4,8 @@ using Authorization.Application.Ports.Persistence;
 using Authorization.Domain.Entities;
 using Authorization.Infrastructure.Persistence.Exceptions;
 using Authorization.Infrastructure.Persistence.Sql;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Microsoft.Data.SqlClient;
 
 namespace Authorization.Infrastructure.Persistence.Repositories

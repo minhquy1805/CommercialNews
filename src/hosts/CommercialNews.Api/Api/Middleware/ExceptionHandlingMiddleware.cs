@@ -1,5 +1,6 @@
 using CommercialNews.Api.Api.ErrorHandling;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
+
 
 namespace CommercialNews.Api.Api.Middleware
 {

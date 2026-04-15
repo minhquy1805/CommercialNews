@@ -1,4 +1,5 @@
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
 using Seo.Application.Ports.Persistence;
 
 namespace Seo.Infrastructure.Persistence.Sql;

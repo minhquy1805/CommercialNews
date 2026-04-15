@@ -1,7 +1,7 @@
 using Audit.Application.Models;
 using Audit.Application.Models.QueryModels;
 using Audit.Domain.Entities;
-using CommercialNews.BuildingBlocks.Contracts.Common;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 
 namespace Audit.Application.Ports.Persistence;
 

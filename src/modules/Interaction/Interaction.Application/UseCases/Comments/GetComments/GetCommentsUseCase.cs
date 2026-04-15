@@ -1,5 +1,5 @@
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Interaction.Application.Contracts.Comments.Requests;
 using Interaction.Application.Contracts.Comments.Responses;
 using Interaction.Application.Errors;

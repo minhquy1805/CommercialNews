@@ -4,7 +4,7 @@ using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
 using Authorization.Application.Ports.Services;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace Authorization.Application.UseCases.GetUserRoles
 {

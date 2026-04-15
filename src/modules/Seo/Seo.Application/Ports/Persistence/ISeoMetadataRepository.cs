@@ -1,4 +1,4 @@
-using CommercialNews.BuildingBlocks.Contracts.Common;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Seo.Application.Models.QueryModels;
 using Seo.Domain.Entities;
 
