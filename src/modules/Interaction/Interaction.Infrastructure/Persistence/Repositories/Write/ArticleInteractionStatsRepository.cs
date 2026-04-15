@@ -1,5 +1,6 @@
 using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Interaction.Application.Ports.Persistence.Write;
 using Interaction.Domain.Entities;
 using Interaction.Infrastructure.Persistence.Exceptions;

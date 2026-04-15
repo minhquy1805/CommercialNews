@@ -1,6 +1,6 @@
 using System.Data;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Media.Application.Models.QueryModels;
 using Media.Application.Ports.Persistence;
 using Media.Domain.Entities;

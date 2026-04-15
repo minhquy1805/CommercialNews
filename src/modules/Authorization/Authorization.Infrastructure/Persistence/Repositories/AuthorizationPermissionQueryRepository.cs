@@ -2,7 +2,7 @@ using System.Data;
 using Authorization.Application.Models.QueryModels;
 using Authorization.Application.Ports.Persistence;
 using Authorization.Infrastructure.Persistence.Exceptions;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
 
 namespace Authorization.Infrastructure.Persistence.Repositories

@@ -1,9 +1,11 @@
 using CommercialNews.Api.Api.Admin.Contracts.Content.Categories.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Content.Categories.Responses;
+using CommercialNews.Api.Api.Common.Contracts;
+using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
-using CommercialNews.BuildingBlocks.Abstractions.Execution;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Models.QueryModels;

@@ -1,6 +1,6 @@
 using Authorization.Application.Ports.Services;
 using Authorization.Infrastructure.Persistence.Exceptions;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
 
 namespace Authorization.Infrastructure.Services

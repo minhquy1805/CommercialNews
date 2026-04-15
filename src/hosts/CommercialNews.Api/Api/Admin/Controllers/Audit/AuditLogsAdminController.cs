@@ -6,9 +6,9 @@ using Audit.Application.UseCases.GetAuditLogs;
 using Audit.Application.UseCases.GetAuditLogsByCorrelationId;
 using CommercialNews.Api.Api.Admin.Contracts.Audit.AuditLog.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Audit.AuditLog.Responses;
+using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Audit;

@@ -1,5 +1,5 @@
 ﻿using System.Data;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Identity.Application.Ports.Persistence;
 using Identity.Domain.Entities;
 using Identity.Domain.Enums;

@@ -5,7 +5,7 @@ using Audit.Application.Models.QueryModels;
 using Audit.Application.Ports.Persistence;
 using Audit.Domain.Exceptions;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace Audit.Application.UseCases.GetAuditLogsByCorrelationId;
 

@@ -1,4 +1,4 @@
-using CommercialNews.BuildingBlocks.Contracts.Common;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 
 namespace CommercialNews.Api.Api.Public.Contracts.Reading.Responses;
 

@@ -1,8 +1,8 @@
-using CommercialNews.BuildingBlocks.Abstractions.Identifiers;
-using CommercialNews.BuildingBlocks.Abstractions.Time;
-using CommercialNews.BuildingBlocks.Identifiers;
 using CommercialNews.BuildingBlocks.Persistence.Sql;
-using CommercialNews.BuildingBlocks.Time;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Options;
+using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 

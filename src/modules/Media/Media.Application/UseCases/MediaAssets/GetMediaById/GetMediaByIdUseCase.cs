@@ -1,5 +1,5 @@
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Media.Application.Contracts.MediaAsset.Requests;
 using Media.Application.Contracts.MediaAsset.Responses;
 using Media.Application.Errors;

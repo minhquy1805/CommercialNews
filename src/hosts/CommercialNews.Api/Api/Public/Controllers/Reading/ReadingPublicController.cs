@@ -1,8 +1,9 @@
+using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
 using CommercialNews.Api.Api.Public.Contracts.Reading.Requests;
 using CommercialNews.Api.Api.Public.Contracts.Reading.Responses;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Microsoft.AspNetCore.Mvc;
 using Reading.Application.Contracts.Requests;
 using Reading.Application.Contracts.Responses;

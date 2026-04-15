@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using CommercialNews.BuildingBlocks.Contracts.Headers;
+using CommercialNews.Api.Api.Common.Headers;
 
 namespace CommercialNews.Api.Api.Middleware
 {

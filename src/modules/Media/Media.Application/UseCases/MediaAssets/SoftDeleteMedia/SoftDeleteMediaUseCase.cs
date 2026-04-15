@@ -1,7 +1,7 @@
-using CommercialNews.BuildingBlocks.Abstractions.Execution;
-using CommercialNews.BuildingBlocks.Abstractions.Time;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Media.Application.Contracts.MediaAsset.Requests;
 using Media.Application.Contracts.MediaAsset.Responses;
 using Media.Application.Errors;
