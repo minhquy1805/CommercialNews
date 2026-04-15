@@ -1,4 +1,4 @@
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.ErrorHandling

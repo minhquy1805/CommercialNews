@@ -1,5 +1,5 @@
-using CommercialNews.BuildingBlocks.Contracts.Headers;
-using Microsoft.Extensions.Logging;
+
+using CommercialNews.Api.Api.Common.Headers;
 
 namespace CommercialNews.Api.Api.Middleware
 {

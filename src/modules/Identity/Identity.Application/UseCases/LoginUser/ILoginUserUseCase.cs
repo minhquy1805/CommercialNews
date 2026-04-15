@@ -1,4 +1,4 @@
-﻿using CommercialNews.BuildingBlocks.Results;
+﻿using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
 

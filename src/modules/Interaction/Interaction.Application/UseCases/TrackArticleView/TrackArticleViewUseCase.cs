@@ -1,6 +1,6 @@
-using CommercialNews.BuildingBlocks.Abstractions.Time;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Interaction.Application.Contracts.Views.Requests;
 using Interaction.Application.Contracts.Views.Responses;
 using Interaction.Application.Errors;

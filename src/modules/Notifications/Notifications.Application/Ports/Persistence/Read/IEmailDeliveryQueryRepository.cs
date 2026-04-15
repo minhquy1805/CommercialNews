@@ -1,4 +1,4 @@
-using CommercialNews.BuildingBlocks.Contracts.Common;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Notifications.Application.Models.QueryModels;
 
 namespace Notifications.Application.Ports.Persistence.Read;

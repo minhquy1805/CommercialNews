@@ -5,8 +5,8 @@ using Audit.Application.Ports.Persistence;
 using Audit.Domain.Entities;
 using Audit.Infrastructure.Persistence.Exceptions;
 using Audit.Infrastructure.Persistence.Sql;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Microsoft.Data.SqlClient;
 
 namespace Audit.Infrastructure.Persistence.Repositories;

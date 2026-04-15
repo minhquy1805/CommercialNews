@@ -1,4 +1,4 @@
-using CommercialNews.BuildingBlocks.Abstractions.Execution;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using System.Security.Claims;
 
 namespace CommercialNews.Api.Api.Common.RequestContext

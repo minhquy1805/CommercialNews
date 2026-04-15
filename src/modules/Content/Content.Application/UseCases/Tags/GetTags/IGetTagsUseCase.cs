@@ -1,5 +1,5 @@
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Models.QueryModels;
 
 namespace Content.Application.UseCases.Tags.GetTags

@@ -1,7 +1,7 @@
 using System.Text.Json;
-using CommercialNews.BuildingBlocks.Abstractions.Time;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Notifications.Application.Contracts.Outbox.Requests;
 using Notifications.Application.Contracts.Outbox.Responses;
 using Notifications.Application.Contracts.Processing.Requests;

@@ -1,6 +1,6 @@
 using System.Data;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Content.Application.Models.QueryModels;
 using Content.Application.Ports.Persistence;
 using Content.Infrastructure.Persistence.Sql;
@@ -113,7 +113,10 @@ namespace Content.Infrastructure.Persistence.Repositories
 
                     return new PagedQueryResult<ArticleRevisionListResultItem>
                     {
-                        Items = pagedItems,
+                        Items = allItems
+                            .Skip(skip)
+                            .Take(query.PageSize)
+                            .ToArray(),
                         Page = query.Page,
                         PageSize = query.PageSize,
                         TotalItems = totalItems

@@ -1,7 +1,4 @@
-﻿using CommercialNews.BuildingBlocks.Abstractions.Execution;
-using CommercialNews.BuildingBlocks.Abstractions.Time;
-using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Results;
+﻿using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using Identity.Application.Contracts.Requests;
 using Identity.Application.Contracts.Responses;
 using Identity.Application.Errors;
@@ -11,6 +8,9 @@ using Identity.Domain.Entities;
 using Identity.Domain.Exceptions;
 using Identity.Domain.Enums;
 using RefreshTokenEntity = Identity.Domain.Entities.RefreshToken;
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace Identity.Application.UseCases.LoginUser
 {

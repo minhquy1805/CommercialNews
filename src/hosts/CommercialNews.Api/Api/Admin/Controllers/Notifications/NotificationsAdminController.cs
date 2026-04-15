@@ -1,8 +1,8 @@
 using CommercialNews.Api.Api.Admin.Contracts.Notifications.EmailDeliveries.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Notifications.EmailDeliveries.Responses;
+using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Microsoft.AspNetCore.Mvc;
 using Notifications.Application.Contracts.EmailDeliveries.Requests;
 using Notifications.Application.Contracts.EmailDeliveries.Responses;

@@ -1,4 +1,4 @@
-namespace CommercialNews.BuildingBlocks.Results;
+namespace CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 public enum ErrorType
 {

@@ -1,6 +1,6 @@
 using System.Data;
-using CommercialNews.BuildingBlocks.Contracts.Common;
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Microsoft.Data.SqlClient;
 using Notifications.Application.Models.QueryModels;
 using Notifications.Application.Ports.Persistence.Read;

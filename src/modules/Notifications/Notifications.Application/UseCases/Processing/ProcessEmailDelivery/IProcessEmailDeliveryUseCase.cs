@@ -1,4 +1,4 @@
-using CommercialNews.BuildingBlocks.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Notifications.Application.Contracts.Processing.Requests;
 using Notifications.Application.Contracts.Processing.Responses;
 
