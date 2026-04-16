@@ -22,13 +22,13 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-USE [CommercialNews];
-GO
-
 IF DB_ID(N'CommercialNews') IS NULL
 BEGIN
     THROW 51201, 'Database [CommercialNews] does not exist. Run bootstrap scripts first.', 1;
 END
+GO
+
+USE [CommercialNews];
 GO
 
 IF SCHEMA_ID(N'identity') IS NULL
@@ -48,7 +48,7 @@ CREATE OR ALTER PROCEDURE [identity].[UserAccount_Insert]
     @PasswordHash        NVARCHAR(500),
     @FullName            NVARCHAR(200) = NULL,
     @AvatarUrl           NVARCHAR(800) = NULL,
-    @Status              VARCHAR(20) = 'Active',
+    @Status              VARCHAR(20),
     @UserId              BIGINT OUTPUT
 AS
 BEGIN
@@ -205,6 +205,7 @@ GO
 
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_UpdateLastLogin]
     @UserId          BIGINT,
+    @LastLoginAt     DATETIME2(3),
     @AffectedRows    INT OUTPUT
 AS
 BEGIN
@@ -213,8 +214,9 @@ BEGIN
 
     UPDATE [identity].[UserAccount]
     SET
-        [LastLoginAt] = SYSUTCDATETIME(),
-        [UpdatedAt] = SYSUTCDATETIME()
+        [LastLoginAt] = @LastLoginAt,
+        [UpdatedAt] = @LastLoginAt,
+        [Version] = [Version] + 1
     WHERE [UserId] = @UserId;
 
     SET @AffectedRows = @@ROWCOUNT;
@@ -222,8 +224,9 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_SetEmailVerified]
-    @UserId          BIGINT,
-    @AffectedRows    INT OUTPUT
+    @UserId             BIGINT,
+    @EmailVerifiedAt    DATETIME2(3),
+    @AffectedRows       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -232,8 +235,9 @@ BEGIN
     UPDATE [identity].[UserAccount]
     SET
         [IsEmailVerified] = 1,
-        [EmailVerifiedAt] = SYSUTCDATETIME(),
-        [UpdatedAt] = SYSUTCDATETIME(),
+        [EmailVerifiedAt] = @EmailVerifiedAt,
+        [Status] = 'Active',
+        [UpdatedAt] = @EmailVerifiedAt,
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId
       AND [IsEmailVerified] = 0;
@@ -325,6 +329,7 @@ GO
 
 CREATE OR ALTER PROCEDURE [identity].[EmailVerificationToken_MarkUsed]
     @VerificationTokenId  BIGINT,
+    @UsedAt               DATETIME2(3),
     @AffectedRows         INT OUTPUT
 AS
 BEGIN
@@ -332,7 +337,7 @@ BEGIN
     SET XACT_ABORT ON;
 
     UPDATE [identity].[EmailVerificationToken]
-    SET [UsedAt] = SYSUTCDATETIME()
+    SET [UsedAt] = @UsedAt
     WHERE [VerificationTokenId] = @VerificationTokenId
       AND [UsedAt] IS NULL;
 
@@ -367,6 +372,7 @@ GO
 
 CREATE OR ALTER PROCEDURE [identity].[PasswordResetToken_RevokeActiveByUserId]
     @UserId          BIGINT,
+    @RevokedAt       DATETIME2(3),
     @AffectedRows    INT OUTPUT
 AS
 BEGIN
@@ -374,11 +380,11 @@ BEGIN
     SET XACT_ABORT ON;
 
     UPDATE [identity].[PasswordResetToken]
-    SET [RevokedAt] = SYSUTCDATETIME()
+    SET [RevokedAt] = @RevokedAt
     WHERE [UserId] = @UserId
       AND [UsedAt] IS NULL
       AND [RevokedAt] IS NULL
-      AND [ExpiresAt] > SYSUTCDATETIME();
+      AND [ExpiresAt] > @RevokedAt;
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
@@ -443,6 +449,7 @@ GO
 
 CREATE OR ALTER PROCEDURE [identity].[PasswordResetToken_MarkUsed]
     @ResetTokenId     BIGINT,
+    @UsedAt           DATETIME2(3),
     @AffectedRows     INT OUTPUT
 AS
 BEGIN
@@ -450,7 +457,7 @@ BEGIN
     SET XACT_ABORT ON;
 
     UPDATE [identity].[PasswordResetToken]
-    SET [UsedAt] = SYSUTCDATETIME()
+    SET [UsedAt] = @UsedAt
     WHERE [ResetTokenId] = @ResetTokenId
       AND [UsedAt] IS NULL
       AND [RevokedAt] IS NULL;
@@ -571,6 +578,7 @@ GO
 
 CREATE OR ALTER PROCEDURE [identity].[RefreshToken_Revoke]
     @RefreshTokenId        BIGINT,
+    @RevokedAt             DATETIME2(3),
     @RevokedReason         NVARCHAR(200) = NULL,
     @ReplacedByTokenHash   VARBINARY(32) = NULL,
     @AffectedRows          INT OUTPUT
@@ -581,7 +589,7 @@ BEGIN
 
     UPDATE [identity].[RefreshToken]
     SET
-        [RevokedAt] = SYSUTCDATETIME(),
+        [RevokedAt] = @RevokedAt,
         [RevokedReason] = @RevokedReason,
         [ReplacedByTokenHash] = @ReplacedByTokenHash
     WHERE [RefreshTokenId] = @RefreshTokenId
@@ -593,6 +601,7 @@ GO
 
 CREATE OR ALTER PROCEDURE [identity].[RefreshToken_RevokeAllActiveByUserId]
     @UserId          BIGINT,
+    @RevokedAt       DATETIME2(3),
     @RevokedReason   NVARCHAR(200) = NULL,
     @AffectedRows    INT OUTPUT
 AS
@@ -602,11 +611,11 @@ BEGIN
 
     UPDATE [identity].[RefreshToken]
     SET
-        [RevokedAt] = SYSUTCDATETIME(),
+        [RevokedAt] = @RevokedAt,
         [RevokedReason] = @RevokedReason
     WHERE [UserId] = @UserId
       AND [RevokedAt] IS NULL
-      AND [ExpiresAt] > SYSUTCDATETIME();
+      AND [ExpiresAt] > @RevokedAt;
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
@@ -642,7 +651,10 @@ GO
 
 CREATE OR ALTER PROCEDURE [identity].[RefreshToken_Rotate]
     @CurrentTokenHash      VARBINARY(32),
+    @RevokedAt             DATETIME2(3),
+    @RevokedReason         NVARCHAR(200) = NULL,
     @NewTokenHash          VARBINARY(32),
+    @NewCreatedAt          DATETIME2(3),
     @NewExpiresAt          DATETIME2(3),
     @CreatedIp             NVARCHAR(45) = NULL,
     @UserAgent             NVARCHAR(300) = NULL,
@@ -664,7 +676,7 @@ BEGIN
     FROM [identity].[RefreshToken] WITH (UPDLOCK, ROWLOCK)
     WHERE [TokenHash] = @CurrentTokenHash
       AND [RevokedAt] IS NULL
-      AND [ExpiresAt] > SYSUTCDATETIME();
+      AND [ExpiresAt] > @RevokedAt;
 
     IF @CurrentRefreshTokenId IS NULL
     BEGIN
@@ -676,6 +688,7 @@ BEGIN
     (
         [UserId],
         [TokenHash],
+        [CreatedAt],
         [ExpiresAt],
         [CreatedIp],
         [UserAgent],
@@ -685,6 +698,7 @@ BEGIN
     (
         @UserId,
         @NewTokenHash,
+        @NewCreatedAt,
         @NewExpiresAt,
         @CreatedIp,
         @UserAgent,
@@ -695,8 +709,8 @@ BEGIN
 
     UPDATE [identity].[RefreshToken]
     SET
-        [RevokedAt] = SYSUTCDATETIME(),
-        [RevokedReason] = N'Rotated',
+        [RevokedAt] = @RevokedAt,
+        [RevokedReason] = @RevokedReason,
         [ReplacedByTokenHash] = @NewTokenHash
     WHERE [RefreshTokenId] = @CurrentRefreshTokenId
       AND [RevokedAt] IS NULL;
@@ -807,6 +821,7 @@ BEGIN
     SET XACT_ABORT ON;
 
     DECLARE @VerificationTokenId BIGINT;
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
 
     BEGIN TRANSACTION;
 
@@ -816,7 +831,7 @@ BEGIN
     FROM [identity].[EmailVerificationToken] WITH (UPDLOCK, ROWLOCK)
     WHERE [TokenHash] = @TokenHash
       AND [UsedAt] IS NULL
-      AND [ExpiresAt] > SYSUTCDATETIME();
+      AND [ExpiresAt] > @NowUtc;
 
     IF @VerificationTokenId IS NULL
     BEGIN
@@ -825,15 +840,16 @@ BEGIN
     END
 
     UPDATE [identity].[EmailVerificationToken]
-    SET [UsedAt] = SYSUTCDATETIME()
+    SET [UsedAt] = @NowUtc
     WHERE [VerificationTokenId] = @VerificationTokenId
       AND [UsedAt] IS NULL;
 
     UPDATE [identity].[UserAccount]
     SET
         [IsEmailVerified] = 1,
-        [EmailVerifiedAt] = SYSUTCDATETIME(),
-        [UpdatedAt] = SYSUTCDATETIME(),
+        [EmailVerifiedAt] = @NowUtc,
+        [Status] = 'Active',
+        [UpdatedAt] = @NowUtc,
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId
       AND [IsEmailVerified] = 0;
@@ -856,6 +872,7 @@ BEGIN
     SET XACT_ABORT ON;
 
     DECLARE @ResetTokenId BIGINT;
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
 
     BEGIN TRANSACTION;
 
@@ -866,7 +883,7 @@ BEGIN
     WHERE [TokenHash] = @TokenHash
       AND [UsedAt] IS NULL
       AND [RevokedAt] IS NULL
-      AND [ExpiresAt] > SYSUTCDATETIME();
+      AND [ExpiresAt] > @NowUtc;
 
     IF @ResetTokenId IS NULL
     BEGIN
@@ -875,7 +892,7 @@ BEGIN
     END
 
     UPDATE [identity].[PasswordResetToken]
-    SET [UsedAt] = SYSUTCDATETIME()
+    SET [UsedAt] = @NowUtc
     WHERE [ResetTokenId] = @ResetTokenId
       AND [UsedAt] IS NULL
       AND [RevokedAt] IS NULL;
@@ -883,9 +900,17 @@ BEGIN
     UPDATE [identity].[UserAccount]
     SET
         [PasswordHash] = @PasswordHash,
-        [UpdatedAt] = SYSUTCDATETIME(),
+        [UpdatedAt] = @NowUtc,
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId;
+
+    UPDATE [identity].[RefreshToken]
+    SET
+        [RevokedAt] = @NowUtc,
+        [RevokedReason] = N'PasswordReset'
+    WHERE [UserId] = @UserId
+      AND [RevokedAt] IS NULL
+      AND [ExpiresAt] > @NowUtc;
 
     COMMIT TRANSACTION;
 END;
