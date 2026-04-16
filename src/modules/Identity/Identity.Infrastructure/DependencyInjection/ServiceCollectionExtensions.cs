@@ -5,35 +5,41 @@ using Identity.Infrastructure.Persistence.Repositories;
 using Identity.Infrastructure.Persistence.Sql;
 using Identity.Infrastructure.Security;
 using Identity.Infrastructure.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Identity.Infrastructure.DependencyInjection
+namespace Identity.Infrastructure.DependencyInjection;
+
+public static class ServiceCollectionExtensions
 {
-    public static class ServiceCollectionExtensions
+    public static IServiceCollection AddIdentityInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
-        public static IServiceCollection AddIdentityInfrastructure(this IServiceCollection services)
-        {
-            ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
 
-            services.AddScoped<IdentityUnitOfWork>();
-            services.AddScoped<IIdentityUnitOfWork>(sp => sp.GetRequiredService<IdentityUnitOfWork>());
+        services.Configure<JwtSettings>(
+            configuration.GetSection(JwtSettings.SectionName));
 
-            services.AddSingleton<IdentitySqlExceptionTranslator>();
+        services.AddScoped<IdentityUnitOfWork>();
+        services.AddScoped<IIdentityUnitOfWork>(sp => sp.GetRequiredService<IdentityUnitOfWork>());
 
-            services.AddScoped<IUserAccountRepository, UserAccountRepository>();
-            services.AddScoped<IEmailVerificationTokenRepository, EmailVerificationTokenRepository>();
-            services.AddScoped<IPasswordResetTokenRepository, PasswordResetTokenRepository>();
-            services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
-            services.AddScoped<ILoginHistoryRepository, LoginHistoryRepository>();
+        services.AddSingleton<IdentitySqlExceptionTranslator>();
 
-            services.AddSingleton<IPasswordHasher, PasswordHasher>();
-            services.AddSingleton<IRawTokenGenerator, RawTokenGenerator>();
-            services.AddSingleton<ITokenHashProvider, TokenHashProvider>();
-            services.AddSingleton<IAccessTokenGenerator, AccessTokenGenerator>();
+        services.AddScoped<IUserAccountRepository, UserAccountRepository>();
+        services.AddScoped<IEmailVerificationTokenRepository, EmailVerificationTokenRepository>();
+        services.AddScoped<IPasswordResetTokenRepository, PasswordResetTokenRepository>();
+        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<ILoginHistoryRepository, LoginHistoryRepository>();
 
-            services.AddScoped<IIdentityNotificationOutboxWriter, IdentityNotificationOutboxWriter>();
+        services.AddSingleton<IPasswordHasher, PasswordHasher>();
+        services.AddSingleton<IRawTokenGenerator, RawTokenGenerator>();
+        services.AddSingleton<ITokenHashProvider, TokenHashProvider>();
+        services.AddSingleton<IAccessTokenGenerator, JwtAccessTokenGenerator>();
 
-            return services;
-        }
+        services.AddScoped<IIdentityNotificationOutboxWriter, IdentityNotificationOutboxWriter>();
+
+        return services;
     }
 }
