@@ -5,7 +5,16 @@ using CommercialNews.Api.Api.Public.Identity.Contracts.Session.Requests;
 using CommercialNews.Api.Api.Public.Identity.Contracts.Session.Responses;
 using CommercialNews.Api.Api.Public.Identity.Contracts.User.Requests;
 using CommercialNews.Api.Api.Public.Identity.Contracts.User.Responses;
-using Identity.Application.Contracts.Requests;
+using Identity.Application.Contracts.ChangePassword;
+using Identity.Application.Contracts.ForgotPassword;
+using Identity.Application.Contracts.LoginUser;
+using Identity.Application.Contracts.Logout;
+using Identity.Application.Contracts.RefreshToken;
+using Identity.Application.Contracts.RegisterUser;
+using Identity.Application.Contracts.ResendVerificationEmail;
+using Identity.Application.Contracts.ResetPassword;
+using Identity.Application.Contracts.UpdateMyProfile;
+using Identity.Application.Contracts.VerifyEmail;
 using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.GetMyProfile;
@@ -20,386 +29,385 @@ using Identity.Application.UseCases.UpdateMyProfile;
 using Identity.Application.UseCases.VerifyEmail;
 using Microsoft.AspNetCore.Mvc;
 
-namespace CommercialNews.Api.Api.Public.Controllers
+namespace CommercialNews.Api.Api.Public.Controllers;
+
+[ApiController]
+[Route("api/v1/identity")]
+public sealed class IdentityController : ControllerBase
 {
-    [ApiController]
-    [Route("api/v1/identity")]
-    public sealed class IdentityController : ControllerBase
+    [HttpPost("register")]
+    [ProducesResponseType(typeof(RegisterResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Register(
+        [FromBody] RegisterRequest request,
+        [FromServices] IRegisterUserUseCase useCase,
+        CancellationToken cancellationToken)
     {
-        [HttpPost("register")]
-        [ProducesResponseType(typeof(RegisterResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> Register(
-            [FromBody] RegisterRequest request,
-            [FromServices] IRegisterUserUseCase useCase,
-            CancellationToken cancellationToken)
+        var applicationRequest = new RegisterUserRequestDto
         {
-            var applicationRequest = new RegisterUserRequestDto
+            Email = request.Email,
+            Password = request.Password,
+            FullName = request.FullName
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new RegisterResponse
             {
-                Email = request.Email,
-                Password = request.Password,
-                FullName = request.FullName
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new RegisterResponse
-                {
-                    UserId = value.UserId,
-                    PublicId = value.PublicId,
-                    Email = value.Email,
-                    RequiresEmailVerification = value.RequiresEmailVerification
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                PublicId = value.PublicId,
+                Email = value.Email,
+                RequiresEmailVerification = value.RequiresEmailVerification
+            });
         }
 
-        [HttpPost("verify-email")]
-        [ProducesResponseType(typeof(VerifyEmailResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> VerifyEmail(
-            [FromBody] VerifyEmailRequest request,
-            [FromServices] IVerifyEmailUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("verify-email")]
+    [ProducesResponseType(typeof(VerifyEmailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> VerifyEmail(
+        [FromBody] VerifyEmailRequest request,
+        [FromServices] IVerifyEmailUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new VerifyEmailRequestDto
         {
-            var applicationRequest = new VerifyEmailRequestDto
+            Token = request.Token
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new VerifyEmailResponse
             {
-                Token = request.Token
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new VerifyEmailResponse
-                {
-                    UserId = value.UserId,
-                    Verified = value.Verified
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                Verified = value.Verified
+            });
         }
 
-        [HttpPost("login")]
-        [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        public async Task<IActionResult> Login(
-            [FromBody] LoginRequest request,
-            [FromServices] ILoginUserUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("login")]
+    [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> Login(
+        [FromBody] LoginRequest request,
+        [FromServices] ILoginUserUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new LoginUserRequestDto
         {
-            var applicationRequest = new LoginUserRequestDto
+            Email = request.Email,
+            Password = request.Password
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new LoginResponse
             {
-                Email = request.Email,
-                Password = request.Password
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new LoginResponse
-                {
-                    UserId = value.UserId,
-                    PublicId = value.PublicId,
-                    Email = value.Email,
-                    AccessToken = value.AccessToken,
-                    RefreshToken = value.RefreshToken,
-                    AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc,
-                    RefreshTokenExpiresAtUtc = value.RefreshTokenExpiresAtUtc
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                PublicId = value.PublicId,
+                Email = value.Email,
+                AccessToken = value.AccessToken,
+                RefreshToken = value.RefreshToken,
+                AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc,
+                RefreshTokenExpiresAtUtc = value.RefreshTokenExpiresAtUtc
+            });
         }
 
-        [HttpPost("forgot-password")]
-        [ProducesResponseType(typeof(ForgotPasswordResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> ForgotPassword(
-            [FromBody] ForgotPasswordRequest request,
-            [FromServices] IForgotPasswordUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("forgot-password")]
+    [ProducesResponseType(typeof(ForgotPasswordResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ForgotPassword(
+        [FromBody] ForgotPasswordRequest request,
+        [FromServices] IForgotPasswordUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new ForgotPasswordRequestDto
         {
-            var applicationRequest = new ForgotPasswordRequestDto
+            Email = request.Email
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new ForgotPasswordResponse
             {
-                Email = request.Email
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new ForgotPasswordResponse
-                {
-                    Requested = value.Requested,
-                    Message = value.Message
-                });
-            }
-
-            return this.ToActionResult(result);
+                Requested = value.Requested,
+                Message = value.Message
+            });
         }
 
-        [HttpPost("reset-password")]
-        [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> ResetPassword(
-            [FromBody] ResetPasswordRequest request,
-            [FromServices] IResetPasswordUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("reset-password")]
+    [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> ResetPassword(
+        [FromBody] ResetPasswordRequest request,
+        [FromServices] IResetPasswordUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new ResetPasswordRequestDto
         {
-            var applicationRequest = new ResetPasswordRequestDto
+            Token = request.Token,
+            NewPassword = request.NewPassword
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new ResetPasswordResponse
             {
-                Token = request.Token,
-                NewPassword = request.NewPassword
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new ResetPasswordResponse
-                {
-                    UserId = value.UserId,
-                    PasswordReset = value.PasswordReset
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                PasswordReset = value.PasswordReset
+            });
         }
 
-        [HttpPost("refresh-token")]
-        [ProducesResponseType(typeof(RefreshTokenResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        [ProducesResponseType(StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> RefreshToken(
-            [FromBody] RefreshTokenRequest request,
-            [FromServices] IRefreshTokenUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("refresh-token")]
+    [ProducesResponseType(typeof(RefreshTokenResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RefreshToken(
+        [FromBody] RefreshTokenRequest request,
+        [FromServices] IRefreshTokenUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new RefreshTokenRequestDto
         {
-            var applicationRequest = new RefreshTokenRequestDto
+            RefreshToken = request.RefreshToken
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new RefreshTokenResponse
             {
-                RefreshToken = request.RefreshToken
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new RefreshTokenResponse
-                {
-                    UserId = value.UserId,
-                    AccessToken = value.AccessToken,
-                    RefreshToken = value.RefreshToken,
-                    AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc,
-                    RefreshTokenExpiresAtUtc = value.RefreshTokenExpiresAtUtc
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                AccessToken = value.AccessToken,
+                RefreshToken = value.RefreshToken,
+                AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc,
+                RefreshTokenExpiresAtUtc = value.RefreshTokenExpiresAtUtc
+            });
         }
 
-        [HttpPost("resend-verification-email")]
-        [ProducesResponseType(typeof(ResendVerificationEmailResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> ResendVerificationEmail(
-            [FromBody] ResendVerificationEmailRequest request,
-            [FromServices] IResendVerificationEmailUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("resend-verification-email")]
+    [ProducesResponseType(typeof(ResendVerificationEmailResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResendVerificationEmail(
+        [FromBody] ResendVerificationEmailRequest request,
+        [FromServices] IResendVerificationEmailUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new ResendVerificationEmailRequestDto
         {
-            var applicationRequest = new ResendVerificationEmailRequestDto
+            Email = request.Email
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new ResendVerificationEmailResponse
             {
-                Email = request.Email
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new ResendVerificationEmailResponse
-                {
-                    Requested = value.Requested,
-                    Message = value.Message
-                });
-            }
-
-            return this.ToActionResult(result);
+                Requested = value.Requested,
+                Message = value.Message
+            });
         }
 
-        [HttpPost("change-password")]
-        [ProducesResponseType(typeof(ChangePasswordResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> ChangePassword(
-            [FromBody] ChangePasswordRequest request,
-            [FromServices] IChangePasswordUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("change-password")]
+    [ProducesResponseType(typeof(ChangePasswordResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ChangePassword(
+        [FromBody] ChangePasswordRequest request,
+        [FromServices] IChangePasswordUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new ChangePasswordRequestDto
         {
-            var applicationRequest = new ChangePasswordRequestDto
+            CurrentPassword = request.CurrentPassword,
+            NewPassword = request.NewPassword
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new ChangePasswordResponse
             {
-                CurrentPassword = request.CurrentPassword,
-                NewPassword = request.NewPassword
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new ChangePasswordResponse
-                {
-                    UserId = value.UserId,
-                    PasswordChanged = value.PasswordChanged
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                PasswordChanged = value.PasswordChanged
+            });
         }
 
-        [HttpPost("logout")]
-        [ProducesResponseType(typeof(LogoutResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> Logout(
-            [FromBody] LogoutRequest request,
-            [FromServices] ILogoutUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("logout")]
+    [ProducesResponseType(typeof(LogoutResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Logout(
+        [FromBody] LogoutRequest request,
+        [FromServices] ILogoutUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new LogoutRequestDto
         {
-            var applicationRequest = new LogoutRequestDto
+            RefreshToken = request.RefreshToken
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new LogoutResponse
             {
-                RefreshToken = request.RefreshToken
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new LogoutResponse
-                {
-                    UserId = value.UserId,
-                    LoggedOut = value.LoggedOut
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                LoggedOut = value.LoggedOut
+            });
         }
 
-        [HttpGet("me")]
-        [ProducesResponseType(typeof(GetMyProfileResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> GetMyProfile(
-            [FromServices] IGetMyProfileUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpGet("me")]
+    [ProducesResponseType(typeof(GetMyProfileResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetMyProfile(
+        [FromServices] IGetMyProfileUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var result = await useCase.ExecuteAsync(cancellationToken);
+
+        if (result.IsSuccess)
         {
-            var result = await useCase.ExecuteAsync(cancellationToken);
-
-            if (result.IsSuccess)
+            var value = result.Value!;
+            return Ok(new GetMyProfileResponse
             {
-                var value = result.Value!;
-                return Ok(new GetMyProfileResponse
-                {
-                    UserId = value.UserId,
-                    PublicId = value.PublicId,
-                    Email = value.Email,
-                    FullName = value.FullName,
-                    AvatarUrl = value.AvatarUrl,
-                    IsEmailVerified = value.IsEmailVerified,
-                    Status = value.Status,
-                    CreatedAt = value.CreatedAt,
-                    UpdatedAt = value.UpdatedAt,
-                    LastLoginAt = value.LastLoginAt
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                PublicId = value.PublicId,
+                Email = value.Email,
+                FullName = value.FullName,
+                AvatarUrl = value.AvatarUrl,
+                IsEmailVerified = value.IsEmailVerified,
+                Status = value.Status,
+                CreatedAt = value.CreatedAt,
+                UpdatedAt = value.UpdatedAt,
+                LastLoginAt = value.LastLoginAt
+            });
         }
 
-        [HttpPut("me")]
-        [ProducesResponseType(typeof(UpdateMyProfileResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> UpdateMyProfile(
-            [FromBody] UpdateMyProfileRequest request,
-            [FromServices] IUpdateMyProfileUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPut("me")]
+    [ProducesResponseType(typeof(UpdateMyProfileResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateMyProfile(
+        [FromBody] UpdateMyProfileRequest request,
+        [FromServices] IUpdateMyProfileUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new UpdateMyProfileRequestDto
         {
-            var applicationRequest = new UpdateMyProfileRequestDto
+            FullName = request.FullName,
+            AvatarUrl = request.AvatarUrl
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new UpdateMyProfileResponse
             {
-                FullName = request.FullName,
-                AvatarUrl = request.AvatarUrl
-            };
-
-            var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
-
-            if (result.IsSuccess)
-            {
-                var value = result.Value!;
-                return Ok(new UpdateMyProfileResponse
-                {
-                    UserId = value.UserId,
-                    PublicId = value.PublicId,
-                    Email = value.Email,
-                    FullName = value.FullName,
-                    AvatarUrl = value.AvatarUrl,
-                    IsEmailVerified = value.IsEmailVerified,
-                    Status = value.Status,
-                    UpdatedAt = value.UpdatedAt
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                PublicId = value.PublicId,
+                Email = value.Email,
+                FullName = value.FullName,
+                AvatarUrl = value.AvatarUrl,
+                IsEmailVerified = value.IsEmailVerified,
+                Status = value.Status,
+                UpdatedAt = value.UpdatedAt
+            });
         }
 
-        [HttpPost("logout-all-sessions")]
-        [ProducesResponseType(typeof(LogoutAllSessionsResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-        [ProducesResponseType(StatusCodes.Status403Forbidden)]
-        [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> LogoutAllSessions(
-            [FromServices] ILogoutAllSessionsUseCase useCase,
-            CancellationToken cancellationToken)
+        return this.ToActionResult(result);
+    }
+
+    [HttpPost("logout-all-sessions")]
+    [ProducesResponseType(typeof(LogoutAllSessionsResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> LogoutAllSessions(
+        [FromServices] ILogoutAllSessionsUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var result = await useCase.ExecuteAsync(cancellationToken);
+
+        if (result.IsSuccess)
         {
-            var result = await useCase.ExecuteAsync(cancellationToken);
-
-            if (result.IsSuccess)
+            var value = result.Value!;
+            return Ok(new LogoutAllSessionsResponse
             {
-                var value = result.Value!;
-                return Ok(new LogoutAllSessionsResponse
-                {
-                    UserId = value.UserId,
-                    LoggedOutAllSessions = value.LoggedOutAllSessions
-                });
-            }
-
-            return this.ToActionResult(result);
+                UserId = value.UserId,
+                LoggedOutAllSessions = value.LoggedOutAllSessions
+            });
         }
+
+        return this.ToActionResult(result);
     }
 }

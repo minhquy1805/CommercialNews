@@ -1,139 +1,134 @@
 ﻿using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using CommercialNews.BuildingBlocks.SharedKernel.Time;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.VerifyEmail;
 using Identity.Application.Errors;
 using Identity.Application.Ports.Persistence;
 using Identity.Application.Ports.Services;
+using Identity.Application.Validation.VerifyEmail;
 using Identity.Domain.Entities;
 using Identity.Domain.Exceptions;
 
-namespace Identity.Application.UseCases.VerifyEmail
-{
-    public sealed class VerifyEmailUseCase : IVerifyEmailUseCase
-    {
-        private readonly ITokenHashProvider _tokenHashProvider;
-        private readonly IEmailVerificationTokenRepository _emailVerificationTokenRepository;
-        private readonly IUserAccountRepository _userAccountRepository;
-        private readonly IIdentityUnitOfWork _unitOfWork;
-        private readonly IDateTimeProvider _dateTimeProvider;
+namespace Identity.Application.UseCases.VerifyEmail;
 
-        public VerifyEmailUseCase(
-            ITokenHashProvider tokenHashProvider,
-            IEmailVerificationTokenRepository emailVerificationTokenRepository,
-            IUserAccountRepository userAccountRepository,
-            IIdentityUnitOfWork unitOfWork,
-            IDateTimeProvider dateTimeProvider)
+public sealed class VerifyEmailUseCase : IVerifyEmailUseCase
+{
+    private readonly ITokenHashProvider _tokenHashProvider;
+    private readonly IEmailVerificationTokenRepository _emailVerificationTokenRepository;
+    private readonly IUserAccountRepository _userAccountRepository;
+    private readonly IIdentityUnitOfWork _unitOfWork;
+    private readonly IDateTimeProvider _dateTimeProvider;
+
+    public VerifyEmailUseCase(
+        ITokenHashProvider tokenHashProvider,
+        IEmailVerificationTokenRepository emailVerificationTokenRepository,
+        IUserAccountRepository userAccountRepository,
+        IIdentityUnitOfWork unitOfWork,
+        IDateTimeProvider dateTimeProvider)
+    {
+        _tokenHashProvider = tokenHashProvider ?? throw new ArgumentNullException(nameof(tokenHashProvider));
+        _emailVerificationTokenRepository = emailVerificationTokenRepository ?? throw new ArgumentNullException(nameof(emailVerificationTokenRepository));
+        _userAccountRepository = userAccountRepository ?? throw new ArgumentNullException(nameof(userAccountRepository));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+    }
+
+    public async Task<Result<VerifyEmailResponseDto>> ExecuteAsync(
+        VerifyEmailRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        Error? validationError = VerifyEmailValidator.Validate(request);
+        if (validationError is not null)
         {
-            _tokenHashProvider = tokenHashProvider;
-            _emailVerificationTokenRepository = emailVerificationTokenRepository;
-            _userAccountRepository = userAccountRepository;
-            _unitOfWork = unitOfWork;
-            _dateTimeProvider = dateTimeProvider;
+            return Result<VerifyEmailResponseDto>.Failure(validationError);
         }
 
-        public async Task<Result<VerifyEmailResponseDto>> ExecuteAsync(
-            VerifyEmailRequestDto request,
-            CancellationToken cancellationToken = default)
+        try
         {
-            if (request is null)
+            byte[] tokenHash = _tokenHashProvider.Hash(request.Token.Trim());
+
+            EmailVerificationToken? token =
+                await _emailVerificationTokenRepository.GetActiveByTokenHashAsync(
+                    tokenHash,
+                    cancellationToken);
+
+            if (token is null)
             {
-                return Result<VerifyEmailResponseDto>.Failure(IdentityErrors.ValidationFailed);
+                return Result<VerifyEmailResponseDto>.Failure(
+                    IdentityErrors.EmailVerification.TokenNotFound);
             }
 
-            if (string.IsNullOrWhiteSpace(request.Token))
-            {
-                return Result<VerifyEmailResponseDto>.Failure(IdentityErrors.ValidationFailed);
-            }
+            DateTime nowUtc = _dateTimeProvider.UtcNow;
+
+            token.MarkUsed(nowUtc);
+
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                byte[] tokenHash = _tokenHashProvider.Hash(request.Token);
+                bool markedUsed = await _emailVerificationTokenRepository.MarkUsedAsync(
+                    token.VerificationTokenId,
+                    nowUtc,
+                    cancellationToken);
 
-                EmailVerificationToken? token =
-                    await _emailVerificationTokenRepository.GetActiveByTokenHashAsync(
-                        tokenHash,
-                        cancellationToken);
-
-                if (token is null)
-                {
-                    return Result<VerifyEmailResponseDto>.Failure(
-                        IdentityErrors.EmailVerification.TokenNotFound);
-                }
-
-                DateTime nowUtc = _dateTimeProvider.UtcNow;
-
-                token.MarkUsed(nowUtc);
-
-                await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-                try
-                {
-                    bool markedUsed = await _emailVerificationTokenRepository.MarkUsedAsync(
-                        token.VerificationTokenId,
-                        cancellationToken);
-
-                    if (!markedUsed)
-                    {
-                        await _unitOfWork.RollbackAsync(cancellationToken);
-                        return Result<VerifyEmailResponseDto>.Failure(
-                            IdentityErrors.EmailVerification.TokenAlreadyUsed);
-                    }
-
-                    bool verified = await _userAccountRepository.SetEmailVerifiedAsync(
-                        token.UserId,
-                        cancellationToken);
-
-                    if (!verified)
-                    {
-                        await _unitOfWork.RollbackAsync(cancellationToken);
-                        return Result<VerifyEmailResponseDto>.Failure(
-                            IdentityErrors.User.AlreadyVerified);
-                    }
-
-                    await _unitOfWork.CommitAsync(cancellationToken);
-
-                    return Result<VerifyEmailResponseDto>.Success(new VerifyEmailResponseDto
-                    {
-                        UserId = token.UserId,
-                        Verified = true
-                    });
-                }
-                catch
+                if (!markedUsed)
                 {
                     await _unitOfWork.RollbackAsync(cancellationToken);
-                    throw;
+                    return Result<VerifyEmailResponseDto>.Failure(
+                        IdentityErrors.EmailVerification.TokenAlreadyUsed);
                 }
-            }
-            catch (PersistenceException exception)
-            {
-                return Result<VerifyEmailResponseDto>.Failure(MapPersistenceException(exception));
-            }
-            catch (IdentityDomainException exception)
-            {
-                return Result<VerifyEmailResponseDto>.Failure(MapDomainException(exception));
-            }
-        }
 
-        private static Error MapDomainException(IdentityDomainException exception)
-        {
-            return exception.Code switch
-            {
-                "IDENTITY.EMAIL_VERIFICATION_TOKEN_ALREADY_USED" => IdentityErrors.EmailVerification.TokenAlreadyUsed,
-                "IDENTITY.EMAIL_VERIFICATION_INVALID_USED_AT" => IdentityErrors.EmailVerification.InvalidUsedAt,
-                "IDENTITY.EMAIL_VERIFICATION_TOKEN_HASH_REQUIRED" => IdentityErrors.EmailVerification.TokenHashRequired,
-                "IDENTITY.EMAIL_VERIFICATION_TOKEN_HASH_INVALID" => IdentityErrors.EmailVerification.TokenHashInvalid,
-                _ => IdentityErrors.ValidationFailed
-            };
-        }
+                bool verified = await _userAccountRepository.MarkEmailVerifiedAsync(
+                    token.UserId,
+                    nowUtc,
+                    cancellationToken);
 
-        private static Error MapPersistenceException(PersistenceException exception)
-        {
-            return exception.Code switch
+                if (!verified)
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    return Result<VerifyEmailResponseDto>.Failure(
+                        IdentityErrors.ValidationFailed);
+                }
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+
+                return Result<VerifyEmailResponseDto>.Success(new VerifyEmailResponseDto
+                {
+                    UserId = token.UserId,
+                    Verified = true
+                });
+            }
+            catch
             {
-                _ => IdentityErrors.ValidationFailed
-            };
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
+        catch (PersistenceException exception)
+        {
+            return Result<VerifyEmailResponseDto>.Failure(MapPersistenceException(exception));
+        }
+        catch (IdentityDomainException exception)
+        {
+            return Result<VerifyEmailResponseDto>.Failure(MapDomainException(exception));
+        }
+    }
+
+    private static Error MapDomainException(IdentityDomainException exception)
+    {
+        return exception.Code switch
+        {
+            "IDENTITY.EMAIL_VERIFICATION_TOKEN_ALREADY_USED" => IdentityErrors.EmailVerification.TokenAlreadyUsed,
+            "IDENTITY.EMAIL_VERIFICATION_TOKEN_EXPIRED" => IdentityErrors.EmailVerification.TokenExpired,
+            _ => IdentityErrors.ValidationFailed
+        };
+    }
+
+    private static Error MapPersistenceException(PersistenceException exception)
+    {
+        return exception.Code switch
+        {
+            _ => IdentityErrors.ValidationFailed
+        };
     }
 }

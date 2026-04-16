@@ -1,11 +1,10 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.GetMyProfile;
 
-namespace Identity.Application.UseCases.GetMyProfile
+namespace Identity.Application.UseCases.GetMyProfile;
+
+public interface IGetMyProfileUseCase
 {
-    public interface IGetMyProfileUseCase
-    {
-        Task<Result<GetMyProfileResponseDto>> ExecuteAsync(
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<GetMyProfileResponseDto>> ExecuteAsync(
+        CancellationToken cancellationToken = default);
 }

@@ -1,13 +1,11 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.ChangePassword;
 
-namespace Identity.Application.UseCases.ChangePassword
+namespace Identity.Application.UseCases.ChangePassword;
+
+public interface IChangePasswordUseCase
 {
-    public interface IChangePasswordUseCase
-    {
-        Task<Result<ChangePasswordResponseDto>> ExecuteAsync(
-            ChangePasswordRequestDto request,
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<ChangePasswordResponseDto>> ExecuteAsync(
+        ChangePasswordRequestDto request,
+        CancellationToken cancellationToken = default);
 }

@@ -1,167 +1,141 @@
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using CommercialNews.BuildingBlocks.SharedKernel.Time;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Configuration;
+using Identity.Application.Contracts.ResendVerificationEmail;
 using Identity.Application.Errors;
 using Identity.Application.Ports.Persistence;
 using Identity.Application.Ports.Services;
+using Identity.Application.Validation.ResendVerificationEmail;
 using Identity.Domain.Entities;
 using Identity.Domain.Exceptions;
+using Microsoft.Extensions.Options;
 
-namespace Identity.Application.UseCases.ResendVerificationEmail
+namespace Identity.Application.UseCases.ResendVerificationEmail;
+
+public sealed class ResendVerificationEmailUseCase : IResendVerificationEmailUseCase
 {
-    public sealed class ResendVerificationEmailUseCase : IResendVerificationEmailUseCase
-    {
-        private readonly IUserAccountRepository _userAccountRepository;
-        private readonly IEmailVerificationTokenRepository _emailVerificationTokenRepository;
-        private readonly IRawTokenGenerator _rawTokenGenerator;
-        private readonly ITokenHashProvider _tokenHashProvider;
-        private readonly IDateTimeProvider _dateTimeProvider;
-        private readonly IIdentityUnitOfWork _unitOfWork;
-        private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
+    private readonly IUserAccountRepository _userAccountRepository;
+    private readonly IEmailVerificationTokenRepository _emailVerificationTokenRepository;
+    private readonly IRawTokenGenerator _rawTokenGenerator;
+    private readonly ITokenHashProvider _tokenHashProvider;
+    private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IIdentityUnitOfWork _unitOfWork;
+    private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
+    private readonly IdentityTokenOptions _tokenOptions;
 
-        public ResendVerificationEmailUseCase(
-            IUserAccountRepository userAccountRepository,
-            IEmailVerificationTokenRepository emailVerificationTokenRepository,
-            IRawTokenGenerator rawTokenGenerator,
-            ITokenHashProvider tokenHashProvider,
-            IDateTimeProvider dateTimeProvider,
-            IIdentityUnitOfWork unitOfWork,
-            IIdentityNotificationOutboxWriter notificationOutboxWriter)
+    public ResendVerificationEmailUseCase(
+        IUserAccountRepository userAccountRepository,
+        IEmailVerificationTokenRepository emailVerificationTokenRepository,
+        IRawTokenGenerator rawTokenGenerator,
+        ITokenHashProvider tokenHashProvider,
+        IDateTimeProvider dateTimeProvider,
+        IIdentityUnitOfWork unitOfWork,
+        IIdentityNotificationOutboxWriter notificationOutboxWriter,
+        IOptions<IdentityTokenOptions> tokenOptions)
+    {
+        _userAccountRepository = userAccountRepository ?? throw new ArgumentNullException(nameof(userAccountRepository));
+        _emailVerificationTokenRepository = emailVerificationTokenRepository ?? throw new ArgumentNullException(nameof(emailVerificationTokenRepository));
+        _rawTokenGenerator = rawTokenGenerator ?? throw new ArgumentNullException(nameof(rawTokenGenerator));
+        _tokenHashProvider = tokenHashProvider ?? throw new ArgumentNullException(nameof(tokenHashProvider));
+        _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _notificationOutboxWriter = notificationOutboxWriter ?? throw new ArgumentNullException(nameof(notificationOutboxWriter));
+        _tokenOptions = tokenOptions?.Value ?? throw new ArgumentNullException(nameof(tokenOptions));
+    }
+
+    public async Task<Result<ResendVerificationEmailResponseDto>> ExecuteAsync(
+        ResendVerificationEmailRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        Error? validationError = ResendVerificationEmailValidator.Validate(request);
+        if (validationError is not null)
         {
-            _userAccountRepository = userAccountRepository;
-            _emailVerificationTokenRepository = emailVerificationTokenRepository;
-            _rawTokenGenerator = rawTokenGenerator;
-            _tokenHashProvider = tokenHashProvider;
-            _dateTimeProvider = dateTimeProvider;
-            _unitOfWork = unitOfWork;
-            _notificationOutboxWriter = notificationOutboxWriter;
+            return Result<ResendVerificationEmailResponseDto>.Failure(validationError);
         }
 
-        public async Task<Result<ResendVerificationEmailResponseDto>> ExecuteAsync(
-            ResendVerificationEmailRequestDto request,
-            CancellationToken cancellationToken = default)
+        try
         {
-            if (request is null)
+            string normalizedEmail = NormalizeEmail(request.Email);
+
+            var user = await _userAccountRepository.GetByEmailNormalizedAsync(
+                normalizedEmail,
+                cancellationToken);
+
+            if (user is null)
             {
-                return Result<ResendVerificationEmailResponseDto>.Failure(IdentityErrors.ValidationFailed);
+                return Result<ResendVerificationEmailResponseDto>.Success(BuildGenericResponse());
             }
 
-            if (string.IsNullOrWhiteSpace(request.Email))
+            if (user.IsEmailVerified)
             {
-                return Result<ResendVerificationEmailResponseDto>.Failure(IdentityErrors.User.EmailRequired);
+                return Result<ResendVerificationEmailResponseDto>.Success(BuildGenericResponse());
             }
 
-            if (request.Email.Trim().Length > 320)
-            {
-                return Result<ResendVerificationEmailResponseDto>.Failure(IdentityErrors.User.EmailTooLong);
-            }
+            DateTime nowUtc = _dateTimeProvider.UtcNow;
+            string rawVerificationToken = _rawTokenGenerator.Generate();
+            byte[] verificationTokenHash = _tokenHashProvider.Hash(rawVerificationToken);
+
+            EmailVerificationToken verificationToken = EmailVerificationToken.Create(
+                userId: user.UserId,
+                tokenHash: verificationTokenHash,
+                createdAt: nowUtc,
+                expiresAt: nowUtc.AddHours(_tokenOptions.EmailVerificationTokenLifetimeHours),
+                createdIp: null,
+                correlationId: null);
+
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                string normalizedEmail = NormalizeEmail(request.Email);
-
-                var user = await _userAccountRepository.GetByEmailNormalizedAsync(
-                    normalizedEmail,
+                await _emailVerificationTokenRepository.InsertAsync(
+                    verificationToken,
                     cancellationToken);
 
-                if (user is null)
-                {
-                    return Result<ResendVerificationEmailResponseDto>.Success(BuildGenericResponse());
-                }
-
-                if (user.IsEmailVerified)
-                {
-                    return Result<ResendVerificationEmailResponseDto>.Success(BuildGenericResponse());
-                }
-
-                DateTime nowUtc = _dateTimeProvider.UtcNow;
-                string rawVerificationToken = _rawTokenGenerator.Generate();
-                byte[] verificationTokenHash = _tokenHashProvider.Hash(rawVerificationToken);
-
-                EmailVerificationToken verificationToken = EmailVerificationToken.Create(
+                await _notificationOutboxWriter.EnqueueVerificationEmailAsync(
                     userId: user.UserId,
-                    tokenHash: verificationTokenHash,
-                    createdAt: nowUtc,
-                    expiresAt: nowUtc.AddHours(24),
-                    createdIp: null,
-                    correlationId: null);
+                    userPublicId: user.PublicId,
+                    email: user.Email,
+                    fullName: user.FullName,
+                    rawVerificationToken: rawVerificationToken,
+                    occurredAtUtc: nowUtc,
+                    cancellationToken: cancellationToken);
 
-                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+                await _unitOfWork.CommitAsync(cancellationToken);
 
-                try
-                {
-                    await _emailVerificationTokenRepository.InsertAsync(
-                        verificationToken,
-                        cancellationToken);
+                Console.WriteLine($"[DEV][VERIFY-RESEND] Email={user.Email}; PublicId={user.PublicId}; Token={rawVerificationToken}");
 
-                    await _notificationOutboxWriter.EnqueueVerificationEmailAsync(
-                        userId: user.UserId,
-                        userPublicId: user.PublicId,
-                        email: user.Email,
-                        fullName: user.FullName,
-                        rawVerificationToken: rawVerificationToken,
-                        occurredAtUtc: nowUtc,
-                        cancellationToken: cancellationToken);
-
-                    await _unitOfWork.CommitAsync(cancellationToken);
-
-                    // DEV ONLY: output resent verification token for local workflow testing
-                    Console.WriteLine($"[DEV][VERIFY-RESEND] Email={user.Email}; PublicId={user.PublicId}; Token={rawVerificationToken}");
-
-                    return Result<ResendVerificationEmailResponseDto>.Success(BuildGenericResponse());
-                }
-                catch
-                {
-                    await _unitOfWork.RollbackAsync(cancellationToken);
-                    throw;
-                }
+                return Result<ResendVerificationEmailResponseDto>.Success(BuildGenericResponse());
             }
-            catch (PersistenceException exception)
+            catch
             {
-                return Result<ResendVerificationEmailResponseDto>.Failure(MapPersistenceException(exception));
-            }
-            catch (IdentityDomainException exception)
-            {
-                return Result<ResendVerificationEmailResponseDto>.Failure(MapDomainException(exception));
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
             }
         }
-
-        private static string NormalizeEmail(string email)
+        catch (PersistenceException)
         {
-            return email.Trim().ToUpperInvariant();
+            return Result<ResendVerificationEmailResponseDto>.Failure(
+                IdentityErrors.ResendVerification.RequestFailed);
         }
-
-        private static ResendVerificationEmailResponseDto BuildGenericResponse()
+        catch (IdentityDomainException)
         {
-            return new ResendVerificationEmailResponseDto
-            {
-                Requested = true,
-                Message = "If the account exists and is not yet verified, a verification email will be sent."
-            };
+            return Result<ResendVerificationEmailResponseDto>.Failure(
+                IdentityErrors.ResendVerification.RequestFailed);
         }
+    }
 
-        private static Error MapDomainException(IdentityDomainException exception)
-        {
-            return exception.Code switch
-            {
-                "IDENTITY.EMAIL_VERIFICATION_INVALID_USER_ID" => IdentityErrors.EmailVerification.InvalidUserId,
-                "IDENTITY.EMAIL_VERIFICATION_TOKEN_HASH_REQUIRED" => IdentityErrors.EmailVerification.TokenHashRequired,
-                "IDENTITY.EMAIL_VERIFICATION_TOKEN_HASH_INVALID" => IdentityErrors.EmailVerification.TokenHashInvalid,
-                "IDENTITY.EMAIL_VERIFICATION_INVALID_EXPIRES_AT" => IdentityErrors.EmailVerification.InvalidExpiresAt,
-                "IDENTITY.EMAIL_VERIFICATION_CREATED_IP_TOO_LONG" => IdentityErrors.EmailVerification.CreatedIpTooLong,
-                "IDENTITY.EMAIL_VERIFICATION_CORRELATION_ID_TOO_LONG" => IdentityErrors.EmailVerification.CorrelationIdTooLong,
-                _ => IdentityErrors.ValidationFailed
-            };
-        }
+    private static string NormalizeEmail(string email)
+    {
+        return email.Trim().ToUpperInvariant();
+    }
 
-        private static Error MapPersistenceException(PersistenceException exception)
+    private static ResendVerificationEmailResponseDto BuildGenericResponse()
+    {
+        return new ResendVerificationEmailResponseDto
         {
-            return exception.Code switch
-            {
-                _ => IdentityErrors.ValidationFailed
-            };
-        }
+            Requested = true,
+            Message = "If the account exists and is eligible, a verification email will be sent."
+        };
     }
 }

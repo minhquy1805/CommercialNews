@@ -2,166 +2,140 @@ using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using CommercialNews.BuildingBlocks.SharedKernel.Time;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.ChangePassword;
 using Identity.Application.Errors;
 using Identity.Application.Ports.Persistence;
 using Identity.Application.Ports.Services;
+using Identity.Application.Validation.ChangePassword;
 using Identity.Domain.Enums;
 
-namespace Identity.Application.UseCases.ChangePassword
-{
-    public sealed class ChangePasswordUseCase : IChangePasswordUseCase
-    {
-        private readonly IRequestContext _requestContext;
-        private readonly IUserAccountRepository _userAccountRepository;
-        private readonly IPasswordHasher _passwordHasher;
-        private readonly IRefreshTokenRepository _refreshTokenRepository;
-        private readonly IIdentityUnitOfWork _unitOfWork;
-        private readonly IDateTimeProvider _dateTimeProvider;
-        private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
+namespace Identity.Application.UseCases.ChangePassword;
 
-        public ChangePasswordUseCase(
-            IRequestContext requestContext,
-            IUserAccountRepository userAccountRepository,
-            IPasswordHasher passwordHasher,
-            IRefreshTokenRepository refreshTokenRepository,
-            IIdentityUnitOfWork unitOfWork,
-            IDateTimeProvider dateTimeProvider,
-            IIdentityNotificationOutboxWriter notificationOutboxWriter)
+public sealed class ChangePasswordUseCase : IChangePasswordUseCase
+{
+    private readonly IRequestContext _requestContext;
+    private readonly IUserAccountRepository _userAccountRepository;
+    private readonly IPasswordHasher _passwordHasher;
+    private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly IIdentityUnitOfWork _unitOfWork;
+    private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
+
+    public ChangePasswordUseCase(
+        IRequestContext requestContext,
+        IUserAccountRepository userAccountRepository,
+        IPasswordHasher passwordHasher,
+        IRefreshTokenRepository refreshTokenRepository,
+        IIdentityUnitOfWork unitOfWork,
+        IDateTimeProvider dateTimeProvider,
+        IIdentityNotificationOutboxWriter notificationOutboxWriter)
+    {
+        _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
+        _userAccountRepository = userAccountRepository ?? throw new ArgumentNullException(nameof(userAccountRepository));
+        _passwordHasher = passwordHasher ?? throw new ArgumentNullException(nameof(passwordHasher));
+        _refreshTokenRepository = refreshTokenRepository ?? throw new ArgumentNullException(nameof(refreshTokenRepository));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _notificationOutboxWriter = notificationOutboxWriter ?? throw new ArgumentNullException(nameof(notificationOutboxWriter));
+    }
+
+    public async Task<Result<ChangePasswordResponseDto>> ExecuteAsync(
+        ChangePasswordRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        Error? validationError = ChangePasswordValidator.Validate(request);
+        if (validationError is not null)
         {
-            _requestContext = requestContext;
-            _userAccountRepository = userAccountRepository;
-            _passwordHasher = passwordHasher;
-            _refreshTokenRepository = refreshTokenRepository;
-            _unitOfWork = unitOfWork;
-            _dateTimeProvider = dateTimeProvider;
-            _notificationOutboxWriter = notificationOutboxWriter;
+            return Result<ChangePasswordResponseDto>.Failure(validationError);
         }
 
-        public async Task<Result<ChangePasswordResponseDto>> ExecuteAsync(
-            ChangePasswordRequestDto request,
-            CancellationToken cancellationToken = default)
+        long? currentUserId = _requestContext.CurrentUserId;
+        if (currentUserId is null)
         {
-            if (request is null)
+            return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.InvalidCredentials);
+        }
+
+        try
+        {
+            DateTime nowUtc = _dateTimeProvider.UtcNow;
+
+            var user = await _userAccountRepository.GetByIdAsync(
+                currentUserId.Value,
+                cancellationToken);
+
+            if (user is null)
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.User.NotFound);
             }
 
-            if (string.IsNullOrWhiteSpace(request.CurrentPassword))
+            if (!user.IsEmailVerified)
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.VerificationRequired);
             }
 
-            if (string.IsNullOrWhiteSpace(request.NewPassword))
+            if (string.Equals(user.Status, UserAccountStatuses.Disabled, StringComparison.OrdinalIgnoreCase))
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.PasswordPolicyViolation);
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.AccountDisabled);
             }
 
-            if (request.NewPassword.Length < 8)
+            if (user.IsLockedAt(nowUtc))
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.PasswordPolicyViolation);
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.AccountLocked);
             }
 
-            long? currentUserId = _requestContext.CurrentUserId;
-            if (currentUserId is null)
+            if (!_passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.LogoutFailed);
+                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.InvalidCredentials);
             }
+
+            string newPasswordHash = _passwordHasher.Hash(request.NewPassword);
+
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                var user = await _userAccountRepository.GetByIdAsync(
-                    currentUserId.Value,
+                bool updated = await _userAccountRepository.UpdatePasswordAsync(
+                    user.UserId,
+                    newPasswordHash,
                     cancellationToken);
 
-                if (user is null)
+                if (!updated)
                 {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
                     return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.User.NotFound);
                 }
 
-                if (!user.IsEmailVerified)
+                await _refreshTokenRepository.RevokeAllActiveByUserIdAsync(
+                    user.UserId,
+                    nowUtc,
+                    "PasswordChanged",
+                    cancellationToken);
+
+                await _notificationOutboxWriter.EnqueuePasswordChangedEmailAsync(
+                    userId: user.UserId,
+                    userPublicId: user.PublicId,
+                    email: user.Email,
+                    fullName: user.FullName,
+                    occurredAtUtc: nowUtc,
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+
+                return Result<ChangePasswordResponseDto>.Success(new ChangePasswordResponseDto
                 {
-                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.VerificationRequired);
-                }
-
-                if (user.Status == UserAccountStatus.Inactive)
-                {
-                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.AccountInactive);
-                }
-
-                if (user.IsLockedAt(_dateTimeProvider.UtcNow))
-                {
-                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.AccountLocked);
-                }
-
-                if (!_passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
-                {
-                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.InvalidCredentials);
-                }
-
-                if (request.CurrentPassword == request.NewPassword)
-                {
-                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.PasswordPolicyViolation);
-                }
-
-                string newPasswordHash = _passwordHasher.Hash(request.NewPassword);
-                DateTime nowUtc = _dateTimeProvider.UtcNow;
-
-                await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-                try
-                {
-                    bool updated = await _userAccountRepository.UpdatePasswordAsync(
-                        user.UserId,
-                        newPasswordHash,
-                        cancellationToken);
-
-                    if (!updated)
-                    {
-                        await _unitOfWork.RollbackAsync(cancellationToken);
-                        return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.User.NotFound);
-                    }
-
-                    await _refreshTokenRepository.RevokeAllActiveByUserIdAsync(
-                        user.UserId,
-                        "PasswordChanged",
-                        cancellationToken);
-
-                    await _notificationOutboxWriter.EnqueuePasswordChangedEmailAsync(
-                        userId: user.UserId,
-                        userPublicId: user.PublicId,
-                        email: user.Email,
-                        fullName: user.FullName,
-                        occurredAtUtc: nowUtc,
-                        cancellationToken: cancellationToken);
-
-                    await _unitOfWork.CommitAsync(cancellationToken);
-
-                    return Result<ChangePasswordResponseDto>.Success(new ChangePasswordResponseDto
-                    {
-                        UserId = user.UserId,
-                        PasswordChanged = true
-                    });
-                }
-                catch
-                {
-                    await _unitOfWork.RollbackAsync(cancellationToken);
-                    throw;
-                }
+                    UserId = user.UserId,
+                    PasswordChanged = true
+                });
             }
-            catch (PersistenceException exception)
+            catch
             {
-                return Result<ChangePasswordResponseDto>.Failure(MapPersistenceException(exception));
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
             }
         }
-
-        private static Error MapPersistenceException(PersistenceException exception)
+        catch (PersistenceException)
         {
-            return exception.Code switch
-            {
-                _ => IdentityErrors.ValidationFailed
-            };
+            return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
         }
     }
 }

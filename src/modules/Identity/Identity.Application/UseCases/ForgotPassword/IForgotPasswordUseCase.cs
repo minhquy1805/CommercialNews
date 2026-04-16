@@ -1,13 +1,11 @@
 ﻿using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.ForgotPassword;
 
-namespace Identity.Application.UseCases.ForgotPassword
+namespace Identity.Application.UseCases.ForgotPassword;
+
+public interface IForgotPasswordUseCase
 {
-    public interface IForgotPasswordUseCase
-    {
-        Task<Result<ForgotPasswordResponseDto>> ExecuteAsync(
-            ForgotPasswordRequestDto request,
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<ForgotPasswordResponseDto>> ExecuteAsync(
+        ForgotPasswordRequestDto request,
+        CancellationToken cancellationToken = default);
 }

@@ -1,13 +1,11 @@
 ﻿using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.LoginUser;
 
-namespace Identity.Application.UseCases.LoginUser
+namespace Identity.Application.UseCases.LoginUser;
+
+public interface ILoginUserUseCase
 {
-    public interface ILoginUserUseCase
-    {
-        Task<Result<LoginUserResponseDto>> ExecuteAsync(
-            LoginUserRequestDto request,
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<LoginUserResponseDto>> ExecuteAsync(
+        LoginUserRequestDto request,
+        CancellationToken cancellationToken = default);
 }
