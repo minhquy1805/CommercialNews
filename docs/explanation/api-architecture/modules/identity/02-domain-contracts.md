@@ -27,7 +27,7 @@ Identity does **not** own:
 
 ## 2) Entities (conceptual model)
 
-### 2.1 User
+### 2.1 UserAccount
 Core attributes (conceptual):
 - `UserId` (stable system-wide)
 - `Email` (unique)
