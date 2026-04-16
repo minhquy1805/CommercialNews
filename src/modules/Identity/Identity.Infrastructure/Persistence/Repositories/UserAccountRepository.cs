@@ -2,606 +2,574 @@
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Identity.Application.Ports.Persistence;
 using Identity.Domain.Entities;
-using Identity.Domain.Enums;
 using Identity.Infrastructure.Persistence.Exceptions;
 using Identity.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
-namespace Identity.Infrastructure.Persistence.Repositories
+namespace Identity.Infrastructure.Persistence.Repositories;
+
+public sealed class UserAccountRepository : IUserAccountRepository
 {
-    public sealed class UserAccountRepository : IUserAccountRepository
+    private const string UserAccountInsertProc = "[identity].[UserAccount_Insert]";
+    private const string UserAccountSelectByIdProc = "[identity].[UserAccount_SelectById]";
+    private const string UserAccountSelectByPublicIdProc = "[identity].[UserAccount_SelectByPublicId]";
+    private const string UserAccountSelectByEmailNormalizedProc = "[identity].[UserAccount_SelectByEmailNormalized]";
+    private const string UserAccountUpdateProfileProc = "[identity].[UserAccount_UpdateProfile]";
+    private const string UserAccountUpdatePasswordProc = "[identity].[UserAccount_UpdatePassword]";
+    private const string UserAccountUpdateLastLoginProc = "[identity].[UserAccount_UpdateLastLogin]";
+    private const string UserAccountMarkEmailVerifiedProc = "[identity].[UserAccount_SetEmailVerified]";
+    private const string UserAccountUpdateStatusProc = "[identity].[UserAccount_UpdateStatus]";
+
+    private readonly IdentityUnitOfWork _unitOfWork;
+    private readonly ISqlConnectionFactory _sqlConnectionFactory;
+    private readonly IdentitySqlExceptionTranslator _sqlExceptionTranslator;
+
+    public UserAccountRepository(
+        IdentityUnitOfWork unitOfWork,
+        ISqlConnectionFactory sqlConnectionFactory,
+        IdentitySqlExceptionTranslator sqlExceptionTranslator)
     {
-        private const string UserAccountInsertProc = "[identity].[UserAccount_Insert]";
-        private const string UserAccountSelectByIdProc = "[identity].[UserAccount_SelectById]";
-        private const string UserAccountSelectByPublicIdProc = "[identity].[UserAccount_SelectByPublicId]";
-        private const string UserAccountSelectByEmailNormalizedProc = "[identity].[UserAccount_SelectByEmailNormalized]";
-        private const string UserAccountUpdateProfileProc = "[identity].[UserAccount_UpdateProfile]";
-        private const string UserAccountUpdatePasswordProc = "[identity].[UserAccount_UpdatePassword]";
-        private const string UserAccountUpdateLastLoginProc = "[identity].[UserAccount_UpdateLastLogin]";
-        private const string UserAccountSetEmailVerifiedProc = "[identity].[UserAccount_SetEmailVerified]";
-        private const string UserAccountUpdateStatusProc = "[identity].[UserAccount_UpdateStatus]";
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
+        _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
+    }
 
-        private readonly IdentityUnitOfWork _unitOfWork;
-        private readonly ISqlConnectionFactory _sqlConnectionFactory;
-        private readonly IdentitySqlExceptionTranslator _sqlExceptionTranslator;
-
-        public UserAccountRepository(
-            IdentityUnitOfWork unitOfWork,
-            ISqlConnectionFactory sqlConnectionFactory,
-            IdentitySqlExceptionTranslator sqlExceptionTranslator)
+    public async Task<UserAccount?> GetByIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
         {
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
-            _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
+            return null;
         }
 
-        public async Task<UserAccount?> GetByIdAsync(
-            long userId,
-            CancellationToken cancellationToken = default)
+        SqlConnection? ownedConnection = null;
+
+        try
         {
-            if (userId <= 0)
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountSelectByIdProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
             {
-                return null;
-            }
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
 
-            SqlConnection? ownedConnection = null;
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountSelectByIdProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
+                if (!await reader.ReadAsync(cancellationToken))
                 {
-                    command.Parameters.Add(
-                        new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
+                    return null;
+                }
 
-                    using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+                return MapUserAccount(reader);
+            }
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
 
-                    if (!await reader.ReadAsync(cancellationToken))
+    public async Task<UserAccount?> GetByPublicIdAsync(
+        string publicId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(publicId))
+        {
+            return null;
+        }
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountSelectByPublicIdProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@PublicId", SqlDbType.Char, 26)
                     {
-                        return null;
-                    }
+                        Value = publicId.Trim()
+                    });
 
-                    return MapUserAccount(reader);
-                }
-            }
-            finally
-            {
-                if (ownedConnection is not null)
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
                 {
-                    await ownedConnection.DisposeAsync();
+                    return null;
                 }
+
+                return MapUserAccount(reader);
             }
         }
-
-        public async Task<UserAccount?> GetByPublicIdAsync(
-            string publicId,
-            CancellationToken cancellationToken = default)
+        finally
         {
-            if (string.IsNullOrWhiteSpace(publicId))
+            if (ownedConnection is not null)
             {
-                return null;
+                await ownedConnection.DisposeAsync();
             }
+        }
+    }
 
-            SqlConnection? ownedConnection = null;
+    public async Task<UserAccount?> GetByEmailNormalizedAsync(
+        string emailNormalized,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(emailNormalized))
+        {
+            return null;
+        }
 
-            try
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountSelectByEmailNormalizedProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
             {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountSelectByPublicIdProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@PublicId", SqlDbType.Char, 26)
-                        {
-                            Value = publicId.Trim()
-                        });
-
-                    using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-                    if (!await reader.ReadAsync(cancellationToken))
+                command.Parameters.Add(
+                    new SqlParameter("@EmailNormalized", SqlDbType.NVarChar, 320)
                     {
-                        return null;
-                    }
+                        Value = emailNormalized.Trim()
+                    });
 
-                    return MapUserAccount(reader);
-                }
-            }
-            finally
-            {
-                if (ownedConnection is not null)
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
                 {
-                    await ownedConnection.DisposeAsync();
+                    return null;
                 }
+
+                return MapUserAccount(reader);
             }
         }
-
-        public async Task<UserAccount?> GetByEmailNormalizedAsync(
-            string emailNormalized,
-            CancellationToken cancellationToken = default)
+        finally
         {
-            if (string.IsNullOrWhiteSpace(emailNormalized))
+            if (ownedConnection is not null)
             {
-                return null;
+                await ownedConnection.DisposeAsync();
             }
+        }
+    }
 
-            SqlConnection? ownedConnection = null;
+    public async Task<long> InsertAsync(
+        UserAccount userAccount,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(userAccount);
 
-            try
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountInsertProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
             {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountSelectByEmailNormalizedProc, cancellationToken);
+                command.Parameters.Add(
+                    new SqlParameter("@PublicId", SqlDbType.Char, 26) { Value = userAccount.PublicId });
 
-                ownedConnection = connection;
+                command.Parameters.Add(
+                    new SqlParameter("@Email", SqlDbType.NVarChar, 320) { Value = userAccount.Email });
 
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@EmailNormalized", SqlDbType.NVarChar, 320)
-                        {
-                            Value = emailNormalized.Trim()
-                        });
+                command.Parameters.Add(
+                    new SqlParameter("@EmailNormalized", SqlDbType.NVarChar, 320) { Value = userAccount.EmailNormalized });
 
-                    using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+                command.Parameters.Add(
+                    new SqlParameter("@PasswordHash", SqlDbType.NVarChar, 500) { Value = userAccount.PasswordHash });
 
-                    if (!await reader.ReadAsync(cancellationToken))
+                command.Parameters.Add(
+                    new SqlParameter("@FullName", SqlDbType.NVarChar, 200)
                     {
-                        return null;
-                    }
+                        Value = ToDbValue(userAccount.FullName)
+                    });
 
-                    return MapUserAccount(reader);
-                }
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
-            }
-        }
-
-        public async Task<long> InsertAsync(
-            UserAccount userAccount,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(userAccount);
-
-            SqlConnection? ownedConnection = null;
-
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountInsertProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@PublicId", SqlDbType.Char, 26) { Value = userAccount.PublicId });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Email", SqlDbType.NVarChar, 320) { Value = userAccount.Email });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@EmailNormalized", SqlDbType.NVarChar, 320) { Value = userAccount.EmailNormalized });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@PasswordHash", SqlDbType.NVarChar, 500) { Value = userAccount.PasswordHash });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@FullName", SqlDbType.NVarChar, 200)
-                        {
-                            Value = userAccount.FullName is not null
-                                ? userAccount.FullName
-                                : DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@AvatarUrl", SqlDbType.NVarChar, 800)
-                        {
-                            Value = userAccount.AvatarUrl is not null
-                                ? userAccount.AvatarUrl
-                                : DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Status", SqlDbType.VarChar, 20)
-                        {
-                            Value = userAccount.Status.ToString()
-                        });
-
-                    SqlParameter userIdParameter = new("@UserId", SqlDbType.BigInt)
+                command.Parameters.Add(
+                    new SqlParameter("@AvatarUrl", SqlDbType.NVarChar, 800)
                     {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(userIdParameter);
+                        Value = ToDbValue(userAccount.AvatarUrl)
+                    });
 
-                    await command.ExecuteNonQueryAsync(cancellationToken);
-
-                    return Convert.ToInt64(userIdParameter.Value);
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
-            }
-        }
-
-        public async Task<bool> UpdateProfileAsync(
-            long userId,
-            string? fullName,
-            string? avatarUrl,
-            CancellationToken cancellationToken = default)
-        {
-            if (userId <= 0)
-            {
-                return false;
-            }
-
-            SqlConnection? ownedConnection = null;
-
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountUpdateProfileProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@FullName", SqlDbType.NVarChar, 200)
-                        {
-                            Value = !string.IsNullOrWhiteSpace(fullName)
-                                ? fullName.Trim()
-                                : DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@AvatarUrl", SqlDbType.NVarChar, 800)
-                        {
-                            Value = !string.IsNullOrWhiteSpace(avatarUrl)
-                                ? avatarUrl.Trim()
-                                : DBNull.Value
-                        });
-
-                    SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
+                command.Parameters.Add(
+                    new SqlParameter("@Status", SqlDbType.VarChar, 20)
                     {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(affectedRowsParameter);
+                        Value = userAccount.Status
+                    });
 
-                    await command.ExecuteNonQueryAsync(cancellationToken);
-
-                    int affectedRows = affectedRowsParameter.Value is DBNull
-                        ? 0
-                        : Convert.ToInt32(affectedRowsParameter.Value);
-
-                    return affectedRows > 0;
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
+                SqlParameter userIdParameter = new("@UserId", SqlDbType.BigInt)
                 {
-                    await ownedConnection.DisposeAsync();
-                }
+                    Direction = ParameterDirection.Output
+                };
+                command.Parameters.Add(userIdParameter);
+
+                await command.ExecuteNonQueryAsync(cancellationToken);
+
+                return Convert.ToInt64(userIdParameter.Value);
             }
         }
-
-        public async Task<bool> UpdatePasswordAsync(
-            long userId,
-            string passwordHash,
-            CancellationToken cancellationToken = default)
+        catch (SqlException exception)
         {
-            if (userId <= 0 || string.IsNullOrWhiteSpace(passwordHash))
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
             {
-                return false;
+                await ownedConnection.DisposeAsync();
             }
+        }
+    }
 
-            SqlConnection? ownedConnection = null;
+    public async Task<bool> UpdateProfileAsync(
+        long userId,
+        string? fullName,
+        string? avatarUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
 
-            try
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountUpdateProfileProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
             {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountUpdatePasswordProc, cancellationToken);
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
 
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@PasswordHash", SqlDbType.NVarChar, 500)
-                        {
-                            Value = passwordHash.Trim()
-                        });
-
-                    SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
+                command.Parameters.Add(
+                    new SqlParameter("@FullName", SqlDbType.NVarChar, 200)
                     {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(affectedRowsParameter);
+                        Value = ToTrimmedDbValue(fullName)
+                    });
 
-                    await command.ExecuteNonQueryAsync(cancellationToken);
-
-                    int affectedRows = affectedRowsParameter.Value is DBNull
-                        ? 0
-                        : Convert.ToInt32(affectedRowsParameter.Value);
-
-                    return affectedRows > 0;
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
-            }
-        }
-
-        public async Task<bool> UpdateLastLoginAsync(
-            long userId,
-            CancellationToken cancellationToken = default)
-        {
-            if (userId <= 0)
-            {
-                return false;
-            }
-
-            SqlConnection? ownedConnection = null;
-
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountUpdateLastLoginProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
-
-                    SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
+                command.Parameters.Add(
+                    new SqlParameter("@AvatarUrl", SqlDbType.NVarChar, 800)
                     {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(affectedRowsParameter);
+                        Value = ToTrimmedDbValue(avatarUrl)
+                    });
 
-                    await command.ExecuteNonQueryAsync(cancellationToken);
-
-                    int affectedRows = affectedRowsParameter.Value is DBNull
-                        ? 0
-                        : Convert.ToInt32(affectedRowsParameter.Value);
-
-                    return affectedRows > 0;
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
+                return await ExecuteAffectedRowsAsync(command, cancellationToken);
             }
         }
-
-        public async Task<bool> SetEmailVerifiedAsync(
-            long userId,
-            CancellationToken cancellationToken = default)
+        catch (SqlException exception)
         {
-            if (userId <= 0)
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
             {
-                return false;
+                await ownedConnection.DisposeAsync();
             }
+        }
+    }
 
-            SqlConnection? ownedConnection = null;
+    public async Task<bool> UpdatePasswordAsync(
+        long userId,
+        string passwordHash,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0 || string.IsNullOrWhiteSpace(passwordHash))
+        {
+            return false;
+        }
 
-            try
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountUpdatePasswordProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
             {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountSetEmailVerifiedProc, cancellationToken);
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
 
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@UserId", SqlDbType.BigInt)
-                        {
-                            Value = userId
-                        });
-
-                    SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
+                command.Parameters.Add(
+                    new SqlParameter("@PasswordHash", SqlDbType.NVarChar, 500)
                     {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(affectedRowsParameter);
+                        Value = passwordHash.Trim()
+                    });
 
-                    await command.ExecuteNonQueryAsync(cancellationToken);
-
-                    int affectedRows = affectedRowsParameter.Value is DBNull
-                        ? 0
-                        : Convert.ToInt32(affectedRowsParameter.Value);
-
-                    return affectedRows > 0;
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
+                return await ExecuteAffectedRowsAsync(command, cancellationToken);
             }
         }
-
-        public async Task<bool> UpdateStatusAsync(
-            long userId,
-            UserAccountStatus status,
-            DateTime? lockedUntil,
-            CancellationToken cancellationToken = default)
+        catch (SqlException exception)
         {
-            if (userId <= 0)
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
             {
-                return false;
+                await ownedConnection.DisposeAsync();
             }
+        }
+    }
 
-            SqlConnection? ownedConnection = null;
+    public async Task<bool> UpdateLastLoginAsync(
+        long userId,
+        DateTime lastLoginAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
 
-            try
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountUpdateLastLoginProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
             {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(UserAccountUpdateStatusProc, cancellationToken);
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
 
-                ownedConnection = connection;
+                command.Parameters.Add(
+                    new SqlParameter("@LastLoginAt", SqlDbType.DateTime2) { Value = lastLoginAtUtc });
 
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
+                return await ExecuteAffectedRowsAsync(command, cancellationToken);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
 
-                    command.Parameters.Add(
-                        new SqlParameter("@Status", SqlDbType.VarChar, 20)
-                        {
-                            Value = status.ToString()
-                        });
+    public async Task<bool> MarkEmailVerifiedAsync(
+        long userId,
+        DateTime verifiedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
 
-                    command.Parameters.Add(
-                        new SqlParameter("@LockedUntil", SqlDbType.DateTime2)
-                        {
-                            Value = lockedUntil.HasValue
-                                ? lockedUntil.Value
-                                : DBNull.Value
-                        });
+        SqlConnection? ownedConnection = null;
 
-                    SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountMarkEmailVerifiedProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt)
                     {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(affectedRowsParameter);
+                        Value = userId
+                    });
 
-                    await command.ExecuteNonQueryAsync(cancellationToken);
+                command.Parameters.Add(
+                    new SqlParameter("@EmailVerifiedAt", SqlDbType.DateTime2)
+                    {
+                        Value = verifiedAtUtc
+                    });
 
-                    int affectedRows = affectedRowsParameter.Value is DBNull
-                        ? 0
-                        : Convert.ToInt32(affectedRowsParameter.Value);
-
-                    return affectedRows > 0;
-                }
+                return await ExecuteAffectedRowsAsync(command, cancellationToken);
             }
-            catch (SqlException exception)
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
             {
-                throw _sqlExceptionTranslator.Translate(exception);
+                await ownedConnection.DisposeAsync();
             }
-            finally
+        }
+    }
+
+    public async Task<bool> UpdateStatusAsync(
+        long userId,
+        string status,
+        DateTime? lockedUntil,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0 || string.IsNullOrWhiteSpace(status))
+        {
+            return false;
+        }
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountUpdateStatusProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
             {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Status", SqlDbType.VarChar, 20)
+                    {
+                        Value = status.Trim()
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@LockedUntil", SqlDbType.DateTime2)
+                    {
+                        Value = ToDbValue(lockedUntil)
+                    });
+
+                return await ExecuteAffectedRowsAsync(command, cancellationToken);
             }
         }
-
-        private async Task<(SqlCommand Command, SqlConnection? OwnedConnection)> CreateCommandAsync(
-            string storedProcedureName,
-            CancellationToken cancellationToken)
+        catch (SqlException exception)
         {
-            if (_unitOfWork.HasActiveConnection)
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
             {
-                SqlCommand ambientCommand = _unitOfWork.Connection.CreateCommand();
-                ambientCommand.Transaction = _unitOfWork.HasActiveTransaction
-                    ? _unitOfWork.Transaction
-                    : null;
-                ambientCommand.CommandText = storedProcedureName;
-                ambientCommand.CommandType = CommandType.StoredProcedure;
-
-                return (ambientCommand, null);
+                await ownedConnection.DisposeAsync();
             }
-
-            SqlConnection ownedConnection = _sqlConnectionFactory.CreateConnection();
-            await ownedConnection.OpenAsync(cancellationToken);
-
-            SqlCommand command = ownedConnection.CreateCommand();
-            command.CommandText = storedProcedureName;
-            command.CommandType = CommandType.StoredProcedure;
-
-            return (command, ownedConnection);
         }
+    }
 
-        private static UserAccount MapUserAccount(SqlDataReader reader)
+    private async Task<(SqlCommand Command, SqlConnection? OwnedConnection)> CreateCommandAsync(
+        string storedProcedureName,
+        CancellationToken cancellationToken)
+    {
+        if (_unitOfWork.HasActiveConnection)
         {
-            return UserAccount.Rehydrate(
-                userId: reader.GetInt64(reader.GetOrdinal("UserId")),
-                publicId: reader.GetString(reader.GetOrdinal("PublicId")),
-                email: reader.GetString(reader.GetOrdinal("Email")),
-                emailNormalized: reader.GetString(reader.GetOrdinal("EmailNormalized")),
-                passwordHash: reader.GetString(reader.GetOrdinal("PasswordHash")),
-                fullName: ReadNullableString(reader, "FullName"),
-                avatarUrl: ReadNullableString(reader, "AvatarUrl"),
-                isEmailVerified: reader.GetBoolean(reader.GetOrdinal("IsEmailVerified")),
-                emailVerifiedAt: ReadNullableDateTime(reader, "EmailVerifiedAt"),
-                status: ParseStatus(reader.GetString(reader.GetOrdinal("Status"))),
-                lockedUntil: ReadNullableDateTime(reader, "LockedUntil"),
-                createdAt: reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
-                updatedAt: reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
-                lastLoginAt: ReadNullableDateTime(reader, "LastLoginAt"),
-                version: reader.GetInt32(reader.GetOrdinal("Version")));
+            SqlCommand ambientCommand = _unitOfWork.Connection.CreateCommand();
+            ambientCommand.Transaction = _unitOfWork.HasActiveTransaction
+                ? _unitOfWork.Transaction
+                : null;
+            ambientCommand.CommandText = storedProcedureName;
+            ambientCommand.CommandType = CommandType.StoredProcedure;
+
+            return (ambientCommand, null);
         }
 
-        private static UserAccountStatus ParseStatus(string value)
-        {
-            return Enum.Parse<UserAccountStatus>(value, ignoreCase: true);
-        }
+        SqlConnection ownedConnection = _sqlConnectionFactory.CreateConnection();
+        await ownedConnection.OpenAsync(cancellationToken);
 
-        private static string? ReadNullableString(SqlDataReader reader, string columnName)
-        {
-            int ordinal = reader.GetOrdinal(columnName);
-            return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-        }
+        SqlCommand command = ownedConnection.CreateCommand();
+        command.CommandText = storedProcedureName;
+        command.CommandType = CommandType.StoredProcedure;
 
-        private static DateTime? ReadNullableDateTime(SqlDataReader reader, string columnName)
+        return (command, ownedConnection);
+    }
+
+    private static async Task<bool> ExecuteAffectedRowsAsync(
+        SqlCommand command,
+        CancellationToken cancellationToken)
+    {
+        SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
         {
-            int ordinal = reader.GetOrdinal(columnName);
-            return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
-        }
+            Direction = ParameterDirection.Output
+        };
+        command.Parameters.Add(affectedRowsParameter);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+
+        int affectedRows = affectedRowsParameter.Value is DBNull
+            ? 0
+            : Convert.ToInt32(affectedRowsParameter.Value);
+
+        return affectedRows > 0;
+    }
+
+    private static UserAccount MapUserAccount(SqlDataReader reader)
+    {
+        return UserAccount.Rehydrate(
+            userId: reader.GetInt64(reader.GetOrdinal("UserId")),
+            publicId: reader.GetString(reader.GetOrdinal("PublicId")),
+            email: reader.GetString(reader.GetOrdinal("Email")),
+            emailNormalized: reader.GetString(reader.GetOrdinal("EmailNormalized")),
+            passwordHash: reader.GetString(reader.GetOrdinal("PasswordHash")),
+            fullName: ReadNullableString(reader, "FullName"),
+            avatarUrl: ReadNullableString(reader, "AvatarUrl"),
+            isEmailVerified: reader.GetBoolean(reader.GetOrdinal("IsEmailVerified")),
+            emailVerifiedAt: ReadNullableDateTime(reader, "EmailVerifiedAt"),
+            status: reader.GetString(reader.GetOrdinal("Status")),
+            lockedUntil: ReadNullableDateTime(reader, "LockedUntil"),
+            createdAt: reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
+            updatedAt: reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
+            lastLoginAt: ReadNullableDateTime(reader, "LastLoginAt"),
+            version: reader.GetInt32(reader.GetOrdinal("Version")));
+    }
+
+    private static string? ReadNullableString(SqlDataReader reader, string columnName)
+    {
+        int ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    private static DateTime? ReadNullableDateTime(SqlDataReader reader, string columnName)
+    {
+        int ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+    }
+
+    private static object ToDbValue(string? value)
+    {
+        return value is not null ? value : DBNull.Value;
+    }
+
+    private static object ToDbValue(DateTime? value)
+    {
+        return value.HasValue ? value.Value : DBNull.Value;
+    }
+
+    private static object ToTrimmedDbValue(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value) ? value.Trim() : DBNull.Value;
     }
 }

@@ -1,13 +1,11 @@
 ﻿using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.RegisterUser;
 
-namespace Identity.Application.UseCases.RegisterUser
+namespace Identity.Application.UseCases.RegisterUser;
+
+public interface IRegisterUserUseCase
 {
-    public interface IRegisterUserUseCase
-    {
-        Task<Result<RegisterUserResponseDto>> ExecuteAsync(
-            RegisterUserRequestDto request,
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<RegisterUserResponseDto>> ExecuteAsync(
+        RegisterUserRequestDto request,
+        CancellationToken cancellationToken = default);
 }
