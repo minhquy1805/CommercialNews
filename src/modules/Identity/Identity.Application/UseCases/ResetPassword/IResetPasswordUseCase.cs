@@ -1,13 +1,11 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.ResetPassword;
 
-namespace Identity.Application.UseCases.ResetPassword
+namespace Identity.Application.UseCases.ResetPassword;
+
+public interface IResetPasswordUseCase
 {
-    public interface IResetPasswordUseCase
-    {
-        Task<Result<ResetPasswordResponseDto>> ExecuteAsync(
-            ResetPasswordRequestDto request,
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<ResetPasswordResponseDto>> ExecuteAsync(
+        ResetPasswordRequestDto request,
+        CancellationToken cancellationToken = default);
 }

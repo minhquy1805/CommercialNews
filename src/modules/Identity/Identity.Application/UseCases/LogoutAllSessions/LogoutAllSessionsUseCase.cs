@@ -2,100 +2,96 @@ using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using CommercialNews.BuildingBlocks.SharedKernel.Time;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.LogoutAllSessions;
 using Identity.Application.Errors;
 using Identity.Application.Ports.Persistence;
 using Identity.Domain.Enums;
 
-namespace Identity.Application.UseCases.LogoutAllSessions
-{
-    public sealed class LogoutAllSessionsUseCase : ILogoutAllSessionsUseCase
-    {
-        private readonly IRequestContext _requestContext;
-        private readonly IUserAccountRepository _userAccountRepository;
-        private readonly IRefreshTokenRepository _refreshTokenRepository;
-        private readonly IIdentityUnitOfWork _unitOfWork;
-        private readonly IDateTimeProvider _dateTimeProvider;
+namespace Identity.Application.UseCases.LogoutAllSessions;
 
-        public LogoutAllSessionsUseCase(
-            IRequestContext requestContext,
-            IUserAccountRepository userAccountRepository,
-            IRefreshTokenRepository refreshTokenRepository,
-            IIdentityUnitOfWork unitOfWork,
-            IDateTimeProvider dateTimeProvider)
+public sealed class LogoutAllSessionsUseCase : ILogoutAllSessionsUseCase
+{
+    private readonly IRequestContext _requestContext;
+    private readonly IUserAccountRepository _userAccountRepository;
+    private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly IIdentityUnitOfWork _unitOfWork;
+    private readonly IDateTimeProvider _dateTimeProvider;
+
+    public LogoutAllSessionsUseCase(
+        IRequestContext requestContext,
+        IUserAccountRepository userAccountRepository,
+        IRefreshTokenRepository refreshTokenRepository,
+        IIdentityUnitOfWork unitOfWork,
+        IDateTimeProvider dateTimeProvider)
+    {
+        _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
+        _userAccountRepository = userAccountRepository ?? throw new ArgumentNullException(nameof(userAccountRepository));
+        _refreshTokenRepository = refreshTokenRepository ?? throw new ArgumentNullException(nameof(refreshTokenRepository));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+    }
+
+    public async Task<Result<LogoutAllSessionsResponseDto>> ExecuteAsync(
+        CancellationToken cancellationToken = default)
+    {
+        long? currentUserId = _requestContext.CurrentUserId;
+        if (currentUserId is null)
         {
-            _requestContext = requestContext;
-            _userAccountRepository = userAccountRepository;
-            _refreshTokenRepository = refreshTokenRepository;
-            _unitOfWork = unitOfWork;
-            _dateTimeProvider = dateTimeProvider;
+            return Result<LogoutAllSessionsResponseDto>.Failure(
+                IdentityErrors.LogoutAllSessions.NotAuthenticated);
         }
 
-        public async Task<Result<LogoutAllSessionsResponseDto>> ExecuteAsync(
-            CancellationToken cancellationToken = default)
+        try
         {
-            long? currentUserId = _requestContext.CurrentUserId;
-            if (currentUserId is null)
+            DateTime nowUtc = _dateTimeProvider.UtcNow;
+
+            var user = await _userAccountRepository.GetByIdAsync(
+                currentUserId.Value,
+                cancellationToken);
+
+            if (user is null)
             {
-                return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.Auth.LogoutFailed);
+                return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.User.NotFound);
             }
+
+            if (string.Equals(user.Status, UserAccountStatuses.Disabled, StringComparison.OrdinalIgnoreCase))
+            {
+                return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.Auth.AccountDisabled);
+            }
+
+            if (user.IsLockedAt(nowUtc))
+            {
+                return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.Auth.AccountLocked);
+            }
+
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                var user = await _userAccountRepository.GetByIdAsync(
-                    currentUserId.Value,
-                    cancellationToken);
+                await _refreshTokenRepository.RevokeAllActiveByUserIdAsync(
+                    userId: user.UserId,
+                    revokedAtUtc: nowUtc,
+                    revokedReason: "LoggedOutAllSessions",
+                    cancellationToken: cancellationToken);
 
-                if (user is null)
+                await _unitOfWork.CommitAsync(cancellationToken);
+
+                return Result<LogoutAllSessionsResponseDto>.Success(new LogoutAllSessionsResponseDto
                 {
-                    return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.User.NotFound);
-                }
-
-                if (user.Status == UserAccountStatus.Inactive)
-                {
-                    return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.Auth.AccountInactive);
-                }
-
-                if (user.IsLockedAt(_dateTimeProvider.UtcNow))
-                {
-                    return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.AccountLocked);
-                }
-
-                await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-                try
-                {
-                    await _refreshTokenRepository.RevokeAllActiveByUserIdAsync(
-                        userId: user.UserId,
-                        revokedReason: "LoggedOutAllSessions",
-                        cancellationToken: cancellationToken);
-
-                    await _unitOfWork.CommitAsync(cancellationToken);
-
-                    return Result<LogoutAllSessionsResponseDto>.Success(new LogoutAllSessionsResponseDto
-                    {
-                        UserId = user.UserId,
-                        LoggedOutAllSessions = true
-                    });
-                }
-                catch
-                {
-                    await _unitOfWork.RollbackAsync(cancellationToken);
-                    throw;
-                }
+                    UserId = user.UserId,
+                    LoggedOutAllSessions = true
+                });
             }
-            catch (PersistenceException exception)
+            catch
             {
-                return Result<LogoutAllSessionsResponseDto>.Failure(MapPersistenceException(exception));
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
             }
         }
-
-        private static Error MapPersistenceException(PersistenceException exception)
+        catch (PersistenceException)
         {
-            return exception.Code switch
-            {
-                _ => IdentityErrors.Auth.LogoutFailed
-            };
+            return Result<LogoutAllSessionsResponseDto>.Failure(
+                IdentityErrors.LogoutAllSessions.Failed);
         }
     }
 }

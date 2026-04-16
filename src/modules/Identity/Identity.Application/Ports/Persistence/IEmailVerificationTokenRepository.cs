@@ -1,19 +1,19 @@
 ﻿using Identity.Domain.Entities;
 
-namespace Identity.Application.Ports.Persistence
+namespace Identity.Application.Ports.Persistence;
+
+public interface IEmailVerificationTokenRepository
 {
-    public interface IEmailVerificationTokenRepository
-    {
-        Task InsertAsync(
-            EmailVerificationToken token,
-            CancellationToken cancellationToken = default);
+    Task InsertAsync(
+        EmailVerificationToken token,
+        CancellationToken cancellationToken = default);
 
-        Task<EmailVerificationToken?> GetActiveByTokenHashAsync(
-            byte[] tokenHash,
-            CancellationToken cancellationToken = default);
+    Task<EmailVerificationToken?> GetActiveByTokenHashAsync(
+        byte[] tokenHash,
+        CancellationToken cancellationToken = default);
 
-        Task<bool> MarkUsedAsync(
-            long verificationTokenId,
-            CancellationToken cancellationToken = default);
-    }
+    Task<bool> MarkUsedAsync(
+        long verificationTokenId,
+        DateTime usedAtUtc,
+        CancellationToken cancellationToken = default);
 }
