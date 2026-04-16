@@ -1,13 +1,11 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Identity.Application.Contracts.Requests;
-using Identity.Application.Contracts.Responses;
+using Identity.Application.Contracts.Logout;
 
-namespace Identity.Application.UseCases.Logout
+namespace Identity.Application.UseCases.Logout;
+
+public interface ILogoutUseCase
 {
-    public interface ILogoutUseCase
-    {
-        Task<Result<LogoutResponseDto>> ExecuteAsync(
-            LogoutRequestDto request,
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<LogoutResponseDto>> ExecuteAsync(
+        LogoutRequestDto request,
+        CancellationToken cancellationToken = default);
 }
