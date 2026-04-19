@@ -10,8 +10,8 @@ public interface IPermissionRepository
         long permissionId,
         CancellationToken cancellationToken = default);
 
-    Task<Permission?> GetByNameNormalizedAsync(
-        string nameNormalized,
+    Task<Permission?> GetByKeyNormalizedAsync(
+        string keyNormalized,
         CancellationToken cancellationToken = default);
 
     Task<PagedQueryResult<PermissionListResultItem>> GetPagedAsync(
@@ -19,6 +19,7 @@ public interface IPermissionRepository
         int pageSize,
         string? query,
         string? module,
+        string? action,
         bool? isActive,
         CancellationToken cancellationToken = default);
 
