@@ -2,8 +2,9 @@ namespace CommercialNews.Api.Api.Admin.Contracts.Authorization.Permissions.Reque
 
 public sealed class CreatePermissionHttpRequest
 {
-    public string Name { get; init; } = string.Empty;
-    public string? Description { get; init; }
+    public string Key { get; init; } = string.Empty;
     public string? Module { get; init; }
+    public string? Action { get; init; }
+    public string? Description { get; init; }
     public bool IsSystem { get; init; }
 }
