@@ -1,19 +1,28 @@
-namespace Authorization.Domain.Exceptions
+namespace Authorization.Domain.Exceptions;
+
+public sealed class AuthorizationDomainException : Exception
 {
-    public sealed class AuthorizationDomainException : Exception
+    public string Code { get; }
+
+    public AuthorizationDomainException(string code, string message)
+        : base(message)
     {
-        public string Code { get; }
-
-        public AuthorizationDomainException(string code, string message)
-            : base(message)
+        if (string.IsNullOrWhiteSpace(code))
         {
-            Code = code;
+            throw new ArgumentException("Exception code is required.", nameof(code));
         }
 
-        public AuthorizationDomainException(string code, string message, Exception innerException)
-            : base(message, innerException)
+        Code = code;
+    }
+
+    public AuthorizationDomainException(string code, string message, Exception innerException)
+        : base(message, innerException)
+    {
+        if (string.IsNullOrWhiteSpace(code))
         {
-            Code = code;
+            throw new ArgumentException("Exception code is required.", nameof(code));
         }
+
+        Code = code;
     }
 }
