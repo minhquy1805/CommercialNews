@@ -7,6 +7,7 @@ public sealed class RoleListResultItem
 
     public string Name { get; init; } = string.Empty;
     public string NameNormalized { get; init; } = string.Empty;
+    public string? DisplayName { get; init; }
     public string? Description { get; init; }
 
     public bool IsSystem { get; init; }
