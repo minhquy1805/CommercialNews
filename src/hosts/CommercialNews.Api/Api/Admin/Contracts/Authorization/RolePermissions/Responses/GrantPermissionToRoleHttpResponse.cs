@@ -2,7 +2,6 @@ namespace CommercialNews.Api.Api.Admin.Contracts.Authorization.RolePermissions.R
 
 public sealed class GrantPermissionToRoleHttpResponse
 {
-    public long RolePermissionId { get; init; }
     public long RoleId { get; init; }
     public long PermissionId { get; init; }
     public bool IsGranted { get; init; }

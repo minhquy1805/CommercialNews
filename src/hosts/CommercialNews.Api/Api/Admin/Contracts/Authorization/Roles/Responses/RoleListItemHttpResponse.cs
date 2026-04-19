@@ -1,6 +1,6 @@
 namespace CommercialNews.Api.Api.Admin.Contracts.Authorization.Roles.Responses;
 
-public sealed class UpdateRoleHttpResponse
+public sealed class RoleListItemHttpResponse
 {
     public long RoleId { get; init; }
     public string PublicId { get; init; } = string.Empty;
@@ -10,6 +10,8 @@ public sealed class UpdateRoleHttpResponse
     public string? Description { get; init; }
     public bool IsSystem { get; init; }
     public bool IsActive { get; init; }
+    public DateTime CreatedAt { get; init; }
     public DateTime UpdatedAt { get; init; }
+    public long? CreatedByUserId { get; init; }
     public long? UpdatedByUserId { get; init; }
 }
