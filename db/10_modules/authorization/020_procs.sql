@@ -3,16 +3,18 @@
   Module: Authorization
   Purpose:
   - Create stored procedures for Authorization V1.
-  - RBAC baseline operations for:
+  - Sync-base RBAC operations for:
       * Role
       * Permission
       * UserRole assignment/revoke
       * RolePermission grant/revoke
-  - Idempotent: uses CREATE OR ALTER PROCEDURE
+      * Effective permission read
+  - Truth-first, idempotent where applicable.
 
   Notes:
-  - UserRole and RolePermission use revoke semantics instead of hard delete.
-  - Assignment/grant operations are idempotent.
+  - UserRole and RolePermission use simple truth relationships in V1.
+  - Revoke semantics are implemented as DELETE from truth relationships.
+  - CREATE OR ALTER PROCEDURE is used for idempotent re-runs.
 */
 
 SET ANSI_NULLS ON;
@@ -40,14 +42,15 @@ GO
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [authorization].[Role_Insert]
-    @PublicId          CHAR(26),
-    @Name              NVARCHAR(100),
-    @NameNormalized    NVARCHAR(100),
-    @Description       NVARCHAR(500) = NULL,
-    @IsSystem          BIT = 0,
-    @IsActive          BIT = 1,
-    @CreatedByUserId   BIGINT = NULL,
-    @RoleId            BIGINT OUTPUT
+    @PublicId           CHAR(26),
+    @Name               NVARCHAR(80),
+    @NameNormalized     NVARCHAR(80),
+    @DisplayName        NVARCHAR(120) = NULL,
+    @Description        NVARCHAR(300) = NULL,
+    @IsSystem           BIT = 0,
+    @IsActive           BIT = 1,
+    @CreatedByUserId    BIGINT = NULL,
+    @RoleId             BIGINT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -75,6 +78,7 @@ BEGIN
         [PublicId],
         [Name],
         [NameNormalized],
+        [DisplayName],
         [Description],
         [IsSystem],
         [IsActive],
@@ -86,6 +90,7 @@ BEGIN
         @PublicId,
         @Name,
         @NameNormalized,
+        @DisplayName,
         @Description,
         @IsSystem,
         @IsActive,
@@ -98,13 +103,14 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Role_Update]
-    @RoleId            BIGINT,
-    @Name              NVARCHAR(100),
-    @NameNormalized    NVARCHAR(100),
-    @Description       NVARCHAR(500) = NULL,
-    @IsActive          BIT,
-    @UpdatedByUserId   BIGINT = NULL,
-    @AffectedRows      INT OUTPUT
+    @RoleId             BIGINT,
+    @Name               NVARCHAR(80),
+    @NameNormalized     NVARCHAR(80),
+    @DisplayName        NVARCHAR(120) = NULL,
+    @Description        NVARCHAR(300) = NULL,
+    @IsActive           BIT,
+    @UpdatedByUserId    BIGINT = NULL,
+    @AffectedRows       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -140,6 +146,7 @@ BEGIN
     SET
         [Name] = @Name,
         [NameNormalized] = @NameNormalized,
+        [DisplayName] = @DisplayName,
         [Description] = @Description,
         [IsActive] = @IsActive,
         [UpdatedAt] = SYSUTCDATETIME(),
@@ -196,6 +203,7 @@ BEGIN
         [PublicId],
         [Name],
         [NameNormalized],
+        [DisplayName],
         [Description],
         [IsSystem],
         [IsActive],
@@ -209,7 +217,7 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Role_SelectByNameNormalized]
-    @NameNormalized NVARCHAR(100)
+    @NameNormalized NVARCHAR(80)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -219,6 +227,7 @@ BEGIN
         [PublicId],
         [Name],
         [NameNormalized],
+        [DisplayName],
         [Description],
         [IsSystem],
         [IsActive],
@@ -241,6 +250,7 @@ BEGIN
         [PublicId],
         [Name],
         [NameNormalized],
+        [DisplayName],
         [Description],
         [IsSystem],
         [IsActive],
@@ -249,7 +259,7 @@ BEGIN
         [CreatedByUserId],
         [UpdatedByUserId]
     FROM [authorization].[Role]
-    ORDER BY [Name] ASC;
+    ORDER BY [NameNormalized] ASC;
 END;
 GO
 
@@ -268,6 +278,7 @@ BEGIN
         [PublicId],
         [Name],
         [NameNormalized],
+        [DisplayName],
         [Description],
         [IsSystem],
         [IsActive],
@@ -276,13 +287,13 @@ BEGIN
         [CreatedByUserId],
         [UpdatedByUserId]
     FROM [authorization].[Role]
-    ORDER BY [Name] ASC
+    ORDER BY [NameNormalized] ASC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Role_SelectSkipAndTakeWhereDynamic]
-    @NameContains NVARCHAR(100) = NULL,
+    @NameContains NVARCHAR(80) = NULL,
     @IsActive BIT = NULL,
     @Skip INT = 0,
     @Take INT = 20
@@ -298,6 +309,7 @@ BEGIN
         [PublicId],
         [Name],
         [NameNormalized],
+        [DisplayName],
         [Description],
         [IsSystem],
         [IsActive],
@@ -309,7 +321,7 @@ BEGIN
     WHERE
         (@NameContains IS NULL OR [Name] LIKE N'%' + @NameContains + N'%')
         AND (@IsActive IS NULL OR [IsActive] = @IsActive)
-    ORDER BY [Name] ASC
+    ORDER BY [NameNormalized] ASC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END;
 GO
@@ -325,7 +337,7 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Role_GetRecordCountWhereDynamic]
-    @NameContains NVARCHAR(100) = NULL,
+    @NameContains NVARCHAR(80) = NULL,
     @IsActive BIT = NULL
 AS
 BEGIN
@@ -344,15 +356,16 @@ GO
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [authorization].[Permission_Insert]
-    @PublicId          CHAR(26),
-    @Name              NVARCHAR(150),
-    @NameNormalized    NVARCHAR(150),
-    @Description       NVARCHAR(500) = NULL,
-    @Module            NVARCHAR(100) = NULL,
-    @IsSystem          BIT = 0,
-    @IsActive          BIT = 1,
-    @CreatedByUserId   BIGINT = NULL,
-    @PermissionId      BIGINT OUTPUT
+    @PublicId           CHAR(26),
+    @Key                NVARCHAR(120),
+    @KeyNormalized      NVARCHAR(120),
+    @Module             NVARCHAR(50) = NULL,
+    @Action             NVARCHAR(50) = NULL,
+    @Description        NVARCHAR(300) = NULL,
+    @IsSystem           BIT = 0,
+    @IsActive           BIT = 1,
+    @CreatedByUserId    BIGINT = NULL,
+    @PermissionId       BIGINT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -361,27 +374,28 @@ BEGIN
     IF NULLIF(LTRIM(RTRIM(@PublicId)), N'') IS NULL
         THROW 53330, 'Permission public id is required.', 1;
 
-    IF NULLIF(LTRIM(RTRIM(@Name)), N'') IS NULL
-        THROW 53331, 'Permission name is required.', 1;
+    IF NULLIF(LTRIM(RTRIM(@Key)), N'') IS NULL
+        THROW 53331, 'Permission key is required.', 1;
 
-    IF NULLIF(LTRIM(RTRIM(@NameNormalized)), N'') IS NULL
-        THROW 53332, 'Permission normalized name is required.', 1;
+    IF NULLIF(LTRIM(RTRIM(@KeyNormalized)), N'') IS NULL
+        THROW 53332, 'Permission normalized key is required.', 1;
 
     IF EXISTS
     (
         SELECT 1
         FROM [authorization].[Permission]
-        WHERE [NameNormalized] = @NameNormalized
+        WHERE [KeyNormalized] = @KeyNormalized
     )
-        THROW 53333, 'Permission name already exists.', 1;
+        THROW 53333, 'Permission key already exists.', 1;
 
     INSERT INTO [authorization].[Permission]
     (
         [PublicId],
-        [Name],
-        [NameNormalized],
-        [Description],
+        [Key],
+        [KeyNormalized],
         [Module],
+        [Action],
+        [Description],
         [IsSystem],
         [IsActive],
         [CreatedByUserId],
@@ -390,10 +404,11 @@ BEGIN
     VALUES
     (
         @PublicId,
-        @Name,
-        @NameNormalized,
-        @Description,
+        @Key,
+        @KeyNormalized,
         @Module,
+        @Action,
+        @Description,
         @IsSystem,
         @IsActive,
         @CreatedByUserId,
@@ -405,14 +420,15 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Permission_Update]
-    @PermissionId      BIGINT,
-    @Name              NVARCHAR(150),
-    @NameNormalized    NVARCHAR(150),
-    @Description       NVARCHAR(500) = NULL,
-    @Module            NVARCHAR(100) = NULL,
-    @IsActive          BIT,
-    @UpdatedByUserId   BIGINT = NULL,
-    @AffectedRows      INT OUTPUT
+    @PermissionId       BIGINT,
+    @Key                NVARCHAR(120),
+    @KeyNormalized      NVARCHAR(120),
+    @Module             NVARCHAR(50) = NULL,
+    @Action             NVARCHAR(50) = NULL,
+    @Description        NVARCHAR(300) = NULL,
+    @IsActive           BIT,
+    @UpdatedByUserId    BIGINT = NULL,
+    @AffectedRows       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -421,11 +437,11 @@ BEGIN
     IF @PermissionId <= 0
         THROW 53334, 'Permission id must be greater than zero.', 1;
 
-    IF NULLIF(LTRIM(RTRIM(@Name)), N'') IS NULL
-        THROW 53331, 'Permission name is required.', 1;
+    IF NULLIF(LTRIM(RTRIM(@Key)), N'') IS NULL
+        THROW 53331, 'Permission key is required.', 1;
 
-    IF NULLIF(LTRIM(RTRIM(@NameNormalized)), N'') IS NULL
-        THROW 53332, 'Permission normalized name is required.', 1;
+    IF NULLIF(LTRIM(RTRIM(@KeyNormalized)), N'') IS NULL
+        THROW 53332, 'Permission normalized key is required.', 1;
 
     IF NOT EXISTS
     (
@@ -439,17 +455,18 @@ BEGIN
     (
         SELECT 1
         FROM [authorization].[Permission]
-        WHERE [NameNormalized] = @NameNormalized
+        WHERE [KeyNormalized] = @KeyNormalized
           AND [PermissionId] <> @PermissionId
     )
-        THROW 53333, 'Permission name already exists.', 1;
+        THROW 53333, 'Permission key already exists.', 1;
 
     UPDATE [authorization].[Permission]
     SET
-        [Name] = @Name,
-        [NameNormalized] = @NameNormalized,
-        [Description] = @Description,
+        [Key] = @Key,
+        [KeyNormalized] = @KeyNormalized,
         [Module] = @Module,
+        [Action] = @Action,
+        [Description] = @Description,
         [IsActive] = @IsActive,
         [UpdatedAt] = SYSUTCDATETIME(),
         [UpdatedByUserId] = @UpdatedByUserId
@@ -503,10 +520,11 @@ BEGIN
     SELECT
         [PermissionId],
         [PublicId],
-        [Name],
-        [NameNormalized],
-        [Description],
+        [Key],
+        [KeyNormalized],
         [Module],
+        [Action],
+        [Description],
         [IsSystem],
         [IsActive],
         [CreatedAt],
@@ -518,8 +536,8 @@ BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [authorization].[Permission_SelectByNameNormalized]
-    @NameNormalized NVARCHAR(150)
+CREATE OR ALTER PROCEDURE [authorization].[Permission_SelectByKeyNormalized]
+    @KeyNormalized NVARCHAR(120)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -527,10 +545,11 @@ BEGIN
     SELECT
         [PermissionId],
         [PublicId],
-        [Name],
-        [NameNormalized],
-        [Description],
+        [Key],
+        [KeyNormalized],
         [Module],
+        [Action],
+        [Description],
         [IsSystem],
         [IsActive],
         [CreatedAt],
@@ -538,7 +557,7 @@ BEGIN
         [CreatedByUserId],
         [UpdatedByUserId]
     FROM [authorization].[Permission]
-    WHERE [NameNormalized] = @NameNormalized;
+    WHERE [KeyNormalized] = @KeyNormalized;
 END;
 GO
 
@@ -550,10 +569,11 @@ BEGIN
     SELECT
         [PermissionId],
         [PublicId],
-        [Name],
-        [NameNormalized],
-        [Description],
+        [Key],
+        [KeyNormalized],
         [Module],
+        [Action],
+        [Description],
         [IsSystem],
         [IsActive],
         [CreatedAt],
@@ -561,7 +581,7 @@ BEGIN
         [CreatedByUserId],
         [UpdatedByUserId]
     FROM [authorization].[Permission]
-    ORDER BY [Name] ASC;
+    ORDER BY [KeyNormalized] ASC;
 END;
 GO
 
@@ -578,10 +598,11 @@ BEGIN
     SELECT
         [PermissionId],
         [PublicId],
-        [Name],
-        [NameNormalized],
-        [Description],
+        [Key],
+        [KeyNormalized],
         [Module],
+        [Action],
+        [Description],
         [IsSystem],
         [IsActive],
         [CreatedAt],
@@ -589,14 +610,15 @@ BEGIN
         [CreatedByUserId],
         [UpdatedByUserId]
     FROM [authorization].[Permission]
-    ORDER BY [Name] ASC
+    ORDER BY [KeyNormalized] ASC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Permission_SelectSkipAndTakeWhereDynamic]
-    @NameContains NVARCHAR(150) = NULL,
-    @Module NVARCHAR(100) = NULL,
+    @KeyContains NVARCHAR(120) = NULL,
+    @Module NVARCHAR(50) = NULL,
+    @Action NVARCHAR(50) = NULL,
     @IsActive BIT = NULL,
     @Skip INT = 0,
     @Take INT = 20
@@ -610,10 +632,11 @@ BEGIN
     SELECT
         [PermissionId],
         [PublicId],
-        [Name],
-        [NameNormalized],
-        [Description],
+        [Key],
+        [KeyNormalized],
         [Module],
+        [Action],
+        [Description],
         [IsSystem],
         [IsActive],
         [CreatedAt],
@@ -622,10 +645,11 @@ BEGIN
         [UpdatedByUserId]
     FROM [authorization].[Permission]
     WHERE
-        (@NameContains IS NULL OR [Name] LIKE N'%' + @NameContains + N'%')
+        (@KeyContains IS NULL OR [Key] LIKE N'%' + @KeyContains + N'%')
         AND (@Module IS NULL OR [Module] = @Module)
+        AND (@Action IS NULL OR [Action] = @Action)
         AND (@IsActive IS NULL OR [IsActive] = @IsActive)
-    ORDER BY [Name] ASC
+    ORDER BY [KeyNormalized] ASC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END;
 GO
@@ -641,8 +665,9 @@ END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[Permission_GetRecordCountWhereDynamic]
-    @NameContains NVARCHAR(150) = NULL,
-    @Module NVARCHAR(100) = NULL,
+    @KeyContains NVARCHAR(120) = NULL,
+    @Module NVARCHAR(50) = NULL,
+    @Action NVARCHAR(50) = NULL,
     @IsActive BIT = NULL
 AS
 BEGIN
@@ -651,8 +676,9 @@ BEGIN
     SELECT COUNT_BIG(1) AS [RecordCount]
     FROM [authorization].[Permission]
     WHERE
-        (@NameContains IS NULL OR [Name] LIKE N'%' + @NameContains + N'%')
+        (@KeyContains IS NULL OR [Key] LIKE N'%' + @KeyContains + N'%')
         AND (@Module IS NULL OR [Module] = @Module)
+        AND (@Action IS NULL OR [Action] = @Action)
         AND (@IsActive IS NULL OR [IsActive] = @IsActive);
 END;
 GO
@@ -665,7 +691,7 @@ CREATE OR ALTER PROCEDURE [authorization].[UserRole_Assign]
     @UserId             BIGINT,
     @RoleId             BIGINT,
     @AssignedByUserId   BIGINT = NULL,
-    @UserRoleId         BIGINT OUTPUT
+    @AffectedRows       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -677,16 +703,15 @@ BEGIN
     IF @RoleId <= 0
         THROW 53353, 'Role id must be greater than zero.', 1;
 
-    SET @UserRoleId = NULL;
+    SET @AffectedRows = 0;
 
-    SELECT TOP (1)
-        @UserRoleId = [UserRoleId]
-    FROM [authorization].[UserRole]
-    WHERE [UserId] = @UserId
-      AND [RoleId] = @RoleId
-      AND [RevokedAt] IS NULL;
-
-    IF @UserRoleId IS NOT NULL
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[UserRole]
+        WHERE [UserId] = @UserId
+          AND [RoleId] = @RoleId
+    )
         RETURN;
 
     INSERT INTO [authorization].[UserRole]
@@ -702,14 +727,13 @@ BEGIN
         @AssignedByUserId
     );
 
-    SET @UserRoleId = SCOPE_IDENTITY();
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[UserRole_Revoke]
     @UserId             BIGINT,
     @RoleId             BIGINT,
-    @RevokedByUserId    BIGINT = NULL,
     @AffectedRows       INT OUTPUT
 AS
 BEGIN
@@ -722,13 +746,9 @@ BEGIN
     IF @RoleId <= 0
         THROW 53353, 'Role id must be greater than zero.', 1;
 
-    UPDATE [authorization].[UserRole]
-    SET
-        [RevokedAt] = SYSUTCDATETIME(),
-        [RevokedByUserId] = @RevokedByUserId
+    DELETE FROM [authorization].[UserRole]
     WHERE [UserId] = @UserId
-      AND [RoleId] = @RoleId
-      AND [RevokedAt] IS NULL;
+      AND [RoleId] = @RoleId;
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
@@ -741,16 +761,14 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT
-        ur.[UserRoleId],
         ur.[UserId],
         ur.[RoleId],
         ur.[AssignedAt],
         ur.[AssignedByUserId],
-        ur.[RevokedAt],
-        ur.[RevokedByUserId],
         r.[PublicId] AS [RolePublicId],
         r.[Name] AS [RoleName],
         r.[NameNormalized] AS [RoleNameNormalized],
+        r.[DisplayName] AS [RoleDisplayName],
         r.[Description] AS [RoleDescription],
         r.[IsSystem] AS [RoleIsSystem],
         r.[IsActive] AS [RoleIsActive]
@@ -758,8 +776,7 @@ BEGIN
     INNER JOIN [authorization].[Role] r
         ON ur.[RoleId] = r.[RoleId]
     WHERE ur.[UserId] = @UserId
-      AND ur.[RevokedAt] IS NULL
-    ORDER BY ur.[AssignedAt] DESC, ur.[UserRoleId] DESC;
+    ORDER BY ur.[AssignedAt] DESC, r.[NameNormalized] ASC;
 END;
 GO
 
@@ -770,13 +787,10 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT
-        ur.[UserRoleId],
         ur.[UserId],
         ur.[RoleId],
         ur.[AssignedAt],
         ur.[AssignedByUserId],
-        ur.[RevokedAt],
-        ur.[RevokedByUserId],
         ua.[PublicId] AS [UserPublicId],
         ua.[Email],
         ua.[EmailNormalized],
@@ -787,12 +801,11 @@ BEGIN
     INNER JOIN [identity].[UserAccount] ua
         ON ur.[UserId] = ua.[UserId]
     WHERE ur.[RoleId] = @RoleId
-      AND ur.[RevokedAt] IS NULL
-    ORDER BY ur.[AssignedAt] DESC, ur.[UserRoleId] DESC;
+    ORDER BY ur.[AssignedAt] DESC, ua.[EmailNormalized] ASC;
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [authorization].[UserRole_SelectActiveByUserIdAndRoleId]
+CREATE OR ALTER PROCEDURE [authorization].[UserRole_SelectByUserIdAndRoleId]
     @UserId BIGINT,
     @RoleId BIGINT
 AS
@@ -800,17 +813,13 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT TOP (1)
-        [UserRoleId],
         [UserId],
         [RoleId],
         [AssignedAt],
-        [AssignedByUserId],
-        [RevokedAt],
-        [RevokedByUserId]
+        [AssignedByUserId]
     FROM [authorization].[UserRole]
     WHERE [UserId] = @UserId
-      AND [RoleId] = @RoleId
-      AND [RevokedAt] IS NULL;
+      AND [RoleId] = @RoleId;
 END;
 GO
 
@@ -846,7 +855,7 @@ CREATE OR ALTER PROCEDURE [authorization].[RolePermission_Grant]
     @RoleId             BIGINT,
     @PermissionId       BIGINT,
     @GrantedByUserId    BIGINT = NULL,
-    @RolePermissionId   BIGINT OUTPUT
+    @AffectedRows       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -858,16 +867,15 @@ BEGIN
     IF @PermissionId <= 0
         THROW 53373, 'Permission id must be greater than zero.', 1;
 
-    SET @RolePermissionId = NULL;
+    SET @AffectedRows = 0;
 
-    SELECT TOP (1)
-        @RolePermissionId = [RolePermissionId]
-    FROM [authorization].[RolePermission]
-    WHERE [RoleId] = @RoleId
-      AND [PermissionId] = @PermissionId
-      AND [RevokedAt] IS NULL;
-
-    IF @RolePermissionId IS NOT NULL
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [authorization].[RolePermission]
+        WHERE [RoleId] = @RoleId
+          AND [PermissionId] = @PermissionId
+    )
         RETURN;
 
     INSERT INTO [authorization].[RolePermission]
@@ -883,14 +891,13 @@ BEGIN
         @GrantedByUserId
     );
 
-    SET @RolePermissionId = SCOPE_IDENTITY();
+    SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [authorization].[RolePermission_Revoke]
     @RoleId             BIGINT,
     @PermissionId       BIGINT,
-    @RevokedByUserId    BIGINT = NULL,
     @AffectedRows       INT OUTPUT
 AS
 BEGIN
@@ -903,13 +910,9 @@ BEGIN
     IF @PermissionId <= 0
         THROW 53373, 'Permission id must be greater than zero.', 1;
 
-    UPDATE [authorization].[RolePermission]
-    SET
-        [RevokedAt] = SYSUTCDATETIME(),
-        [RevokedByUserId] = @RevokedByUserId
+    DELETE FROM [authorization].[RolePermission]
     WHERE [RoleId] = @RoleId
-      AND [PermissionId] = @PermissionId
-      AND [RevokedAt] IS NULL;
+      AND [PermissionId] = @PermissionId;
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
@@ -922,26 +925,23 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT
-        rp.[RolePermissionId],
         rp.[RoleId],
         rp.[PermissionId],
         rp.[GrantedAt],
         rp.[GrantedByUserId],
-        rp.[RevokedAt],
-        rp.[RevokedByUserId],
         p.[PublicId] AS [PermissionPublicId],
-        p.[Name] AS [PermissionName],
-        p.[NameNormalized] AS [PermissionNameNormalized],
-        p.[Description] AS [PermissionDescription],
+        p.[Key] AS [PermissionKey],
+        p.[KeyNormalized] AS [PermissionKeyNormalized],
         p.[Module] AS [PermissionModule],
+        p.[Action] AS [PermissionAction],
+        p.[Description] AS [PermissionDescription],
         p.[IsSystem] AS [PermissionIsSystem],
         p.[IsActive] AS [PermissionIsActive]
     FROM [authorization].[RolePermission] rp
     INNER JOIN [authorization].[Permission] p
         ON rp.[PermissionId] = p.[PermissionId]
     WHERE rp.[RoleId] = @RoleId
-      AND rp.[RevokedAt] IS NULL
-    ORDER BY rp.[GrantedAt] DESC, rp.[RolePermissionId] DESC;
+    ORDER BY rp.[GrantedAt] DESC, p.[KeyNormalized] ASC;
 END;
 GO
 
@@ -952,16 +952,14 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT
-        rp.[RolePermissionId],
         rp.[RoleId],
         rp.[PermissionId],
         rp.[GrantedAt],
         rp.[GrantedByUserId],
-        rp.[RevokedAt],
-        rp.[RevokedByUserId],
         r.[PublicId] AS [RolePublicId],
         r.[Name] AS [RoleName],
         r.[NameNormalized] AS [RoleNameNormalized],
+        r.[DisplayName] AS [RoleDisplayName],
         r.[Description] AS [RoleDescription],
         r.[IsSystem] AS [RoleIsSystem],
         r.[IsActive] AS [RoleIsActive]
@@ -969,12 +967,11 @@ BEGIN
     INNER JOIN [authorization].[Role] r
         ON rp.[RoleId] = r.[RoleId]
     WHERE rp.[PermissionId] = @PermissionId
-      AND rp.[RevokedAt] IS NULL
-    ORDER BY rp.[GrantedAt] DESC, rp.[RolePermissionId] DESC;
+    ORDER BY rp.[GrantedAt] DESC, r.[NameNormalized] ASC;
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [authorization].[RolePermission_SelectActiveByRoleIdAndPermissionId]
+CREATE OR ALTER PROCEDURE [authorization].[RolePermission_SelectByRoleIdAndPermissionId]
     @RoleId BIGINT,
     @PermissionId BIGINT
 AS
@@ -982,17 +979,13 @@ BEGIN
     SET NOCOUNT ON;
 
     SELECT TOP (1)
-        [RolePermissionId],
         [RoleId],
         [PermissionId],
         [GrantedAt],
-        [GrantedByUserId],
-        [RevokedAt],
-        [RevokedByUserId]
+        [GrantedByUserId]
     FROM [authorization].[RolePermission]
     WHERE [RoleId] = @RoleId
-      AND [PermissionId] = @PermissionId
-      AND [RevokedAt] IS NULL;
+      AND [PermissionId] = @PermissionId;
 END;
 GO
 
@@ -1020,6 +1013,10 @@ BEGIN
 END;
 GO
 
+/* =========================================================
+   Effective permissions
+   ========================================================= */
+
 CREATE OR ALTER PROCEDURE [authorization].[Authorization_SelectEffectivePermissionsByUserId]
     @UserId BIGINT
 AS
@@ -1029,10 +1026,11 @@ BEGIN
     SELECT DISTINCT
         p.[PermissionId],
         p.[PublicId] AS [PermissionPublicId],
-        p.[Name] AS [PermissionName],
-        p.[NameNormalized] AS [PermissionNameNormalized],
-        p.[Description] AS [PermissionDescription],
+        p.[Key] AS [PermissionKey],
+        p.[KeyNormalized] AS [PermissionKeyNormalized],
         p.[Module] AS [PermissionModule],
+        p.[Action] AS [PermissionAction],
+        p.[Description] AS [PermissionDescription],
         p.[IsSystem] AS [PermissionIsSystem],
         p.[IsActive] AS [PermissionIsActive]
     FROM [authorization].[UserRole] ur
@@ -1043,10 +1041,8 @@ BEGIN
     INNER JOIN [authorization].[Permission] p
         ON rp.[PermissionId] = p.[PermissionId]
     WHERE ur.[UserId] = @UserId
-      AND ur.[RevokedAt] IS NULL
-      AND rp.[RevokedAt] IS NULL
       AND r.[IsActive] = 1
       AND p.[IsActive] = 1
-    ORDER BY p.[NameNormalized] ASC;
-END
+    ORDER BY p.[KeyNormalized] ASC;
+END;
 GO
