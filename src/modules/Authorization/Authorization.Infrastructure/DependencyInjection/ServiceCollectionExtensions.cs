@@ -6,29 +6,28 @@ using Authorization.Infrastructure.Persistence.Sql;
 using Authorization.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Authorization.Infrastructure.DependencyInjection
+namespace Authorization.Infrastructure.DependencyInjection;
+
+public static class ServiceCollectionExtensions
 {
-    public static class ServiceCollectionExtensions
+    public static IServiceCollection AddAuthorizationInfrastructure(this IServiceCollection services)
     {
-        public static IServiceCollection AddAuthorizationInfrastructure(this IServiceCollection services)
-        {
-            ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(services);
 
-            services.AddScoped<AuthorizationSqlExceptionTranslator>();
+        services.AddSingleton<AuthorizationSqlExceptionTranslator>();
 
-            services.AddScoped<AuthorizationUnitOfWork>();
-            services.AddScoped<IAuthorizationUnitOfWork>(sp =>
-                sp.GetRequiredService<AuthorizationUnitOfWork>());
+        services.AddScoped<AuthorizationUnitOfWork>();
+        services.AddScoped<IAuthorizationUnitOfWork>(sp =>
+            sp.GetRequiredService<AuthorizationUnitOfWork>());
 
-            services.AddScoped<IRoleRepository, RoleRepository>();
-            services.AddScoped<IPermissionRepository, PermissionRepository>();
-            services.AddScoped<IUserRoleRepository, UserRoleRepository>();
-            services.AddScoped<IRolePermissionRepository, RolePermissionRepository>();
-            services.AddScoped<IAuthorizationPermissionQueryRepository, AuthorizationPermissionQueryRepository>();
+        services.AddScoped<IRoleRepository, RoleRepository>();
+        services.AddScoped<IPermissionRepository, PermissionRepository>();
+        services.AddScoped<IUserRoleRepository, UserRoleRepository>();
+        services.AddScoped<IRolePermissionRepository, RolePermissionRepository>();
+        services.AddScoped<IAuthorizationPermissionQueryRepository, AuthorizationPermissionQueryRepository>();
 
-            services.AddScoped<IAuthorizationUserLookupService, AuthorizationUserLookupService>();
+        services.AddScoped<IAuthorizationUserLookupService, AuthorizationUserLookupService>();
 
-            return services;
-        }
+        return services;
     }
 }

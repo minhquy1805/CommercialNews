@@ -3,15 +3,19 @@
   Module: Authorization
   Purpose:
   - Create non-PK/non-constraint indexes for Authorization tables in CommercialNews V1.
-  - Includes:
-      * [authorization].[Role]
-      * [authorization].[Permission]
-      * [authorization].[UserRole]
-      * [authorization].[RolePermission]
+  - Sync-base truth-first authorization model.
+  - Supports:
+      * authoritative admin reads
+      * role / permission listing
+      * user -> roles lookup
+      * role -> users lookup
+      * role -> permissions lookup
+      * permission -> roles reverse lookup
 
   Notes:
   - Idempotent: safe to re-run.
-  - Unique constraints on names/public IDs are already defined in 001_tables.sql.
+  - PKs / UNIQUE constraints are already defined in 001_tables.sql.
+  - Do not duplicate indexes already covered by PK/UQ constraints.
 */
 
 SET NOCOUNT ON;
@@ -58,36 +62,38 @@ END
 GO
 
 /* =========================================================
-   Role indexes
+   [authorization].[Role]
    ========================================================= */
 
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE [name] = N'IX_Role_IsActive_Name'
+    WHERE [name] = N'IX_Role_IsActive_NameNormalized'
       AND [object_id] = OBJECT_ID(N'[authorization].[Role]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_Role_IsActive_Name]
+    CREATE NONCLUSTERED INDEX [IX_Role_IsActive_NameNormalized]
     ON [authorization].[Role]
     (
         [IsActive] ASC,
-        [Name] ASC
+        [NameNormalized] ASC
     )
     INCLUDE
     (
         [PublicId],
+        [Name],
+        [DisplayName],
         [Description],
         [IsSystem],
         [UpdatedAt]
     );
 
-    PRINT N'Created index: [authorization].[Role].[IX_Role_IsActive_Name]';
+    PRINT N'Created index: [authorization].[Role].[IX_Role_IsActive_NameNormalized]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [authorization].[Role].[IX_Role_IsActive_Name]';
+    PRINT N'Index exists: [authorization].[Role].[IX_Role_IsActive_NameNormalized]';
 END
 GO
 
@@ -110,38 +116,91 @@ BEGIN
 END
 GO
 
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_Role_UpdatedByUserId'
+      AND [object_id] = OBJECT_ID(N'[authorization].[Role]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_Role_UpdatedByUserId]
+    ON [authorization].[Role] ([UpdatedByUserId] ASC);
+
+    PRINT N'Created index: [authorization].[Role].[IX_Role_UpdatedByUserId]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [authorization].[Role].[IX_Role_UpdatedByUserId]';
+END
+GO
+
 /* =========================================================
-   Permission indexes
+   [authorization].[Permission]
    ========================================================= */
 
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE [name] = N'IX_Permission_IsActive_Module_Name'
+    WHERE [name] = N'IX_Permission_IsActive_Module_Action'
       AND [object_id] = OBJECT_ID(N'[authorization].[Permission]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_Permission_IsActive_Module_Name]
+    CREATE NONCLUSTERED INDEX [IX_Permission_IsActive_Module_Action]
     ON [authorization].[Permission]
     (
         [IsActive] ASC,
         [Module] ASC,
-        [Name] ASC
+        [Action] ASC
     )
     INCLUDE
     (
         [PublicId],
+        [Key],
         [Description],
         [IsSystem],
         [UpdatedAt]
     );
 
-    PRINT N'Created index: [authorization].[Permission].[IX_Permission_IsActive_Module_Name]';
+    PRINT N'Created index: [authorization].[Permission].[IX_Permission_IsActive_Module_Action]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [authorization].[Permission].[IX_Permission_IsActive_Module_Name]';
+    PRINT N'Index exists: [authorization].[Permission].[IX_Permission_IsActive_Module_Action]';
+END
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_Permission_IsActive_KeyNormalized'
+      AND [object_id] = OBJECT_ID(N'[authorization].[Permission]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_Permission_IsActive_KeyNormalized]
+    ON [authorization].[Permission]
+    (
+        [IsActive] ASC,
+        [KeyNormalized] ASC
+    )
+    INCLUDE
+    (
+        [PublicId],
+        [Key],
+        [Module],
+        [Action],
+        [Description],
+        [IsSystem],
+        [UpdatedAt]
+    );
+
+    PRINT N'Created index: [authorization].[Permission].[IX_Permission_IsActive_KeyNormalized]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [authorization].[Permission].[IX_Permission_IsActive_KeyNormalized]';
 END
 GO
 
@@ -164,149 +223,57 @@ BEGIN
 END
 GO
 
-/* =========================================================
-   UserRole indexes
-   ========================================================= */
-
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE [name] = N'UX_UserRole_UserId_RoleId_Active'
-      AND [object_id] = OBJECT_ID(N'[authorization].[UserRole]')
+    WHERE [name] = N'IX_Permission_UpdatedByUserId'
+      AND [object_id] = OBJECT_ID(N'[authorization].[Permission]')
 )
 BEGIN
-    CREATE UNIQUE NONCLUSTERED INDEX [UX_UserRole_UserId_RoleId_Active]
-    ON [authorization].[UserRole]
-    (
-        [UserId] ASC,
-        [RoleId] ASC
-    )
-    WHERE [RevokedAt] IS NULL;
+    CREATE NONCLUSTERED INDEX [IX_Permission_UpdatedByUserId]
+    ON [authorization].[Permission] ([UpdatedByUserId] ASC);
 
-    PRINT N'Created index: [authorization].[UserRole].[UX_UserRole_UserId_RoleId_Active]';
+    PRINT N'Created index: [authorization].[Permission].[IX_Permission_UpdatedByUserId]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [authorization].[UserRole].[UX_UserRole_UserId_RoleId_Active]';
-END
-GO
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_UserRole_UserId_RevokedAt_AssignedAt'
-      AND [object_id] = OBJECT_ID(N'[authorization].[UserRole]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_UserRole_UserId_RevokedAt_AssignedAt]
-    ON [authorization].[UserRole]
-    (
-        [UserId] ASC,
-        [RevokedAt] ASC,
-        [AssignedAt] DESC
-    )
-    INCLUDE
-    (
-        [RoleId],
-        [AssignedByUserId],
-        [RevokedByUserId]
-    );
-
-    PRINT N'Created index: [authorization].[UserRole].[IX_UserRole_UserId_RevokedAt_AssignedAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [authorization].[UserRole].[IX_UserRole_UserId_RevokedAt_AssignedAt]';
-END
-GO
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_UserRole_RoleId_RevokedAt_AssignedAt'
-      AND [object_id] = OBJECT_ID(N'[authorization].[UserRole]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_UserRole_RoleId_RevokedAt_AssignedAt]
-    ON [authorization].[UserRole]
-    (
-        [RoleId] ASC,
-        [RevokedAt] ASC,
-        [AssignedAt] DESC
-    )
-    INCLUDE
-    (
-        [UserId],
-        [AssignedByUserId],
-        [RevokedByUserId]
-    );
-
-    PRINT N'Created index: [authorization].[UserRole].[IX_UserRole_RoleId_RevokedAt_AssignedAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [authorization].[UserRole].[IX_UserRole_RoleId_RevokedAt_AssignedAt]';
+    PRINT N'Index exists: [authorization].[Permission].[IX_Permission_UpdatedByUserId]';
 END
 GO
 
 /* =========================================================
-   RolePermission indexes
+   [authorization].[UserRole]
    ========================================================= */
 
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'UX_RolePermission_RoleId_PermissionId_Active'
-      AND [object_id] = OBJECT_ID(N'[authorization].[RolePermission]')
-)
-BEGIN
-    CREATE UNIQUE NONCLUSTERED INDEX [UX_RolePermission_RoleId_PermissionId_Active]
-    ON [authorization].[RolePermission]
-    (
-        [RoleId] ASC,
-        [PermissionId] ASC
-    )
-    WHERE [RevokedAt] IS NULL;
-
-    PRINT N'Created index: [authorization].[RolePermission].[UX_RolePermission_RoleId_PermissionId_Active]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [authorization].[RolePermission].[UX_RolePermission_RoleId_PermissionId_Active]';
-END
-GO
+-- PK already covers (UserId, RoleId) for direct user -> roles lookup.
+-- Add reverse lookup for role -> users and admin tooling.
 
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE [name] = N'IX_RolePermission_RoleId_RevokedAt_GrantedAt'
-      AND [object_id] = OBJECT_ID(N'[authorization].[RolePermission]')
+    WHERE [name] = N'IX_UserRole_RoleId_UserId'
+      AND [object_id] = OBJECT_ID(N'[authorization].[UserRole]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_RolePermission_RoleId_RevokedAt_GrantedAt]
-    ON [authorization].[RolePermission]
+    CREATE NONCLUSTERED INDEX [IX_UserRole_RoleId_UserId]
+    ON [authorization].[UserRole]
     (
         [RoleId] ASC,
-        [RevokedAt] ASC,
-        [GrantedAt] DESC
+        [UserId] ASC
     )
     INCLUDE
     (
-        [PermissionId],
-        [GrantedByUserId],
-        [RevokedByUserId]
+        [AssignedAt],
+        [AssignedByUserId]
     );
 
-    PRINT N'Created index: [authorization].[RolePermission].[IX_RolePermission_RoleId_RevokedAt_GrantedAt]';
+    PRINT N'Created index: [authorization].[UserRole].[IX_UserRole_RoleId_UserId]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [authorization].[RolePermission].[IX_RolePermission_RoleId_RevokedAt_GrantedAt]';
+    PRINT N'Index exists: [authorization].[UserRole].[IX_UserRole_RoleId_UserId]';
 END
 GO
 
@@ -314,28 +281,71 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE [name] = N'IX_RolePermission_PermissionId_RevokedAt_GrantedAt'
+    WHERE [name] = N'IX_UserRole_AssignedByUserId'
+      AND [object_id] = OBJECT_ID(N'[authorization].[UserRole]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_UserRole_AssignedByUserId]
+    ON [authorization].[UserRole] ([AssignedByUserId] ASC);
+
+    PRINT N'Created index: [authorization].[UserRole].[IX_UserRole_AssignedByUserId]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [authorization].[UserRole].[IX_UserRole_AssignedByUserId]';
+END
+GO
+
+/* =========================================================
+   [authorization].[RolePermission]
+   ========================================================= */
+
+-- PK already covers (RoleId, PermissionId) for direct role -> permissions lookup.
+-- Add reverse lookup for permission -> roles and admin tooling.
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_RolePermission_PermissionId_RoleId'
       AND [object_id] = OBJECT_ID(N'[authorization].[RolePermission]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_RolePermission_PermissionId_RevokedAt_GrantedAt]
+    CREATE NONCLUSTERED INDEX [IX_RolePermission_PermissionId_RoleId]
     ON [authorization].[RolePermission]
     (
         [PermissionId] ASC,
-        [RevokedAt] ASC,
-        [GrantedAt] DESC
+        [RoleId] ASC
     )
     INCLUDE
     (
-        [RoleId],
-        [GrantedByUserId],
-        [RevokedByUserId]
+        [GrantedAt],
+        [GrantedByUserId]
     );
 
-    PRINT N'Created index: [authorization].[RolePermission].[IX_RolePermission_PermissionId_RevokedAt_GrantedAt]';
+    PRINT N'Created index: [authorization].[RolePermission].[IX_RolePermission_PermissionId_RoleId]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [authorization].[RolePermission].[IX_RolePermission_PermissionId_RevokedAt_GrantedAt]';
+    PRINT N'Index exists: [authorization].[RolePermission].[IX_RolePermission_PermissionId_RoleId]';
+END
+GO
+
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_RolePermission_GrantedByUserId'
+      AND [object_id] = OBJECT_ID(N'[authorization].[RolePermission]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_RolePermission_GrantedByUserId]
+    ON [authorization].[RolePermission] ([GrantedByUserId] ASC);
+
+    PRINT N'Created index: [authorization].[RolePermission].[IX_RolePermission_GrantedByUserId]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [authorization].[RolePermission].[IX_RolePermission_GrantedByUserId]';
 END
 GO

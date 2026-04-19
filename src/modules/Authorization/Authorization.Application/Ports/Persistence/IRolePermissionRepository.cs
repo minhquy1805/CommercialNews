@@ -5,7 +5,7 @@ namespace Authorization.Application.Ports.Persistence;
 
 public interface IRolePermissionRepository
 {
-    Task<RolePermission?> GetActiveByRoleIdAndPermissionIdAsync(
+    Task<RolePermission?> GetByRoleIdAndPermissionIdAsync(
         long roleId,
         long permissionId,
         CancellationToken cancellationToken = default);
@@ -17,14 +17,13 @@ public interface IRolePermissionRepository
     Task<bool> RevokeAsync(
         long roleId,
         long permissionId,
-        long? revokedByUserId,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<RolePermissionListResultItem>> GetActivePermissionsByRoleIdAsync(
+    Task<IReadOnlyList<RolePermissionListResultItem>> GetPermissionsByRoleIdAsync(
         long roleId,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<PermissionRoleListResultItem>> GetActiveRolesByPermissionIdAsync(
+    Task<IReadOnlyList<PermissionRoleListResultItem>> GetRolesByPermissionIdAsync(
         long permissionId,
         CancellationToken cancellationToken = default);
 }
