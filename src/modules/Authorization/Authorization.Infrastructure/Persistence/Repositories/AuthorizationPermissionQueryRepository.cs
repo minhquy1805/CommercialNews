@@ -5,85 +5,85 @@ using Authorization.Infrastructure.Persistence.Exceptions;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
 
-namespace Authorization.Infrastructure.Persistence.Repositories
+namespace Authorization.Infrastructure.Persistence.Repositories;
+
+public sealed class AuthorizationPermissionQueryRepository : IAuthorizationPermissionQueryRepository
 {
-    public sealed class AuthorizationPermissionQueryRepository : IAuthorizationPermissionQueryRepository
+    private const string AuthorizationSelectEffectivePermissionsByUserIdProc =
+        "[authorization].[Authorization_SelectEffectivePermissionsByUserId]";
+
+    private readonly ISqlConnectionFactory _sqlConnectionFactory;
+    private readonly AuthorizationSqlExceptionTranslator _sqlExceptionTranslator;
+
+    public AuthorizationPermissionQueryRepository(
+        ISqlConnectionFactory sqlConnectionFactory,
+        AuthorizationSqlExceptionTranslator sqlExceptionTranslator)
     {
-        private const string AuthorizationSelectEffectivePermissionsByUserIdProc =
-            "[authorization].[Authorization_SelectEffectivePermissionsByUserId]";
+        _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
+        _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
+    }
 
-        private readonly ISqlConnectionFactory _sqlConnectionFactory;
-        private readonly AuthorizationSqlExceptionTranslator _sqlExceptionTranslator;
-
-        public AuthorizationPermissionQueryRepository(
-            ISqlConnectionFactory sqlConnectionFactory,
-            AuthorizationSqlExceptionTranslator sqlExceptionTranslator)
+    public async Task<IReadOnlyList<EffectivePermissionListResultItem>> GetEffectivePermissionsByUserIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
         {
-            _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
-            _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
+            return Array.Empty<EffectivePermissionListResultItem>();
         }
 
-        public async Task<IReadOnlyList<EffectivePermissionListResultItem>> GetEffectivePermissionsByUserIdAsync(
-            long userId,
-            CancellationToken cancellationToken = default)
+        List<EffectivePermissionListResultItem> result = [];
+
+        await using var connection = _sqlConnectionFactory.CreateConnection();
+
+        try
         {
-            if (userId <= 0)
-            {
-                return Array.Empty<EffectivePermissionListResultItem>();
-            }
+            await connection.OpenAsync(cancellationToken);
 
-            List<EffectivePermissionListResultItem> result = [];
+            await using var command = connection.CreateCommand();
+            command.CommandText = AuthorizationSelectEffectivePermissionsByUserIdProc;
+            command.CommandType = CommandType.StoredProcedure;
 
-            await using SqlConnection connection = _sqlConnectionFactory.CreateConnection();
-
-            try
-            {
-                await connection.OpenAsync(cancellationToken);
-
-                await using SqlCommand command = connection.CreateCommand();
-                command.CommandText = AuthorizationSelectEffectivePermissionsByUserIdProc;
-                command.CommandType = CommandType.StoredProcedure;
-
-                command.Parameters.Add(
-                    new SqlParameter("@UserId", SqlDbType.BigInt)
-                    {
-                        Value = userId
-                    });
-
-                await using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-                while (await reader.ReadAsync(cancellationToken))
+            command.Parameters.Add(
+                new SqlParameter("@UserId", SqlDbType.BigInt)
                 {
-                    result.Add(MapEffectivePermissionListResultItem(reader));
-                }
+                    Value = userId
+                });
 
-                return result;
-            }
-            catch (SqlException exception)
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            while (await reader.ReadAsync(cancellationToken))
             {
-                throw _sqlExceptionTranslator.Translate(exception);
+                result.Add(MapEffectivePermissionListResultItem(reader));
             }
-        }
 
-        private static EffectivePermissionListResultItem MapEffectivePermissionListResultItem(SqlDataReader reader)
-        {
-            return new EffectivePermissionListResultItem
-            {
-                PermissionId = reader.GetInt64(reader.GetOrdinal("PermissionId")),
-                PublicId = reader.GetString(reader.GetOrdinal("PermissionPublicId")),
-                Name = reader.GetString(reader.GetOrdinal("PermissionName")),
-                NameNormalized = reader.GetString(reader.GetOrdinal("PermissionNameNormalized")),
-                Description = ReadNullableString(reader, "PermissionDescription"),
-                Module = ReadNullableString(reader, "PermissionModule"),
-                IsSystem = reader.GetBoolean(reader.GetOrdinal("PermissionIsSystem")),
-                IsActive = reader.GetBoolean(reader.GetOrdinal("PermissionIsActive"))
-            };
+            return result;
         }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
 
-        private static string? ReadNullableString(SqlDataReader reader, string columnName)
+    private static EffectivePermissionListResultItem MapEffectivePermissionListResultItem(SqlDataReader reader)
+    {
+        return new EffectivePermissionListResultItem
         {
-            int ordinal = reader.GetOrdinal(columnName);
-            return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
-        }
+            PermissionId = reader.GetInt64(reader.GetOrdinal("PermissionId")),
+            PublicId = reader.GetString(reader.GetOrdinal("PermissionPublicId")),
+            Key = reader.GetString(reader.GetOrdinal("PermissionKey")),
+            KeyNormalized = reader.GetString(reader.GetOrdinal("PermissionKeyNormalized")),
+            Description = ReadNullableString(reader, "PermissionDescription"),
+            Module = ReadNullableString(reader, "PermissionModule"),
+            Action = ReadNullableString(reader, "PermissionAction"),
+            IsSystem = reader.GetBoolean(reader.GetOrdinal("PermissionIsSystem")),
+            IsActive = reader.GetBoolean(reader.GetOrdinal("PermissionIsActive"))
+        };
+    }
+
+    private static string? ReadNullableString(SqlDataReader reader, string columnName)
+    {
+        var ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
 }
