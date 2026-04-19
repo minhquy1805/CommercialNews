@@ -5,7 +5,7 @@ namespace Authorization.Application.Ports.Persistence;
 
 public interface IUserRoleRepository
 {
-    Task<UserRole?> GetActiveByUserIdAndRoleIdAsync(
+    Task<UserRole?> GetByUserIdAndRoleIdAsync(
         long userId,
         long roleId,
         CancellationToken cancellationToken = default);
@@ -17,14 +17,13 @@ public interface IUserRoleRepository
     Task<bool> RevokeAsync(
         long userId,
         long roleId,
-        long? revokedByUserId,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<UserRoleListResultItem>> GetActiveRolesByUserIdAsync(
+    Task<IReadOnlyList<UserRoleListResultItem>> GetRolesByUserIdAsync(
         long userId,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<RoleUserListResultItem>> GetActiveUsersByRoleIdAsync(
+    Task<IReadOnlyList<RoleUserListResultItem>> GetUsersByRoleIdAsync(
         long roleId,
         CancellationToken cancellationToken = default);
 }
