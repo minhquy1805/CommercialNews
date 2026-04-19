@@ -8,623 +8,656 @@ using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Microsoft.Data.SqlClient;
 
-namespace Authorization.Infrastructure.Persistence.Repositories
+namespace Authorization.Infrastructure.Persistence.Repositories;
+
+public sealed class PermissionRepository : IPermissionRepository
 {
-    public sealed class PermissionRepository : IPermissionRepository
+    private const string PermissionInsertProc = "[authorization].[Permission_Insert]";
+    private const string PermissionUpdateProc = "[authorization].[Permission_Update]";
+    private const string PermissionDeleteProc = "[authorization].[Permission_Delete]";
+    private const string PermissionSelectByIdProc = "[authorization].[Permission_SelectById]";
+    private const string PermissionSelectByKeyNormalizedProc = "[authorization].[Permission_SelectByKeyNormalized]";
+    private const string PermissionSelectSkipAndTakeWhereDynamicProc = "[authorization].[Permission_SelectSkipAndTakeWhereDynamic]";
+    private const string PermissionGetRecordCountWhereDynamicProc = "[authorization].[Permission_GetRecordCountWhereDynamic]";
+
+    private readonly AuthorizationUnitOfWork _unitOfWork;
+    private readonly ISqlConnectionFactory _sqlConnectionFactory;
+    private readonly AuthorizationSqlExceptionTranslator _sqlExceptionTranslator;
+
+    public PermissionRepository(
+        AuthorizationUnitOfWork unitOfWork,
+        ISqlConnectionFactory sqlConnectionFactory,
+        AuthorizationSqlExceptionTranslator sqlExceptionTranslator)
     {
-        private const string PermissionInsertProc = "[authorization].[Permission_Insert]";
-        private const string PermissionUpdateProc = "[authorization].[Permission_Update]";
-        private const string PermissionDeleteProc = "[authorization].[Permission_Delete]";
-        private const string PermissionSelectByIdProc = "[authorization].[Permission_SelectById]";
-        private const string PermissionSelectByNameNormalizedProc = "[authorization].[Permission_SelectByNameNormalized]";
-        private const string PermissionSelectSkipAndTakeWhereDynamicProc = "[authorization].[Permission_SelectSkipAndTakeWhereDynamic]";
-        private const string PermissionGetRecordCountWhereDynamicProc = "[authorization].[Permission_GetRecordCountWhereDynamic]";
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
+        _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
+    }
 
-        private readonly AuthorizationUnitOfWork _unitOfWork;
-        private readonly ISqlConnectionFactory _sqlConnectionFactory;
-        private readonly AuthorizationSqlExceptionTranslator _sqlExceptionTranslator;
-
-        public PermissionRepository(
-            AuthorizationUnitOfWork unitOfWork,
-            ISqlConnectionFactory sqlConnectionFactory,
-            AuthorizationSqlExceptionTranslator sqlExceptionTranslator)
+    public async Task<Permission?> GetByIdAsync(
+        long permissionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (permissionId <= 0)
         {
-            _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-            _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
-            _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
+            return null;
         }
 
-        public async Task<Permission?> GetByIdAsync(
-            long permissionId,
-            CancellationToken cancellationToken = default)
+        SqlConnection? ownedConnection = null;
+
+        try
         {
-            if (permissionId <= 0)
+            var (command, connection) = await CreateCommandAsync(
+                PermissionSelectByIdProc,
+                cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
             {
-                return null;
-            }
-
-            SqlConnection? ownedConnection = null;
-
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(PermissionSelectByIdProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@PermissionId", SqlDbType.BigInt)
-                        {
-                            Value = permissionId
-                        });
-
-                    using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-                    if (!await reader.ReadAsync(cancellationToken))
+                command.Parameters.Add(
+                    new SqlParameter("@PermissionId", SqlDbType.BigInt)
                     {
-                        return null;
-                    }
+                        Value = permissionId
+                    });
 
-                    return MapPermission(reader);
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
+                using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
                 {
-                    await ownedConnection.DisposeAsync();
+                    return null;
                 }
+
+                return MapPermission(reader);
             }
         }
-
-        public async Task<Permission?> GetByNameNormalizedAsync(
-            string nameNormalized,
-            CancellationToken cancellationToken = default)
+        catch (SqlException exception)
         {
-            if (string.IsNullOrWhiteSpace(nameNormalized))
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
             {
-                return null;
-            }
-
-            SqlConnection? ownedConnection = null;
-
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(PermissionSelectByNameNormalizedProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@NameNormalized", SqlDbType.NVarChar, 150)
-                        {
-                            Value = nameNormalized.Trim()
-                        });
-
-                    using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-                    if (!await reader.ReadAsync(cancellationToken))
-                    {
-                        return null;
-                    }
-
-                    return MapPermission(reader);
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
+                await ownedConnection.DisposeAsync();
             }
         }
+    }
 
-        public async Task<PagedQueryResult<PermissionListResultItem>> GetPagedAsync(
-            int page,
-            int pageSize,
-            string? query,
-            string? module,
-            bool? isActive,
-            CancellationToken cancellationToken = default)
+    public async Task<Permission?> GetByKeyNormalizedAsync(
+        string keyNormalized,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(keyNormalized))
         {
-            if (page <= 0)
-            {
-                page = 1;
-            }
-
-            if (pageSize <= 0)
-            {
-                pageSize = 20;
-            }
-
-            int skip = (page - 1) * pageSize;
-            List<PermissionListResultItem> items = [];
-            SqlConnection? ownedConnection = null;
-
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(PermissionSelectSkipAndTakeWhereDynamicProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@NameContains", SqlDbType.NVarChar, 150)
-                        {
-                            Value = !string.IsNullOrWhiteSpace(query)
-                                ? query.Trim()
-                                : DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Module", SqlDbType.NVarChar, 100)
-                        {
-                            Value = !string.IsNullOrWhiteSpace(module)
-                                ? module.Trim()
-                                : DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@IsActive", SqlDbType.Bit)
-                        {
-                            Value = isActive.HasValue
-                                ? isActive.Value
-                                : DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Skip", SqlDbType.Int)
-                        {
-                            Value = skip
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Take", SqlDbType.Int)
-                        {
-                            Value = pageSize
-                        });
-
-                    using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-                    while (await reader.ReadAsync(cancellationToken))
-                    {
-                        items.Add(MapPermissionListResultItem(reader));
-                    }
-                }
-
-                long totalItems = await GetRecordCountWhereDynamicAsync(
-                    query,
-                    module,
-                    isActive,
-                    cancellationToken);
-
-                return new PagedQueryResult<PermissionListResultItem>
-                {
-                    Items = items,
-                    Page = page,
-                    PageSize = pageSize,
-                    TotalItems = totalItems > int.MaxValue
-                        ? int.MaxValue
-                        : (int)totalItems
-                };
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
-            }
+            return null;
         }
 
-        public async Task<Permission> InsertAsync(
-            Permission permission,
-            CancellationToken cancellationToken = default)
+        SqlConnection? ownedConnection = null;
+
+        try
         {
-            ArgumentNullException.ThrowIfNull(permission);
+            var (command, connection) = await CreateCommandAsync(
+                PermissionSelectByKeyNormalizedProc,
+                cancellationToken);
 
-            SqlConnection? ownedConnection = null;
+            ownedConnection = connection;
 
-            try
+            using (command)
             {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(PermissionInsertProc, cancellationToken);
+                command.Parameters.Add(
+                    new SqlParameter("@KeyNormalized", SqlDbType.NVarChar, 120)
+                    {
+                        Value = keyNormalized.Trim()
+                    });
 
-                ownedConnection = connection;
+                using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-                using (command)
+                if (!await reader.ReadAsync(cancellationToken))
                 {
-                    command.Parameters.Add(
-                        new SqlParameter("@PublicId", SqlDbType.Char, 26)
-                        {
-                            Value = permission.PublicId
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Name", SqlDbType.NVarChar, 150)
-                        {
-                            Value = permission.Name
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@NameNormalized", SqlDbType.NVarChar, 150)
-                        {
-                            Value = permission.NameNormalized
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Description", SqlDbType.NVarChar, 500)
-                        {
-                            Value = (object?)permission.Description ?? DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Module", SqlDbType.NVarChar, 100)
-                        {
-                            Value = (object?)permission.Module ?? DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@IsSystem", SqlDbType.Bit)
-                        {
-                            Value = permission.IsSystem
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@IsActive", SqlDbType.Bit)
-                        {
-                            Value = permission.IsActive
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@CreatedByUserId", SqlDbType.BigInt)
-                        {
-                            Value = (object?)permission.CreatedByUserId ?? DBNull.Value
-                        });
-
-                    SqlParameter permissionIdParameter = new("@PermissionId", SqlDbType.BigInt)
-                    {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(permissionIdParameter);
-
-                    await command.ExecuteNonQueryAsync(cancellationToken);
-
-                    if (permissionIdParameter.Value is null || permissionIdParameter.Value == DBNull.Value)
-                    {
-                        throw new InvalidOperationException("Permission_Insert did not return PermissionId.");
-                    }
-
-                    long createdPermissionId = Convert.ToInt64(permissionIdParameter.Value);
-
-                    Permission? createdPermission = await GetByIdAsync(
-                        createdPermissionId,
-                        cancellationToken);
-
-                    if (createdPermission is null)
-                    {
-                        throw new InvalidOperationException(
-                            $"Permission with id {createdPermissionId} was inserted but could not be reloaded.");
-                    }
-
-                    return createdPermission;
+                    return null;
                 }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
+
+                return MapPermission(reader);
             }
         }
-
-        public async Task<Permission> UpdateAsync(
-            Permission permission,
-            CancellationToken cancellationToken = default)
+        catch (SqlException exception)
         {
-            ArgumentNullException.ThrowIfNull(permission);
-
-            SqlConnection? ownedConnection = null;
-
-            try
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
             {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(PermissionUpdateProc, cancellationToken);
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
 
-                ownedConnection = connection;
+    public async Task<PagedQueryResult<PermissionListResultItem>> GetPagedAsync(
+        int page,
+        int pageSize,
+        string? query,
+        string? module,
+        string? action,
+        bool? isActive,
+        CancellationToken cancellationToken = default)
+    {
+        if (page <= 0)
+        {
+            page = 1;
+        }
 
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@PermissionId", SqlDbType.BigInt)
-                        {
-                            Value = permission.PermissionId
-                        });
+        if (pageSize <= 0)
+        {
+            pageSize = 20;
+        }
 
-                    command.Parameters.Add(
-                        new SqlParameter("@Name", SqlDbType.NVarChar, 150)
-                        {
-                            Value = permission.Name
-                        });
+        var skip = (page - 1) * pageSize;
+        List<PermissionListResultItem> items = [];
+        SqlConnection? ownedConnection = null;
 
-                    command.Parameters.Add(
-                        new SqlParameter("@NameNormalized", SqlDbType.NVarChar, 150)
-                        {
-                            Value = permission.NameNormalized
-                        });
+        try
+        {
+            var (command, connection) = await CreateCommandAsync(
+                PermissionSelectSkipAndTakeWhereDynamicProc,
+                cancellationToken);
 
-                    command.Parameters.Add(
-                        new SqlParameter("@Description", SqlDbType.NVarChar, 500)
-                        {
-                            Value = (object?)permission.Description ?? DBNull.Value
-                        });
+            ownedConnection = connection;
 
-                    command.Parameters.Add(
-                        new SqlParameter("@Module", SqlDbType.NVarChar, 100)
-                        {
-                            Value = (object?)permission.Module ?? DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@IsActive", SqlDbType.Bit)
-                        {
-                            Value = permission.IsActive
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt)
-                        {
-                            Value = (object?)permission.UpdatedByUserId ?? DBNull.Value
-                        });
-
-                    SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@KeyContains", SqlDbType.NVarChar, 120)
                     {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(affectedRowsParameter);
+                        Value = !string.IsNullOrWhiteSpace(query)
+                            ? query.Trim()
+                            : DBNull.Value
+                    });
 
-                    await command.ExecuteNonQueryAsync(cancellationToken);
-
-                    Permission? updatedPermission = await GetByIdAsync(
-                        permission.PermissionId,
-                        cancellationToken);
-
-                    if (updatedPermission is null)
+                command.Parameters.Add(
+                    new SqlParameter("@Module", SqlDbType.NVarChar, 50)
                     {
-                        throw new InvalidOperationException(
-                            $"Permission with id {permission.PermissionId} was updated but could not be reloaded.");
-                    }
+                        Value = !string.IsNullOrWhiteSpace(module)
+                            ? module.Trim()
+                            : DBNull.Value
+                    });
 
-                    return updatedPermission;
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
-            }
-        }
-
-        public async Task<bool> DeleteAsync(
-            long permissionId,
-            CancellationToken cancellationToken = default)
-        {
-            if (permissionId <= 0)
-            {
-                return false;
-            }
-
-            SqlConnection? ownedConnection = null;
-
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(PermissionDeleteProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@PermissionId", SqlDbType.BigInt)
-                        {
-                            Value = permissionId
-                        });
-
-                    SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
+                command.Parameters.Add(
+                    new SqlParameter("@Action", SqlDbType.NVarChar, 50)
                     {
-                        Direction = ParameterDirection.Output
-                    };
-                    command.Parameters.Add(affectedRowsParameter);
+                        Value = !string.IsNullOrWhiteSpace(action)
+                            ? action.Trim()
+                            : DBNull.Value
+                    });
 
-                    await command.ExecuteNonQueryAsync(cancellationToken);
-
-                    int affectedRows = affectedRowsParameter.Value is DBNull
-                        ? 0
-                        : Convert.ToInt32(affectedRowsParameter.Value);
-
-                    return affectedRows > 0;
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
-                {
-                    await ownedConnection.DisposeAsync();
-                }
-            }
-        }
-
-        private async Task<long> GetRecordCountWhereDynamicAsync(
-            string? query,
-            string? module,
-            bool? isActive,
-            CancellationToken cancellationToken)
-        {
-            SqlConnection? ownedConnection = null;
-
-            try
-            {
-                (SqlCommand command, SqlConnection? connection) =
-                    await CreateCommandAsync(PermissionGetRecordCountWhereDynamicProc, cancellationToken);
-
-                ownedConnection = connection;
-
-                using (command)
-                {
-                    command.Parameters.Add(
-                        new SqlParameter("@NameContains", SqlDbType.NVarChar, 150)
-                        {
-                            Value = !string.IsNullOrWhiteSpace(query)
-                                ? query.Trim()
-                                : DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@Module", SqlDbType.NVarChar, 100)
-                        {
-                            Value = !string.IsNullOrWhiteSpace(module)
-                                ? module.Trim()
-                                : DBNull.Value
-                        });
-
-                    command.Parameters.Add(
-                        new SqlParameter("@IsActive", SqlDbType.Bit)
-                        {
-                            Value = isActive.HasValue
-                                ? isActive.Value
-                                : DBNull.Value
-                        });
-
-                    object? scalar = await command.ExecuteScalarAsync(cancellationToken);
-
-                    if (scalar is null || scalar is DBNull)
+                command.Parameters.Add(
+                    new SqlParameter("@IsActive", SqlDbType.Bit)
                     {
-                        return 0;
-                    }
+                        Value = isActive.HasValue
+                            ? isActive.Value
+                            : DBNull.Value
+                    });
 
-                    return Convert.ToInt64(scalar);
-                }
-            }
-            catch (SqlException exception)
-            {
-                throw _sqlExceptionTranslator.Translate(exception);
-            }
-            finally
-            {
-                if (ownedConnection is not null)
+                command.Parameters.Add(
+                    new SqlParameter("@Skip", SqlDbType.Int)
+                    {
+                        Value = skip
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Take", SqlDbType.Int)
+                    {
+                        Value = pageSize
+                    });
+
+                using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
                 {
-                    await ownedConnection.DisposeAsync();
+                    items.Add(MapPermissionListResultItem(reader));
                 }
             }
-        }
 
-        private async Task<(SqlCommand Command, SqlConnection? OwnedConnection)> CreateCommandAsync(
-            string storedProcedureName,
-            CancellationToken cancellationToken)
-        {
-            if (_unitOfWork.HasActiveConnection)
+            var totalItems = await GetRecordCountWhereDynamicAsync(
+                query,
+                module,
+                action,
+                isActive,
+                cancellationToken);
+
+            return new PagedQueryResult<PermissionListResultItem>
             {
-                SqlCommand ambientCommand = _unitOfWork.Connection.CreateCommand();
-                ambientCommand.Transaction = _unitOfWork.HasActiveTransaction
-                    ? _unitOfWork.Transaction
-                    : null;
-                ambientCommand.CommandText = storedProcedureName;
-                ambientCommand.CommandType = CommandType.StoredProcedure;
-
-                return (ambientCommand, null);
-            }
-
-            SqlConnection ownedConnection = _sqlConnectionFactory.CreateConnection();
-            await ownedConnection.OpenAsync(cancellationToken);
-
-            SqlCommand command = ownedConnection.CreateCommand();
-            command.CommandText = storedProcedureName;
-            command.CommandType = CommandType.StoredProcedure;
-
-            return (command, ownedConnection);
-        }
-
-        private static Permission MapPermission(SqlDataReader reader)
-        {
-            return Permission.Rehydrate(
-                permissionId: reader.GetInt64(reader.GetOrdinal("PermissionId")),
-                publicId: reader.GetString(reader.GetOrdinal("PublicId")),
-                name: reader.GetString(reader.GetOrdinal("Name")),
-                nameNormalized: reader.GetString(reader.GetOrdinal("NameNormalized")),
-                description: ReadNullableString(reader, "Description"),
-                module: ReadNullableString(reader, "Module"),
-                isSystem: reader.GetBoolean(reader.GetOrdinal("IsSystem")),
-                isActive: reader.GetBoolean(reader.GetOrdinal("IsActive")),
-                createdAt: reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
-                updatedAt: reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
-                createdByUserId: ReadNullableInt64(reader, "CreatedByUserId"),
-                updatedByUserId: ReadNullableInt64(reader, "UpdatedByUserId"));
-        }
-
-        private static PermissionListResultItem MapPermissionListResultItem(SqlDataReader reader)
-        {
-            return new PermissionListResultItem
-            {
-                PermissionId = reader.GetInt64(reader.GetOrdinal("PermissionId")),
-                PublicId = reader.GetString(reader.GetOrdinal("PublicId")),
-                Name = reader.GetString(reader.GetOrdinal("Name")),
-                NameNormalized = reader.GetString(reader.GetOrdinal("NameNormalized")),
-                Description = ReadNullableString(reader, "Description"),
-                Module = ReadNullableString(reader, "Module"),
-                IsSystem = reader.GetBoolean(reader.GetOrdinal("IsSystem")),
-                IsActive = reader.GetBoolean(reader.GetOrdinal("IsActive")),
-                CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
-                UpdatedAt = reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
-                CreatedByUserId = ReadNullableInt64(reader, "CreatedByUserId"),
-                UpdatedByUserId = ReadNullableInt64(reader, "UpdatedByUserId")
+                Items = items,
+                Page = page,
+                PageSize = pageSize,
+                TotalItems = totalItems > int.MaxValue
+                    ? int.MaxValue
+                    : (int)totalItems
             };
         }
-
-        private static string? ReadNullableString(SqlDataReader reader, string columnName)
+        catch (SqlException exception)
         {
-            int ordinal = reader.GetOrdinal(columnName);
-            return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<Permission> InsertAsync(
+        Permission permission,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(permission);
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            var (command, connection) = await CreateCommandAsync(
+                PermissionInsertProc,
+                cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@PublicId", SqlDbType.Char, 26)
+                    {
+                        Value = permission.PublicId
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Key", SqlDbType.NVarChar, 120)
+                    {
+                        Value = permission.Key
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@KeyNormalized", SqlDbType.NVarChar, 120)
+                    {
+                        Value = permission.KeyNormalized
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Module", SqlDbType.NVarChar, 50)
+                    {
+                        Value = (object?)permission.Module ?? DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Action", SqlDbType.NVarChar, 50)
+                    {
+                        Value = (object?)permission.Action ?? DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Description", SqlDbType.NVarChar, 300)
+                    {
+                        Value = (object?)permission.Description ?? DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@IsSystem", SqlDbType.Bit)
+                    {
+                        Value = permission.IsSystem
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@IsActive", SqlDbType.Bit)
+                    {
+                        Value = permission.IsActive
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@CreatedByUserId", SqlDbType.BigInt)
+                    {
+                        Value = (object?)permission.CreatedByUserId ?? DBNull.Value
+                    });
+
+                var permissionIdParameter = new SqlParameter("@PermissionId", SqlDbType.BigInt)
+                {
+                    Direction = ParameterDirection.Output
+                };
+                command.Parameters.Add(permissionIdParameter);
+
+                await command.ExecuteNonQueryAsync(cancellationToken);
+
+                if (permissionIdParameter.Value is null || permissionIdParameter.Value == DBNull.Value)
+                {
+                    throw new InvalidOperationException("Permission_Insert did not return PermissionId.");
+                }
+
+                var createdPermissionId = Convert.ToInt64(permissionIdParameter.Value);
+
+                var createdPermission = await GetByIdAsync(createdPermissionId, cancellationToken);
+                if (createdPermission is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Permission with id {createdPermissionId} was inserted but could not be reloaded.");
+                }
+
+                return createdPermission;
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<Permission> UpdateAsync(
+        Permission permission,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(permission);
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            var (command, connection) = await CreateCommandAsync(
+                PermissionUpdateProc,
+                cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@PermissionId", SqlDbType.BigInt)
+                    {
+                        Value = permission.PermissionId
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Key", SqlDbType.NVarChar, 120)
+                    {
+                        Value = permission.Key
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@KeyNormalized", SqlDbType.NVarChar, 120)
+                    {
+                        Value = permission.KeyNormalized
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Module", SqlDbType.NVarChar, 50)
+                    {
+                        Value = (object?)permission.Module ?? DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Action", SqlDbType.NVarChar, 50)
+                    {
+                        Value = (object?)permission.Action ?? DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Description", SqlDbType.NVarChar, 300)
+                    {
+                        Value = (object?)permission.Description ?? DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@IsActive", SqlDbType.Bit)
+                    {
+                        Value = permission.IsActive
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt)
+                    {
+                        Value = (object?)permission.UpdatedByUserId ?? DBNull.Value
+                    });
+
+                var affectedRowsParameter = new SqlParameter("@AffectedRows", SqlDbType.Int)
+                {
+                    Direction = ParameterDirection.Output
+                };
+                command.Parameters.Add(affectedRowsParameter);
+
+                await command.ExecuteNonQueryAsync(cancellationToken);
+
+                var updatedPermission = await GetByIdAsync(permission.PermissionId, cancellationToken);
+                if (updatedPermission is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Permission with id {permission.PermissionId} was updated but could not be reloaded.");
+                }
+
+                return updatedPermission;
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<bool> DeleteAsync(
+        long permissionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (permissionId <= 0)
+        {
+            return false;
         }
 
-        private static long? ReadNullableInt64(SqlDataReader reader, string columnName)
+        SqlConnection? ownedConnection = null;
+
+        try
         {
-            int ordinal = reader.GetOrdinal(columnName);
-            return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
+            var (command, connection) = await CreateCommandAsync(
+                PermissionDeleteProc,
+                cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@PermissionId", SqlDbType.BigInt)
+                    {
+                        Value = permissionId
+                    });
+
+                var affectedRowsParameter = new SqlParameter("@AffectedRows", SqlDbType.Int)
+                {
+                    Direction = ParameterDirection.Output
+                };
+                command.Parameters.Add(affectedRowsParameter);
+
+                await command.ExecuteNonQueryAsync(cancellationToken);
+
+                var affectedRows = affectedRowsParameter.Value is DBNull
+                    ? 0
+                    : Convert.ToInt32(affectedRowsParameter.Value);
+
+                return affectedRows > 0;
+            }
         }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task<long> GetRecordCountWhereDynamicAsync(
+        string? query,
+        string? module,
+        string? action,
+        bool? isActive,
+        CancellationToken cancellationToken)
+    {
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            var (command, connection) = await CreateCommandAsync(
+                PermissionGetRecordCountWhereDynamicProc,
+                cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@KeyContains", SqlDbType.NVarChar, 120)
+                    {
+                        Value = !string.IsNullOrWhiteSpace(query)
+                            ? query.Trim()
+                            : DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Module", SqlDbType.NVarChar, 50)
+                    {
+                        Value = !string.IsNullOrWhiteSpace(module)
+                            ? module.Trim()
+                            : DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Action", SqlDbType.NVarChar, 50)
+                    {
+                        Value = !string.IsNullOrWhiteSpace(action)
+                            ? action.Trim()
+                            : DBNull.Value
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@IsActive", SqlDbType.Bit)
+                    {
+                        Value = isActive.HasValue
+                            ? isActive.Value
+                            : DBNull.Value
+                    });
+
+                var scalar = await command.ExecuteScalarAsync(cancellationToken);
+
+                if (scalar is null || scalar is DBNull)
+                {
+                    return 0;
+                }
+
+                return Convert.ToInt64(scalar);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task<(SqlCommand Command, SqlConnection? OwnedConnection)> CreateCommandAsync(
+        string storedProcedureName,
+        CancellationToken cancellationToken)
+    {
+        if (_unitOfWork.HasActiveConnection)
+        {
+            var ambientCommand = _unitOfWork.Connection.CreateCommand();
+            ambientCommand.Transaction = _unitOfWork.HasActiveTransaction
+                ? _unitOfWork.Transaction
+                : null;
+            ambientCommand.CommandText = storedProcedureName;
+            ambientCommand.CommandType = CommandType.StoredProcedure;
+
+            return (ambientCommand, null);
+        }
+
+        var ownedConnection = _sqlConnectionFactory.CreateConnection();
+        await ownedConnection.OpenAsync(cancellationToken);
+
+        var command = ownedConnection.CreateCommand();
+        command.CommandText = storedProcedureName;
+        command.CommandType = CommandType.StoredProcedure;
+
+        return (command, ownedConnection);
+    }
+
+    private static Permission MapPermission(SqlDataReader reader)
+    {
+        return Permission.Rehydrate(
+            permissionId: reader.GetInt64(reader.GetOrdinal("PermissionId")),
+            publicId: reader.GetString(reader.GetOrdinal("PublicId")),
+            key: reader.GetString(reader.GetOrdinal("Key")),
+            keyNormalized: reader.GetString(reader.GetOrdinal("KeyNormalized")),
+            module: ReadNullableString(reader, "Module"),
+            action: ReadNullableString(reader, "Action"),
+            description: ReadNullableString(reader, "Description"),
+            isSystem: reader.GetBoolean(reader.GetOrdinal("IsSystem")),
+            isActive: reader.GetBoolean(reader.GetOrdinal("IsActive")),
+            createdAt: reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
+            updatedAt: reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
+            createdByUserId: ReadNullableInt64(reader, "CreatedByUserId"),
+            updatedByUserId: ReadNullableInt64(reader, "UpdatedByUserId"));
+    }
+
+    private static PermissionListResultItem MapPermissionListResultItem(SqlDataReader reader)
+    {
+        return new PermissionListResultItem
+        {
+            PermissionId = reader.GetInt64(reader.GetOrdinal("PermissionId")),
+            PublicId = reader.GetString(reader.GetOrdinal("PublicId")),
+            Key = reader.GetString(reader.GetOrdinal("Key")),
+            KeyNormalized = reader.GetString(reader.GetOrdinal("KeyNormalized")),
+            Description = ReadNullableString(reader, "Description"),
+            Module = ReadNullableString(reader, "Module"),
+            Action = ReadNullableString(reader, "Action"),
+            IsSystem = reader.GetBoolean(reader.GetOrdinal("IsSystem")),
+            IsActive = reader.GetBoolean(reader.GetOrdinal("IsActive")),
+            CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
+            UpdatedAt = reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
+            CreatedByUserId = ReadNullableInt64(reader, "CreatedByUserId"),
+            UpdatedByUserId = ReadNullableInt64(reader, "UpdatedByUserId")
+        };
+    }
+
+    private static string? ReadNullableString(SqlDataReader reader, string columnName)
+    {
+        var ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    private static long? ReadNullableInt64(SqlDataReader reader, string columnName)
+    {
+        var ordinal = reader.GetOrdinal(columnName);
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
     }
 }
