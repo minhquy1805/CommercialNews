@@ -191,20 +191,86 @@ Reason:
 - business-level dedupe alone is not enough
 
 ### 3.2 Canonical business dedupe key (V1)
-Each email type must define one canonical business dedupe key.
 
-Recommended examples:
+Each email type must define exactly one canonical business dedupe key.
 
-- Verification email  
-  `(TemplateKey = "verify-email", RecipientUserId, VerificationTokenId/TokenHash)`
+This key is the authoritative identity of one logical email intent for duplicate-prevention purposes.
 
-- Reset password email  
-  `(TemplateKey = "reset-password", RecipientUserId, ResetTokenId/TokenHash)`
+Requirements:
 
-- New article notification (if enabled)  
-  `(TemplateKey = "new-article", RecipientUserId, ArticleId, PublishedVersion or PublishedAt per policy)`
+- the canonical key must be stable for the same logical intent
+- the canonical key must change for a legitimately new intent
+- the canonical key must be documented per notification type
+- the canonical key must be enforceable at the durable truth boundary
+- duplicate-send prevention must rely on this canonical key, not on worker-local memory or broker behavior
 
-**Rule:** choose and document one canonical business dedupe key per email type.
+**Rule:** for each email type, the system must define one official canonical business dedupe key and use it consistently across producer, consumer, replay, and remediation flows.
+
+### 3.2.1 Canonical dedupe key registry (V1 baseline)
+
+The following canonical business dedupe keys are recommended as the V1 contract baseline.
+
+#### Verification email
+
+Canonical key:
+
+`(TemplateKey = "verify-email", RecipientUserId, VerificationTokenId)`
+
+Rules:
+
+- the same verification token must map to the same logical email intent
+- replay/redelivery for the same token must not send again
+- a resend that generates a new verification token is a new logical intent and may send again
+
+#### Reset password email
+
+Canonical key:
+
+`(TemplateKey = "reset-password", RecipientUserId, ResetTokenId)`
+
+Rules:
+
+- the same reset token must map to the same logical email intent
+- duplicate processing for the same reset token must not send again
+- a newly issued reset token creates a new logical intent and may send again
+
+#### New article notification (if enabled)
+
+Canonical key:
+
+`(TemplateKey = "new-article", RecipientUserId, ArticleId, PublishedVersion)`
+
+If `PublishedVersion` is not modeled explicitly, policy may use:
+
+`(TemplateKey = "new-article", RecipientUserId, ArticleId, PublishedAt)`
+
+Rules:
+
+- one published article version should map to one logical notification intent per recipient
+- replay for the same article publication intent must not send again
+- a later republish or a new published version may create a new logical intent if product policy allows it
+
+#### Contract rule
+
+If a notification type is added in the future, it must define:
+
+- its canonical business dedupe key
+- what counts as duplicate replay
+- what counts as legitimate retrigger/new intent
+
+No notification type may ship without this being documented.
+
+### 3.3 Storage for dedupe
+
+Preferred (durable):
+
+- SQL uniqueness on `EmailDelivery.MessageKey` or equivalent business dedupe key
+
+Allowed (supplementary only):
+
+- Redis dedupe set with TTL to reduce DB contention or hot retries
+
+**Rule:** Redis-only dedupe is not sufficient protection for harmful duplicate emails.
 
 ### 3.3 Storage for dedupe
 Preferred (durable):
@@ -223,6 +289,93 @@ Must not send again.
 
 #### B) A legitimately new intent
 May send again.
+
+### 3.4.1 Dedupe-hit behavior (mandatory)
+
+When duplicate processing of the same canonical intent is detected, the system must behave deterministically.
+
+#### Required behavior
+
+A dedupe hit must:
+
+- prevent a duplicate visible send
+- preserve canonical delivery truth
+- remain safe under replay, retry, and redelivery
+- produce operator/audit visibility where policy requires it
+
+#### Default V1 behavior
+
+For V1, the recommended behavior is:
+
+- do **not** call the provider again
+- do **not** create a second active delivery intent for the same canonical business key
+- do **not** move the workflow backward from a newer terminal state
+- return or record a deterministic duplicate-handled outcome
+
+#### State behavior
+
+If the canonical intent is already in a terminal or authoritative state such as:
+
+- `Sent`
+- `Dead`
+- `Suppressed`
+- `Deduped`
+- another policy-defined terminal state
+
+then duplicate processing must not overwrite that state with an older or weaker interpretation.
+
+If the implementation uses an explicit duplicate state, it may record:
+
+- `Suppressed`
+- `Deduped`
+
+Otherwise, it may keep the existing canonical state unchanged and emit duplicate-handling metadata separately.
+
+#### Attempt-record behavior
+
+The implementation must define one consistent rule for duplicate hits:
+
+Option A — no new attempt row  
+- keep the canonical delivery record unchanged
+- increment or record duplicate-hit metrics/logs only
+
+Option B — duplicate-observation attempt row  
+- record an observational attempt or audit event
+- mark it explicitly as duplicate-suppressed / provider-not-called
+- do not treat it as a real send attempt
+
+**Rule:** duplicate observation must never be counted as a successful new send attempt.
+
+#### Metrics and audit behavior
+
+A dedupe hit should produce visibility through some combination of:
+
+- duplicate-hit counter
+- structured log event
+- audit/operational event
+- remediation/reporting signal
+
+This is important for:
+
+- replay diagnosis
+- retry-storm detection
+- queue redelivery analysis
+- operational confidence
+
+#### Safety rule
+
+A duplicate hit is not an error by default.  
+It is a normal distributed-systems outcome that must converge safely.
+
+#### Contract rule
+
+For the same notification type and the same canonical business dedupe key, the implementation must not mix inconsistent behaviors such as:
+
+- sometimes resend
+- sometimes suppress
+- sometimes create a second live intent
+
+unless the policy explicitly distinguishes those cases.
 
 Example:
 - resend verification should create a **new verification token / new intent**
@@ -756,20 +909,22 @@ a new ADR is required.
 
 ## 14) Summary
 
-Notifications correctness in V1 rests on fifteen rules:
+Notifications correctness in V1 rests on seventeen rules:
 
 1. Notifications owns delivery truth, not the originating business truth.  
 2. Email delivery is eventual and must not block core domain success.  
 3. Provider timeout does not prove “email not sent.”  
 4. Two-layer idempotency is mandatory: message dedupe + business-intent dedupe.  
-5. Legitimate resend must create a new intent; duplicate replay must not.  
-6. Delivery-state transitions must resist stale/racing retry attempts.  
-7. Operational visibility of backlog, dead state, and ambiguity is part of correctness, not an optional extra.  
-8. No global ordering or distributed transaction is assumed for Notifications workflows.  
-9. Notification delivery must follow committed domain causes; it must not outrun them.  
-10. Replay/remediation workflows support recovery, but must remain bounded and rerun-safe.  
-11. Derived summaries/reports are not canonical delivery truth.  
-12. Important derived outputs must follow candidate-before-publication discipline.  
-13. Replay, duplicate delivery, and overlapping remediation are normal and must remain safe.  
-14. Safe non-progress is preferable to unsafe duplicate-send behavior.  
-15. Singleton/ownership semantics are not relied on unless explicitly protected by authoritative generation/fencing rules.
+5. Each notification type must define exactly one canonical business dedupe key.  
+6. Legitimate resend must create a new intent; duplicate replay must not.  
+7. Dedupe must be durable enough to survive replay, redelivery, and restart.  
+8. Dedupe-hit behavior must be deterministic and must never cause a duplicate visible send.  
+9. Delivery-state transitions must resist stale/racing retry attempts.  
+10. Operational visibility of backlog, dead state, ambiguity, and duplicate suppression is part of correctness, not an optional extra.  
+11. No global ordering or distributed transaction is assumed for Notifications workflows.  
+12. Notification delivery must follow committed domain causes; it must not outrun them.  
+13. Replay/remediation workflows support recovery, but must remain bounded and rerun-safe.  
+14. Derived summaries/reports are not canonical delivery truth.  
+15. Important derived outputs must follow candidate-before-publication discipline.  
+16. Safe non-progress is preferable to unsafe duplicate-send behavior.  
+17. Singleton/ownership semantics are not relied on unless explicitly protected by authoritative generation/fencing rules.
