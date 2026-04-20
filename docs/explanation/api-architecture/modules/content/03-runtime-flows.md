@@ -1,17 +1,20 @@
 # Content — Runtime Flows (V1)
 
 This module supports arc42 scenarios:
+
 - Scenario 1: create draft and publish
 - Scenario 2: unpublish with reason
 
 Related:
+
 - `../../../../architecture/arc42/04-runtime-view-v1.md`
 - `../../../../architecture/arc42/13-transactions-and-consistency-v1.md`
-- `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
-- `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../architecture/arc42/16-batch-processing-and-derived-data-v1.md`
 - `../../../../architecture/arc42/17-dataflow-and-batch-workflows-v1.md`
+- `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
+- `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../decisions/adr-0013-outbox-and-delivery-semantics-v1.md`
+- `../../../../decisions/adr-0020-timeout-retry-and-failure-detection-policy-v1.md`
 - `../../../../decisions/adr-0027-stream-processing-and-derived-state-policy-v1.md`
 - `../../../../decisions/adr-0028-consumer-idempotency-replay-and-rebuild-policy-v1.md`
 
@@ -22,17 +25,21 @@ Related:
 Content primarily participates in three runtime lanes:
 
 ### A) Synchronous truth lane
+
 Used for:
+
 - create draft
-- update draft
+- update article content
 - publish / unpublish
 - archive / restore
-- edit history / revision append
+- revision append
 - lifecycle legality enforcement
 - authoritative visibility changes
 
 ### B) Async side-effect and derived-state lane
+
 Used for:
+
 - audit ingestion
 - SEO reactions
 - notifications
@@ -41,176 +48,251 @@ Used for:
 - future search/index updates
 
 ### C) Batch / replay / reconciliation support lane
+
 Used for:
+
 - resyncing downstream derived state from Content truth
 - replay/reconciliation when downstream consumers lag or fail
 - bounded rebuild support for read models, SEO-serving artifacts, search artifacts, or reporting outputs that depend on Content truth
 
-**Rule:** Content owns truth and visibility.  
+### Core runtime rules
+
+**Rule:** Content owns lifecycle and visibility truth.  
 Batch/rebuild workflows may depend on Content truth, but they do not replace or redefine it.
 
-**Rule:** Content success is defined by **truth commit**, not by downstream completion.
+**Rule:** Content success is defined by **truth commit**.  
+When async side effects are required, success means:
+- Content truth committed
+- async intent/outbox committed
+
+It does **not** mean:
+- audit is already queryable
+- SEO is already refreshed
+- notifications are already sent
+- projections/caches are already caught up
 
 **Rule:** Content-derived async processing is assumed **at-least-once**.  
 Duplicates, retries, replay, and out-of-order delivery for the same article version must be tolerated safely downstream.
 
 ---
 
-## Flow A — Create draft → Publish (governance boundary)
+## Flow A — Create draft → Publish
 
 ### Goal
+
 Move an article from draft to public truth safely and durably.
 
 ### Sync path
-1. Admin calls `POST /admin/content/articles` to create Draft.
+
+1. Admin calls `POST /api/v1/admin/content/articles` to create `Draft`.
 2. Authorization enforces create policy.
-3. Content persists Draft with metadata.
+3. Content persists draft truth and initializes article version.
 
-4. Admin calls `PUT /admin/content/articles/{id}` to update draft.
-5. Content persists updates and creates an edit history entry.
+4. Admin calls `PUT /api/v1/admin/content/articles/{articleId}` to update draft content.
+5. Content validates update legality and freshness.
+6. Content persists article updates and appends revision/history entry according to policy.
 
-6. Admin calls `POST /admin/content/articles/{id}:publish`.
-7. Authorization enforces publish policy.
-8. Content validates lifecycle transition and sets `PublishedAt` and `Status=Published`.
-9. Content increments per-article `Version`.
-10. Content writes Outbox in the same transaction.
+7. Admin calls `POST /api/v1/admin/content/articles/{articleId}:publish`.
+8. Authorization enforces publish policy.
+9. Content validates lifecycle transition.
+10. Content sets `Status = Published` and `PublishedAt`.
+11. Content increments per-article `Version`.
+12. Content writes Outbox in the same transaction.
+
+### Async event emitted
+
+Content emits:
+
+- `Content.ArticlePublished`
+
+### Event semantics
+
+- emitted only after truth commit
+- carries stable `MessageId`
+- downstream consumers should use:
+  - `MessageId` for message-level dedupe
+  - `(ArticleId, Version)` for ordering-sensitive apply logic
+- replayed or duplicated `Content.ArticlePublished` must not produce duplicate harmful effects
 
 ### Async side effects
-11. Content emits `ArticlePublished`.
-12. Audit ingests and records publish action (eventual).
-13. SEO reacts to ensure slug/canonical/meta correctness or refresh derived serving artifacts (eventual).
-14. Notifications may send new-article notifications (optional, eventual).
-15. Future reading/search projections may update from the same event stream.
 
-### Runtime stream semantics
-- `ArticlePublished` is a **truth-following event**, not an independent truth source.
-- Downstream handlers should use:
-  - `MessageId` for dedupe
-  - `(ArticleId, Version)` for ordering-sensitive apply logic
-- Replayed or duplicated `ArticlePublished` must not produce duplicate harmful effects.
+13. Audit ingests and records publish action *(eventual)*.
+14. SEO reacts to ensure slug/canonical/meta correctness or refresh derived serving artifacts *(eventual)*.
+15. Notifications may send new-article notifications *(optional, eventual)*.
+16. Future reading/search projections may update from the same event stream.
 
 ### Failure modes
-- Audit ingestion fails: publish still succeeds; backlog/lag observable; retries idempotent.
-- SEO processing delayed: article readable; SEO or serving artifacts may lag temporarily (policy-defined).
-- Notifications fail: publish succeeds; retries must not duplicate emails.
-- Broker/outbox publish delayed: truth remains committed; downstream recovery happens through retry.
-- Older/stale Content-derived event arrives after newer version downstream: consumer must reject stale apply or resync from truth.
+
+- audit ingestion fails:
+  - publish still succeeds
+  - backlog/lag must be observable
+  - retries must be idempotent
+- SEO processing delayed:
+  - article truth is already public
+  - SEO or serving artifacts may lag temporarily by policy
+- notifications fail:
+  - publish succeeds
+  - retries must not duplicate emails
+- broker/outbox publish delayed:
+  - truth remains committed
+  - downstream recovery happens through retry
+- older/stale content-derived event arrives after newer version downstream:
+  - consumer must reject stale apply or resync from truth
 
 ### Batch / rebuild hooks
-- If downstream derived systems lag or miss updates, bounded replay/reconciliation workflows may later:
-  - detect missing derived effects
-  - rebuild candidate derived output from Content truth
-  - publish repaired output safely where needed
+
+If downstream derived systems lag or miss updates, bounded replay/reconciliation workflows may later:
+
+- detect missing derived effects
+- rebuild candidate derived output from Content truth
+- publish repaired output safely where needed
 
 ### Runtime rules
-- Content truth defines whether an article is publicly visible.
-- Publish does not wait for derived serving state to catch up.
-- Derived serving lag is acceptable only if truth-safe fallback preserves correctness.
+
+- Content truth defines whether an article is publicly visible
+- publish does not wait for derived serving state to catch up
+- derived serving lag is acceptable only if truth-safe fallback preserves correctness
 
 ---
 
 ## Flow B — Unpublish with reason
 
 ### Goal
+
 Remove an article from public visibility immediately at the truth boundary.
 
 ### Sync path
-1. Admin calls `POST /admin/content/articles/{id}:unpublish` with reason.
+
+1. Admin calls `POST /api/v1/admin/content/articles/{articleId}:unpublish` with reason.
 2. Authorization enforces unpublish policy.
-3. Content validates transition and sets article to non-public state immediately; records reason.
-4. Content increments per-article `Version`.
-5. Content writes Outbox in the same transaction.
+3. Content validates transition legality.
+4. Content sets article to non-public lifecycle state immediately and records reason.
+5. Content increments per-article `Version`.
+6. Content writes Outbox in the same transaction.
+
+### Async event emitted
+
+Content emits:
+
+- `Content.ArticleUnpublished`
+
+### Event semantics
+
+- ordering-sensitive for downstream serving/search/SEO behavior
+- carries stable `MessageId`
+- downstream consumers must not allow an older publish version to re-expose the article after unpublish
+- consumers should prefer version-aware apply or truth resync over arrival-order trust
 
 ### Async side effects
-6. Content emits `ArticleUnpublished`.
-7. Audit records action and reason (eventual).
-8. SEO reacts to ensure non-indexable behavior or removal of derived serving artifacts (eventual).
-9. Future reading/search projections may remove or mark content non-public.
 
-### Runtime stream semantics
-- `ArticleUnpublished` is ordering-sensitive.
-- Downstream handlers must not allow an older publish version to re-expose the article after unpublish.
-- Consumers should prefer version-aware update or truth resync over arrival-order trust.
+7. Audit records action and reason *(eventual)*.
+8. SEO reacts to ensure non-indexable behavior or removal of derived serving artifacts *(eventual)*.
+9. Reading/search projections may remove or mark content non-public *(eventual)*.
 
 ### Failure modes
-- Audit/SEO delay must not re-expose content publicly.
-- Public Query must filter unpublished content by source of truth.
-- Stale route/cache/projection may exist temporarily, but must lose to Content truth visibility checks.
-- Replay of old publish event after unpublish must not resurrect visibility in a derived store.
+
+- audit/SEO delay must not re-expose content publicly
+- public read must filter unpublished content by source of truth or truth-backed visibility check
+- stale route/cache/projection may exist temporarily, but must lose to Content truth visibility checks
+- replay of old publish event after unpublish must not resurrect visibility in a derived store
 
 ### Batch / rebuild hooks
-- Reconciliation workflows may later:
-  - detect stale derived outputs still referencing now-non-public content
-  - generate bounded repair candidates
-  - repair derived state without touching Content truth
+
+Reconciliation workflows may later:
+
+- detect stale derived outputs still referencing now-non-public content
+- generate bounded repair candidates
+- repair derived state without touching Content truth
 
 ### Runtime rules
-- Unpublish takes effect **immediately at the truth boundary**.
-- Async lag may affect derived serving freshness, not truth visibility correctness.
-- If derived state is uncertain, safe fallback or safe negative response beats stale confidence.
+
+- unpublish takes effect **immediately at the truth boundary**
+- async lag may affect derived serving freshness, not truth visibility correctness
+- if derived state is uncertain, safe fallback or safe negative response beats stale confidence
 
 ---
 
-## Flow C — Update draft with revision history
+## Flow C — Update article with revision history
 
 ### Goal
-Persist new editorial truth for a draft while preserving edit history.
+
+Persist new editorial truth while preserving append-only history.
 
 ### Sync path
-1. Admin edits a draft.
+
+1. Admin edits an article according to lifecycle policy.
 2. Content validates edit command and freshness.
 3. Content updates article truth.
 4. Content appends revision/history entry according to policy.
-5. Content updates `Version` where required by concurrency model.
+5. Content updates `Version` where required by the concurrency model.
 
 ### Failure modes
-- Stale edit submission: conflict / optimistic concurrency reject.
-- History append failure inside the same transaction: whole write fails, preserving consistency.
-- External side effects are not required for success.
-- Replay/retry of the same update command must not create hidden duplicate revision history if command-level idempotency is used by policy.
+
+- stale edit submission:
+  - conflict / optimistic concurrency reject
+- history append failure inside the same transaction:
+  - whole write fails, preserving consistency
+- external side effects are not required for success
+- replay/retry of the same update command must not create hidden duplicate revision history if command-level idempotency is used by policy
 
 ### Rules
-- History is append-only by intent.
-- Old revisions must not be silently rewritten.
-- Draft update correctness does not depend on downstream systems.
-- If draft-edit-derived projections exist later, they remain downstream and non-authoritative.
+
+- history is append-only by intent
+- old revisions must not be silently rewritten
+- revision history is historical content evidence, not current live truth
+- update correctness does not depend on downstream systems
+- if draft/article-derived projections exist later, they remain downstream and non-authoritative
 
 ---
 
 ## Flow D — Archive / Restore (if enabled)
 
 ### Goal
+
 Move content into or out of archival state safely without confusing public visibility rules.
 
 ### Sync path
+
 1. Admin calls archive/restore action.
 2. Authorization enforces policy.
 3. Content validates lifecycle legality.
 4. Content updates truth state and metadata.
 5. Content increments `Version` and writes Outbox if downstream effects are needed.
 
+### Async events (if enabled by lifecycle policy)
+
+Content may emit:
+
+- `Content.ArticleArchived`
+- `Content.ArticleRestored`
+
 ### Async side effects
-6. Content may emit lifecycle event for downstream serving, reporting, or audit consumers.
-7. Derived stores may update later to reflect archive/restore behavior.
+
+6. Audit may record lifecycle action.
+7. Derived stores may later update to reflect archive/restore behavior.
 
 ### Failure modes
-- Repeated equivalent command should converge safely as no-op or documented conflict.
-- Downstream lag must not weaken Content truth.
-- Out-of-order derived updates must not move archived content back into active serving state incorrectly.
+
+- repeated equivalent command should converge safely as no-op or documented conflict
+- downstream lag must not weaken Content truth
+- out-of-order derived updates must not move archived content back into active serving state incorrectly
 
 ### Rules
-- Archive/restore remains a truth-bound lifecycle decision.
-- Derived outputs may lag, but lifecycle truth remains authoritative.
-- Version-aware downstream processing is preferred when archive/restore affects serving behavior.
+
+- archive/restore remains a truth-bound lifecycle decision
+- derived outputs may lag, but lifecycle truth remains authoritative
+- version-aware downstream processing is preferred when archive/restore affects serving behavior
 
 ---
 
 ## Flow E — Downstream replay / resync from Content truth
 
 ### Goal
+
 Support bounded recovery when downstream modules missed or delayed Content-derived side effects.
 
 ### Typical workflow shape
+
 1. Select bounded Content truth input:
    - article window
    - changed-since-version/checkpoint scope
@@ -222,6 +304,7 @@ Support bounded recovery when downstream modules missed or delayed Content-deriv
 5. Record completion and cleanup.
 
 ### Typical uses
+
 - SEO rebuild or route reconciliation
 - reading projection repair
 - search/index repair
@@ -229,49 +312,55 @@ Support bounded recovery when downstream modules missed or delayed Content-deriv
 - governance/reporting consistency checks
 
 ### Rules
-- Content truth is the input authority.
-- Replay/reconciliation outputs are derived artifacts, not Content truth.
-- Partial recovery output must not be mistaken for complete active derived state.
-- Replay jobs must be bounded and rerun-safe.
-- If downstream state is too uncertain, full rebuild from Content truth is preferred over fragile partial mutation.
+
+- Content truth is the input authority
+- replay/reconciliation outputs are derived artifacts, not Content truth
+- partial recovery output must not be mistaken for complete active derived state
+- replay jobs must be bounded and rerun-safe
+- if downstream state is too uncertain, full rebuild from Content truth is preferred over fragile partial mutation
 
 ---
 
 ## Flow F — Truth-safe serving under derived lag
 
 ### Goal
+
 Ensure Content visibility correctness survives stale cache, stale projection, or delayed downstream consumers.
 
 ### Typical runtime shape
+
 1. Public-facing route or projection attempts to serve published content.
 2. Derived route/projection/cache may answer quickly if fresh enough.
 3. If derived state is missing, stale, or inconsistent:
-   - runtime falls back to Content truth or truth-backed visibility check.
+   - runtime falls back to Content truth or a truth-backed visibility check exposed to the serving path
 4. Response is served only if Content truth allows public visibility.
 
 ### Examples
+
 - stale SEO artifact still references now-unpublished content
 - lagging read projection has not yet removed archived content
 - search/index result references content whose truth visibility changed
 
 ### Rules
-- Content truth wins over derived serving state.
-- Derived state may accelerate, but must not silently override lifecycle truth.
-- Safe not-found or safe degradation is preferred over incorrect public exposure.
+
+- Content truth wins over derived serving state
+- derived state may accelerate, but must not silently override lifecycle truth
+- safe not-found or safe degradation is preferred over incorrect public exposure
 
 ---
 
 ## Summary
 
-Content runtime in V1 is governed by ten rules:
+Content runtime in V1 is governed by the following rules:
 
 1. Content owns lifecycle and visibility truth.  
 2. Publish/unpublish commit truth + version + outbox atomically.  
-3. Side effects are downstream and eventual.  
-4. Content-derived async processing is at-least-once; duplicates and replay are normal.  
-5. Unpublish must take effect immediately at the truth boundary.  
-6. Downstream consumers should use `MessageId` and `(ArticleId, Version)` semantics where relevant.  
-7. Edit history is append-only by intent.  
-8. Derived serving lag must lose to Content truth visibility checks.  
-9. Batch/replay/reconciliation workflows may depend on Content truth, but do not redefine it.  
-10. Derived-state recovery must remain bounded, observable, rerun-safe, and safe under replay.
+3. Successful writes mean truth committed, and where needed, async intent/outbox committed.  
+4. Side effects are downstream and eventual.  
+5. Content-derived async processing is at-least-once; duplicates and replay are normal.  
+6. Unpublish must take effect immediately at the truth boundary.  
+7. Downstream consumers should use `MessageId` and `(ArticleId, Version)` semantics where relevant.  
+8. Edit history is append-only by intent and does not replace current truth.  
+9. Derived serving lag must lose to Content truth visibility checks.  
+10. Batch/replay/reconciliation workflows may depend on Content truth, but do not redefine it.  
+11. Derived-state recovery must remain bounded, observable, rerun-safe, and safe under replay.
