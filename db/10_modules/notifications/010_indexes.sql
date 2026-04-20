@@ -18,6 +18,7 @@
       * admin ops inspection
       * correlation-based troubleshooting
       * privacy-safer recipient lookups
+      * auth-critical priority-aware delivery
 */
 
 SET NOCOUNT ON;
@@ -67,27 +68,28 @@ GO
    1) [notifications].[OutboxMessage]
    ========================================================= */
 
--- Main worker pull path:
--- Pending / Failed / DeadLetter candidates ordered by retry schedule and occurrence time.
+-- Main outbox publisher pull path:
+-- Pending / Failed candidates ordered by priority, retry schedule, and stable time/identity.
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE [name] = N'IX_OutboxMessage_Status_NextRetryAt_OccurredAt'
+    WHERE [name] = N'IX_OutboxMessage_Status_Priority_NextRetryAt_OccurredAt'
       AND [object_id] = OBJECT_ID(N'[notifications].[OutboxMessage]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_OutboxMessage_Status_NextRetryAt_OccurredAt]
+    CREATE NONCLUSTERED INDEX [IX_OutboxMessage_Status_Priority_NextRetryAt_OccurredAt]
     ON [notifications].[OutboxMessage]
     (
         [Status] ASC,
+        [Priority] ASC,
         [NextRetryAt] ASC,
         [OccurredAt] ASC
     )
     INCLUDE
     (
+        [OutboxMessageId],
         [MessageId],
-        [Priority],
         [EventType],
         [AggregateType],
         [AggregateId],
@@ -97,11 +99,11 @@ BEGIN
         [PublishedAt]
     );
 
-    PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_NextRetryAt_OccurredAt]';
+    PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_Priority_NextRetryAt_OccurredAt]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_NextRetryAt_OccurredAt]';
+    PRINT N'Index exists: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_Priority_NextRetryAt_OccurredAt]';
 END
 GO
 
@@ -152,6 +154,7 @@ BEGIN
     ON [notifications].[OutboxMessage] ([OccurredAt] ASC)
     INCLUDE
     (
+        [OutboxMessageId],
         [MessageId],
         [EventType],
         [AggregateType],
@@ -249,6 +252,7 @@ BEGIN
     )
     INCLUDE
     (
+        [OutboxMessageId],
         [MessageId],
         [EventType],
         [AggregateType],
@@ -269,24 +273,26 @@ GO
    2) [notifications].[EmailDelivery]
    ========================================================= */
 
--- Main delivery queue / retry worker path.
+-- Main delivery queue / retry worker path with priority awareness.
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE [name] = N'IX_EmailDelivery_Status_NextRetryAt_CreatedAt'
+    WHERE [name] = N'IX_EmailDelivery_Status_Priority_NextRetryAt_CreatedAt'
       AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_Status_NextRetryAt_CreatedAt]
+    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_Status_Priority_NextRetryAt_CreatedAt]
     ON [notifications].[EmailDelivery]
     (
         [Status] ASC,
+        [Priority] ASC,
         [NextRetryAt] ASC,
         [CreatedAt] ASC
     )
     INCLUDE
     (
+        [EmailDeliveryId],
         [MessageId],
         [RecipientUserId],
         [ToEmailHash],
@@ -297,11 +303,11 @@ BEGIN
         [Provider]
     );
 
-    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_Status_NextRetryAt_CreatedAt]';
+    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_Status_Priority_NextRetryAt_CreatedAt]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_Status_NextRetryAt_CreatedAt]';
+    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_Status_Priority_NextRetryAt_CreatedAt]';
 END
 GO
 
@@ -393,7 +399,8 @@ BEGIN
         [AttemptCount],
         [SentAt],
         [LastErrorCode],
-        [LastErrorClass]
+        [LastErrorClass],
+        [Priority]
     );
 
     PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_TemplateKey_CreatedAt]';
@@ -426,7 +433,8 @@ BEGIN
         [Status],
         [AttemptCount],
         [RecipientUserId],
-        [ToEmailHash]
+        [ToEmailHash],
+        [Priority]
     );
 
     PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_CorrelationId_CreatedAt]';
@@ -454,7 +462,8 @@ BEGIN
         [TemplateKey],
         [Status],
         [RecipientUserId],
-        [ToEmailHash]
+        [ToEmailHash],
+        [Priority]
     );
 
     PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_SentAt]';
@@ -487,7 +496,8 @@ BEGIN
         [AttemptCount],
         [LastErrorCode],
         [LastErrorClass],
-        [CorrelationId]
+        [CorrelationId],
+        [Priority]
     );
 
     PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_Status_LastAttemptAt]';
@@ -519,6 +529,7 @@ BEGIN
     )
     INCLUDE
     (
+        [MessageId],
         [AttemptNumber],
         [Outcome],
         [IsAmbiguous],
@@ -533,6 +544,42 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_EmailDeliveryId_StartedAt]';
+END
+GO
+
+-- Direct message-level investigation support.
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDeliveryAttempt_MessageId_StartedAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDeliveryAttempt]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDeliveryAttempt_MessageId_StartedAt]
+    ON [notifications].[EmailDeliveryAttempt]
+    (
+        [MessageId] ASC,
+        [StartedAt] ASC
+    )
+    INCLUDE
+    (
+        [EmailDeliveryId],
+        [AttemptNumber],
+        [Outcome],
+        [IsAmbiguous],
+        [FinishedAt],
+        [ProviderMessageId],
+        [ProviderErrorCode],
+        [ErrorClass],
+        [CorrelationId]
+    );
+
+    PRINT N'Created index: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_MessageId_StartedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDeliveryAttempt].[IX_EmailDeliveryAttempt_MessageId_StartedAt]';
 END
 GO
 
@@ -553,6 +600,7 @@ BEGIN
     )
     INCLUDE
     (
+        [MessageId],
         [EmailDeliveryId],
         [AttemptNumber],
         [IsAmbiguous],
@@ -585,6 +633,7 @@ BEGIN
     )
     INCLUDE
     (
+        [MessageId],
         [EmailDeliveryId],
         [AttemptNumber],
         [Outcome],
