@@ -3,8 +3,8 @@
 Base path (Admin): `/api/v1/admin/authz`
 
 > All endpoints in this module are **Admin APIs** and require Bearer auth + explicit policies.  
-> Governance-changing endpoints must emit audit/governance events asynchronously through the standard post-commit path.  
-> Success of a governance write means **Authorization truth committed**. It does **not** mean downstream audit, cache invalidation, or derived materialization has already completed.
+> Governance-changing endpoints commit Authorization truth first and emit async intent through the standard post-commit path.  
+> Success of a governance write means **Authorization truth committed**. It does **not** mean downstream audit, cache invalidation, derived materialization, or optional notification side effects have already completed.
 
 ---
 
@@ -84,7 +84,22 @@ For admin governance flows:
 - post-write reads must reconcile from authoritative Authorization truth
 - immediate confirmation must not depend on audit visibility, cache freshness, or downstream derived outputs
 
-### 2.4 Idempotency posture
+### 2.4 Async intent posture
+
+Governance-changing writes should:
+
+- commit Authorization truth first
+- emit async intent through outbox/post-commit flow
+- use stable async identity and correlation metadata according to platform conventions
+
+Downstream consumers must be assumed to be:
+
+- at-least-once
+- duplicate-tolerant
+- replay-tolerant
+- potentially delayed
+
+### 2.5 Idempotency posture
 
 The following operations should converge safely under retry:
 
@@ -111,8 +126,8 @@ List roles.
 
 - `page`
 - `pageSize`
-- `q` (optional)
-- `sort` allowlist (default `name`)
+- `q` *(optional)*
+- `sort` allowlist *(default: `name`)*
 
 #### Response (200)
 
@@ -147,8 +162,8 @@ Create a role.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
 #### Request
 
@@ -181,9 +196,9 @@ Update role metadata.
 
 #### Headers
 
-- `Idempotency-Key` (recommended for retry-prone clients)
-- `If-Match` (optional, if optimistic concurrency is used)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended for retry-prone clients)*
+- `If-Match` *(optional, if optimistic concurrency is used)*
+- `X-Correlation-Id` *(optional)*
 
 #### Request
 
@@ -214,8 +229,8 @@ Activate a role.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
 #### Response (200)
 
@@ -237,8 +252,8 @@ Deactivate a role.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
 #### Response (200)
 
@@ -267,8 +282,8 @@ List permissions.
 
 - `page`
 - `pageSize`
-- `q` (optional)
-- `sort` allowlist (default `name`)
+- `q` *(optional)*
+- `sort` allowlist *(default: `name`)*
 
 #### Response (200)
 
@@ -304,8 +319,8 @@ Create a permission.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
 #### Request
 
@@ -338,9 +353,9 @@ Update permission metadata.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `If-Match` (optional)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `If-Match` *(optional)*
+- `X-Correlation-Id` *(optional)*
 
 #### Request
 
@@ -372,8 +387,8 @@ Activate a permission.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
 #### Response (200)
 
@@ -394,8 +409,8 @@ Deactivate a permission.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
 #### Response (200)
 
@@ -452,8 +467,8 @@ Grant a permission to a role.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
 #### Request
 
@@ -498,6 +513,7 @@ Revoke a permission from a role.
 #### Rules
 
 - revoke must converge safely under retry
+- repeated equivalent revoke should converge to stable no-op or stable success semantics
 - revocation truth must take effect immediately in authoritative evaluation
 - downstream lag must not preserve stale effective authority on critical paths
 - replay of older grant-derived state must not resurrect revoked authority
@@ -542,8 +558,8 @@ Assign a role to a user.
 
 #### Headers
 
-- `Idempotency-Key` (recommended)
-- `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
 #### Request
 
@@ -565,7 +581,7 @@ Assign a role to a user.
 
 - assignment is idempotent
 - only one active `(UserId, RoleId)` truth relationship may exist at a time
-- repeated equivalent assignment must not create duplicate rows or duplicate harmful side effects
+- repeated equivalent assignment must not create duplicate rows or duplicate harmful downstream effects
 - success does not wait for downstream audit completion
 
 ### `DELETE /users/{userId}/roles/{roleId}`
@@ -593,7 +609,7 @@ Revoke a role from a user.
 
 ### `GET /users/{userId}/effective-permissions`
 
-Return the effective permissions currently derived for a user from authoritative truth.
+Return the effective permissions currently computed from authoritative governance truth for a user.
 
 #### Response (200)
 
@@ -628,7 +644,7 @@ Return the effective permissions currently derived for a user from authoritative
 In V1, policy evaluation primarily happens inside the API component via authorization handlers and middleware.  
 If an evaluation endpoint is needed for diagnostics:
 
-### `POST /evaluate` (optional)
+### `POST /evaluate` *(optional)*
 
 #### Request
 
@@ -660,7 +676,7 @@ If an evaluation endpoint is needed for diagnostics:
 #### Rules
 
 - diagnostic only unless explicitly promoted to a supported product surface
-- the endpoint must not trust client-supplied roles as authoritative truth
+- the endpoint must not trust client-supplied roles or permissions as authoritative truth
 - if evaluation uses cache/materialized inputs, uncertainty on security-sensitive paths must fail closed or fall back to authoritative truth
 - response must not leak unnecessary policy internals
 
@@ -675,7 +691,7 @@ These endpoints should be treated as:
 - truth-first
 - idempotent where logically applicable
 - safe under client retry
-- non-blocking with respect to audit/reporting side effects
+- non-blocking with respect to audit, reporting, cache, or optional notification side effects
 
 ### Recommended endpoint behavior
 
@@ -683,7 +699,16 @@ These endpoints should be treated as:
 - repeated revoke → stable success or no-op semantics
 - repeated activate/deactivate → stable success or no-op semantics
 - uniqueness or invariant violations → deterministic conflict or documented error response
-- timeout ambiguity → reconcile from truth, not from audit, cache, or report state
+- timeout ambiguity → reconcile from truth, not from audit, cache, notification, or report state
+
+### Downstream replay posture
+
+Downstream consumers/materializations must remain safe under:
+
+- duplicate governance events
+- delayed governance events
+- replayed governance events
+- out-of-order derived updates where fresher truth already exists
 
 ### Read-your-writes expectation
 
@@ -711,7 +736,7 @@ Admin endpoints are not public, but they still need protection against:
 Useful signals include:
 
 - bursty repeated assigns, grants, revokes, activates, or deactivates
-- unusual no-op or idempotent hit rates
+- unusual no-op or idempotent-hit rates
 - spikes in `403`, `409`, or `5xx`
 - repeated operations against the same user, role, or permission scope
 
@@ -725,8 +750,14 @@ Authorization APIs do not guarantee that, at response time:
 - cache invalidation has already propagated
 - a derived policy snapshot has already been rebuilt
 - a governance report already reflects the change
+- an optional downstream notification side effect has already completed
 
 They guarantee:
 
 - Authorization truth committed successfully
 - downstream side effects were emitted through the standard async path where applicable
+
+### 11.1 Ownership rule
+
+Authorization does not depend on Notifications for core governance truth.  
+If governance-related notifications exist, they are optional downstream consumers governed by policy, not synchronous prerequisites for success.
