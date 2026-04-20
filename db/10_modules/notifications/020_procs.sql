@@ -11,9 +11,10 @@
 
   Notes:
   - Broker is transport only; SQL remains durable truth.
-  - Outbox is durable async intent.
+  - Outbox is durable async intent / shared outbox artifact in V1.
   - EmailDelivery is canonical delivery-state truth.
   - Mutating procedures return @AffectedRows OUTPUT where appropriate.
+  - Provider timeout is ambiguous; retry/remediation must remain safe.
 */
 
 SET ANSI_NULLS ON;
@@ -226,7 +227,7 @@ BEGIN
     )
     UPDATE o
     SET
-        [Status] = 'Processing',
+        [Status] = 'Publishing',
         [LastAttemptAt] = @Now,
         [UpdatedAt] = @Now
     OUTPUT
@@ -276,7 +277,7 @@ BEGIN
         [LastErrorClass] = NULL,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [OutboxMessageId] = @OutboxMessageId
-      AND [Status] IN ('Pending', 'Processing', 'Failed');
+      AND [Status] IN ('Publishing', 'Failed');
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
@@ -304,13 +305,13 @@ BEGIN
         [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [OutboxMessageId] = @OutboxMessageId
-      AND [Status] IN ('Pending', 'Processing', 'Failed');
+      AND [Status] IN ('Publishing', 'Failed');
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
 GO
 
-CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_MarkDeadLetter]
+CREATE OR ALTER PROCEDURE [notifications].[OutboxMessage_MarkDead]
     @OutboxMessageId BIGINT,
     @LastError NVARCHAR(2000) = NULL,
     @LastErrorCode NVARCHAR(100) = NULL,
@@ -323,7 +324,7 @@ BEGIN
 
     UPDATE [notifications].[OutboxMessage]
     SET
-        [Status] = 'DeadLetter',
+        [Status] = 'Dead',
         [AttemptCount] = [AttemptCount] + 1,
         [NextRetryAt] = NULL,
         [LastError] = @LastError,
@@ -331,7 +332,7 @@ BEGIN
         [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [OutboxMessageId] = @OutboxMessageId
-      AND [Status] IN ('Pending', 'Processing', 'Failed');
+      AND [Status] IN ('Publishing', 'Failed');
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
@@ -354,7 +355,7 @@ BEGIN
         [LastErrorClass] = NULL,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [OutboxMessageId] = @OutboxMessageId
-      AND [Status] IN ('Failed', 'DeadLetter', 'Processing');
+      AND [Status] IN ('Failed', 'Dead', 'Publishing');
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
@@ -460,6 +461,7 @@ CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_Insert]
     @TemplateVersion    INT = NULL,
     @Subject            NVARCHAR(300) = NULL,
     @Provider           VARCHAR(30) = 'smtp',
+    @Priority           TINYINT = 5,
     @CorrelationId      NVARCHAR(100) = NULL,
     @EmailDeliveryId    BIGINT OUTPUT
 AS
@@ -478,6 +480,7 @@ BEGIN
         [TemplateVersion],
         [Subject],
         [Provider],
+        [Priority],
         [CorrelationId]
     )
     VALUES
@@ -491,6 +494,7 @@ BEGIN
         @TemplateVersion,
         @Subject,
         @Provider,
+        @Priority,
         @CorrelationId
     );
 
@@ -515,6 +519,7 @@ BEGIN
         [TemplateVersion],
         [Subject],
         [Provider],
+        [Priority],
         [ProviderMessageId],
         [Status],
         [AttemptCount],
@@ -553,6 +558,7 @@ BEGIN
         [TemplateVersion],
         [Subject],
         [Provider],
+        [Priority],
         [ProviderMessageId],
         [Status],
         [AttemptCount],
@@ -591,6 +597,7 @@ BEGIN
         [TemplateVersion],
         [Subject],
         [Provider],
+        [Priority],
         [ProviderMessageId],
         [Status],
         [AttemptCount],
@@ -646,6 +653,7 @@ BEGIN
             [TemplateVersion],
             [Subject],
             [Provider],
+            [Priority],
             [ProviderMessageId],
             [Status],
             [AttemptCount],
@@ -683,6 +691,7 @@ BEGIN
         [TemplateVersion],
         [Subject],
         [Provider],
+        [Priority],
         [ProviderMessageId],
         [Status],
         [AttemptCount],
@@ -737,6 +746,7 @@ BEGIN
                 AND [NextRetryAt] <= @Now
             )
         ORDER BY
+            [Priority] ASC,
             CASE WHEN [NextRetryAt] IS NULL THEN [CreatedAt] ELSE [NextRetryAt] END ASC,
             [CreatedAt] ASC,
             [EmailDeliveryId] ASC
@@ -757,6 +767,7 @@ BEGIN
         INSERTED.[TemplateVersion],
         INSERTED.[Subject],
         INSERTED.[Provider],
+        INSERTED.[Priority],
         INSERTED.[ProviderMessageId],
         INSERTED.[Status],
         INSERTED.[AttemptCount],
@@ -940,7 +951,7 @@ BEGIN
         [LastErrorClass] = NULL,
         [UpdatedAt] = SYSUTCDATETIME()
     WHERE [EmailDeliveryId] = @EmailDeliveryId
-      AND [Status] IN ('Failed', 'Dead', 'Ambiguous', 'Suppressed', 'Sending');
+      AND [Status] IN ('Failed', 'Dead', 'Ambiguous', 'Sending');
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
@@ -952,6 +963,7 @@ GO
 
 CREATE OR ALTER PROCEDURE [notifications].[EmailDeliveryAttempt_Insert]
     @EmailDeliveryId BIGINT,
+    @MessageId CHAR(26),
     @AttemptNumber INT,
     @StartedAt DATETIME2(3) = NULL,
     @FinishedAt DATETIME2(3) = NULL,
@@ -974,6 +986,7 @@ BEGIN
     INSERT INTO [notifications].[EmailDeliveryAttempt]
     (
         [EmailDeliveryId],
+        [MessageId],
         [AttemptNumber],
         [StartedAt],
         [FinishedAt],
@@ -988,6 +1001,7 @@ BEGIN
     VALUES
     (
         @EmailDeliveryId,
+        @MessageId,
         @AttemptNumber,
         @StartedAt,
         @FinishedAt,
@@ -1013,6 +1027,7 @@ BEGIN
     SELECT
         [EmailDeliveryAttemptId],
         [EmailDeliveryId],
+        [MessageId],
         [AttemptNumber],
         [StartedAt],
         [FinishedAt],
@@ -1026,6 +1041,33 @@ BEGIN
         [CreatedAt]
     FROM [notifications].[EmailDeliveryAttempt]
     WHERE [EmailDeliveryId] = @EmailDeliveryId
+    ORDER BY [AttemptNumber] ASC, [EmailDeliveryAttemptId] ASC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [notifications].[EmailDeliveryAttempt_SelectByMessageId]
+    @MessageId CHAR(26)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        [EmailDeliveryAttemptId],
+        [EmailDeliveryId],
+        [MessageId],
+        [AttemptNumber],
+        [StartedAt],
+        [FinishedAt],
+        [Outcome],
+        [IsAmbiguous],
+        [ProviderMessageId],
+        [ProviderErrorCode],
+        [ErrorClass],
+        [ErrorDetail],
+        [CorrelationId],
+        [CreatedAt]
+    FROM [notifications].[EmailDeliveryAttempt]
+    WHERE [MessageId] = @MessageId
     ORDER BY [AttemptNumber] ASC, [EmailDeliveryAttemptId] ASC;
 END;
 GO
