@@ -3,13 +3,15 @@
 This module supports arc42 Scenario 6: governance action + audit recorded.
 
 Related:
+
 - `../../../../architecture/arc42/04-runtime-view-v1.md`
 - `../../../../architecture/arc42/13-transactions-and-consistency-v1.md`
-- `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
-- `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../architecture/arc42/16-batch-processing-and-derived-data-v1.md`
 - `../../../../architecture/arc42/17-dataflow-and-batch-workflows-v1.md`
+- `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
+- `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../decisions/adr-0013-outbox-and-delivery-semantics-v1.md`
+- `../../../../decisions/adr-0020-timeout-retry-and-failure-detection-policy-v1.md`
 - `../../../../decisions/adr-0027-stream-processing-and-derived-state-policy-v1.md`
 - `../../../../decisions/adr-0028-consumer-idempotency-replay-and-rebuild-policy-v1.md`
 
@@ -17,141 +19,225 @@ Related:
 
 ## Runtime posture in V1
 
-Authorization primarily participates in two runtime lanes:
+Authorization primarily participates in three runtime lanes:
 
 ### A) Synchronous truth lane
+
 Used for:
+
 - assign/revoke role
 - grant/revoke permission
 - create/update governance reference data where supported
-- evaluate policy against current truth
+- activate/deactivate roles and permissions
+- evaluate policy against current authoritative governance truth
 
 ### B) Async side-effect lane
+
 Used for:
+
 - audit emission and ingestion
 - optional cache invalidation / policy materialization updates
 - optional downstream governance reporting/update signals
-
-Authorization may also participate in a lighter third lane:
+- optional governance-related notification consumers if introduced by policy
 
 ### C) Batch / reconciliation / reporting lane
+
 Used for:
+
 - reconcile user-role / role-permission mappings
 - detect orphan or inconsistent governance artifacts
 - produce governance summaries and reports
 - rebuild derived authorization materializations or snapshots if introduced
 - cleanup workflow-private temporary state
 
-**Rule:** Authorization owns governance truth.  
-Audit, cache/materialization, and governance reports are downstream or derived.
+### Core runtime rules
 
-**Rule:** Authorization success is defined by **truth commit**, not by downstream audit/reporting completion.
+**Rule:** Authorization owns governance truth.  
+Audit, cache/materialization, notifications, and governance reports are downstream or derived.
+
+**Rule:** Authorization success is defined by **truth commit**.  
+When async side effects are required, success means:
+- governance truth committed
+- async intent/outbox committed
+
+It does **not** mean:
+- audit is already queryable
+- cache invalidation already propagated
+- materialized views already rebuilt
+- optional downstream notifications already completed
 
 **Rule:** Authorization-derived async processing is assumed **at-least-once**.  
 Duplicates, replay, lag, and worker restart must be tolerated safely.
+
+**Rule:** Security-sensitive governance decisions must reconcile from authoritative truth, not from stale derived views or downstream visibility.
 
 ---
 
 ## Flow A — Admin assigns role to user
 
 ### Goal
-Apply governance truth immediately and make it enforceable without waiting for audit.
 
-### Flow
+Apply governance truth immediately and make it enforceable without waiting for downstream audit or materialization.
+
+### Truth flow
+
 1. Admin calls `POST /api/v1/admin/authz/users/{userId}/roles`.
-2. API enforces policy (e.g., `authz:manage`).
-3. Authorization persists assignment (idempotent).
-4. Authorization emits `UserRoleAssigned` event through Outbox.
-5. Audit worker ingests event and records append-only audit entry.
+2. API enforces required policy.
+3. Authorization validates assignment legality.
+4. Authorization persists assignment idempotently.
+5. Authorization writes async intent/outbox in the same truth transaction.
+
+### Async event emitted
+
+Authorization emits:
+
+- `Authz.UserRoleAssigned`
+
+### Event semantics
+
+- emitted only after truth commit
+- carries stable `MessageId`
+- minimal and privacy-aware
+- safe under duplicate delivery, replay, and worker restart
+
+### Downstream flow
+
+6. Audit worker ingests the governance event.
+7. Optional downstream cache/materialization refreshers ingest it.
+8. Optional downstream governance notifications, if policy introduces them, remain subordinate side effects.
 
 ### Runtime stream semantics
-- `UserRoleAssigned` is a truth-following governance event.
-- Duplicate delivery must not create duplicate audit evidence.
-- Replay after worker crash or backlog recovery is normal.
-- Governance truth is already active before downstream audit catches up.
+
+- `Authz.UserRoleAssigned` is a truth-following governance event
+- duplicate delivery must not create duplicate audit evidence
+- replay after worker crash or backlog recovery is normal
+- governance truth is already active before downstream audit or materialization catches up
 
 ### Failure modes
-- If audit ingestion is delayed: change still applies immediately.
-- Backlog/lag must be observable; retries must be idempotent.
-- Timeout during assignment: reconcile from Authorization truth, not from audit visibility.
-- Duplicate request: converge to one final truth outcome.
-- Duplicate event delivery: must not create duplicate audit rows or duplicate derived governance outputs.
+
+- audit ingestion delayed:
+  - assignment still applies immediately
+- cache/materialization lag:
+  - truth-backed evaluation remains authoritative
+- timeout during assignment:
+  - reconcile from Authorization truth, not from audit visibility
+- duplicate request:
+  - converge to one final truth outcome
+- duplicate event delivery:
+  - must not create duplicate audit rows or duplicate harmful derived outputs
 
 ### Batch / reconciliation hooks
-- governance reconciliation jobs may later verify:
-  - expected assignment presence
-  - orphan or inconsistent mappings
-  - drift between truth and derived policy views
+
+Governance reconciliation jobs may later verify:
+
+- expected assignment presence
+- orphan or inconsistent mappings
+- drift between truth and derived governance views
 
 ### Runtime rules
-- Authorization truth defines the effective assignment.
-- Audit is evidence, not enforcement.
-- Derived policy views may lag, but protected evaluation paths must remain truth-safe.
+
+- Authorization truth defines the effective assignment
+- audit is evidence, not enforcement
+- derived policy views may lag, but protected evaluation paths must remain truth-safe
 
 ---
 
 ## Flow B — Admin grants permission to role
 
 ### Goal
+
 Change role-permission truth safely and make policy evaluation observe it immediately.
 
-### Flow
+### Truth flow
+
 1. Admin calls `POST /api/v1/admin/authz/roles/{roleId}/permissions`.
-2. Policy enforced.
-3. Grant persisted (idempotent).
-4. Emit `RolePermissionGranted`.
-5. Audit ingests and records.
+2. Required policy is enforced.
+3. Authorization validates legality and protection rules.
+4. Grant is persisted idempotently.
+5. Authorization writes async intent/outbox in the same truth transaction.
+
+### Async event emitted
+
+Authorization emits:
+
+- `Authz.RolePermissionGranted`
 
 ### Runtime stream semantics
-- `RolePermissionGranted` is a canonical governance event after truth commit.
-- Duplicate grant requests and duplicate downstream deliveries must converge safely.
-- Replay is allowed and expected under at-least-once delivery.
+
+- `Authz.RolePermissionGranted` is a canonical governance event after truth commit
+- duplicate grant requests and duplicate downstream deliveries must converge safely
+- logically unchanged truth must not create duplicate harmful downstream effects
+- replay is normal under at-least-once delivery
 
 ### Failure modes
-- If audit ingestion is delayed: grant still applies immediately.
-- Duplicate grant request must not create duplicate rows or duplicate meaningful side effects.
-- Timeout ambiguity must be reconciled from Authorization truth.
-- Derived permission snapshots may lag, but truth must remain authoritative.
-- Replay/remediation must not create duplicate derived permission materialization facts if those are introduced later.
+
+- audit ingestion delayed:
+  - grant still applies immediately
+- duplicate grant request:
+  - must not create duplicate truth rows or duplicate meaningful downstream effects
+- timeout ambiguity:
+  - reconcile from Authorization truth
+- derived permission snapshots lag:
+  - truth remains authoritative
+- replay/remediation:
+  - must not create duplicate derived permission materialization facts
 
 ### Batch / reconciliation hooks
-- bounded jobs may verify:
-  - mapping integrity
-  - expected permission coverage
-  - drift between truth and derived snapshots/materializations
+
+Bounded jobs may verify:
+
+- mapping integrity
+- expected permission coverage
+- drift between truth and derived snapshots/materializations
 
 ### Runtime rules
-- Role-permission truth is effective at commit time.
-- Audit/reporting lag does not weaken the grant.
-- Derived governance outputs remain subordinate to Authorization truth.
+
+- role-permission truth is effective at commit time
+- audit/reporting lag does not weaken the grant
+- derived governance outputs remain subordinate to Authorization truth
 
 ---
 
 ## Flow C — Revoke role / revoke permission
 
 ### Goal
+
 Remove governance authority deterministically and have evaluation reflect the change immediately.
 
-### Flow
+### Truth flow
+
 1. Admin calls revoke endpoint.
-2. Policy enforced.
+2. Required policy is enforced.
 3. Authorization validates legality and persists revoke.
-4. Authorization emits `UserRoleRevoked` or `RolePermissionRevoked`.
-5. Audit records change asynchronously.
+4. Authorization writes async intent/outbox in the same truth transaction.
+
+### Async event emitted
+
+Authorization emits one of:
+
+- `Authz.UserRoleRevoked`
+- `Authz.RolePermissionRevoked`
 
 ### Runtime stream semantics
-- Revocation is ordering-sensitive for enforcement, but not globally ordered across the whole system.
-- Downstream consumers must not let older grant views override fresher revoke truth.
-- Replay of older governance events must not reintroduce already-revoked authority in derived outputs.
+
+- revocation is ordering-sensitive for enforcement, but not globally ordered across the whole system
+- downstream consumers must not let older grant views override fresher revoke truth
+- replay of older governance-derived state must not reintroduce already-revoked authority in derived outputs
 
 ### Failure modes
-- Delayed audit must not delay governance truth.
-- Repeated revoke should converge safely as no-op or documented conflict.
-- Stale cache/materialization must not continue granting dangerous access on critical paths.
-- Old replayed grant-derived state must not silently resurrect revoked authority in derived views.
 
-### Rules
-- revoke must be truth-first
+- delayed audit:
+  - must not delay governance truth
+- repeated revoke:
+  - should converge safely as no-op or stable documented result
+- stale cache/materialization:
+  - must not continue granting dangerous access on critical paths
+- old replayed grant-derived state:
+  - must not resurrect revoked authority in derived views
+
+### Runtime rules
+
+- revoke is truth-first
 - fail-closed posture applies if derived state is stale or uncertain
 - downstream consumers must treat governance truth as authoritative
 
@@ -160,34 +246,48 @@ Remove governance authority deterministically and have evaluation reflect the ch
 ## Flow D — Policy evaluation
 
 ### Goal
+
 Make authorization decisions against current enforceable governance truth.
 
-### Flow
+### Evaluation flow
+
 1. API receives a protected request.
 2. Authorization evaluates policy using current truth and allowed evaluation inputs.
 3. If caches/materializations are available and trustworthy by policy, they may accelerate evaluation.
-4. If evaluation state is stale or uncertain on a security-sensitive path, fail closed or fall back to authoritative truth.
-5. Decision is returned to API layer.
+4. If evaluation state is stale or uncertain on a security-sensitive path:
+   - fall back to authoritative truth
+   - or fail closed
+5. Decision is returned to the API layer.
 
 ### Failure modes
-- Cache stale or unavailable: do not grant by guess; fail closed or read authoritative truth.
-- Timeout/ambiguity in derived path: do not convert uncertainty into allow.
-- Derived materialization lag must not weaken protected admin/governance paths.
-- Replay lag in derived authorization snapshots must not be treated as proof of current permission truth.
+
+- cache stale or unavailable:
+  - do not grant by guess
+  - fail closed or read authoritative truth
+- timeout/ambiguity in derived path:
+  - do not convert uncertainty into allow
+- derived materialization lag:
+  - must not weaken protected admin/governance paths
+- replay lag in derived authorization snapshots:
+  - must not be treated as proof of current permission truth
 
 ### Runtime rules
-- Evaluation correctness is truth-first.
-- Derived policy views are acceleration only.
-- Security-sensitive uncertainty must resolve to deny/fail-closed, not optimistic allow.
+
+- evaluation correctness is truth-first
+- derived policy views are acceleration only
+- client-supplied roles/permissions are never authoritative truth
+- security-sensitive uncertainty resolves to deny/fail-closed, not optimistic allow
 
 ---
 
 ## Flow E — Governance reconciliation / reporting workflow
 
 ### Goal
+
 Detect drift, produce reports, and repair derived governance outputs without redefining truth.
 
 ### Typical workflow shape
+
 1. Select bounded governance truth input:
    - users/roles/permissions window
    - changed-since checkpoint
@@ -199,6 +299,7 @@ Detect drift, produce reports, and repair derived governance outputs without red
 6. Record completion and cleanup.
 
 ### Typical outputs
+
 - governance summaries
 - drift reports
 - orphan mapping reports
@@ -206,6 +307,7 @@ Detect drift, produce reports, and repair derived governance outputs without red
 - policy materialization repair candidates
 
 ### Rules
+
 - truth remains in Authorization store
 - reports/snapshots are derived
 - partial candidate output must not masquerade as authoritative governance truth
@@ -213,18 +315,24 @@ Detect drift, produce reports, and repair derived governance outputs without red
 - if a full rebuild is safer than fragile incremental repair, rebuild is preferred
 
 ### Failure modes
-- Report/materialization lag: governance truth remains correct.
-- Candidate publication failure: previous active derived output remains if one exists.
-- Overlapping replay/reconciliation runs: must remain safe under dedupe, bounded input, and cutover rules.
+
+- report/materialization lag:
+  - governance truth remains correct
+- candidate publication failure:
+  - previous active derived output remains if one exists
+- overlapping replay/reconciliation runs:
+  - must remain safe under dedupe, bounded input, and cutover rules
 
 ---
 
 ## Flow F — Truth-safe governance under derived lag
 
 ### Goal
+
 Ensure security-sensitive decisions remain correct even when derived authorization outputs lag.
 
 ### Typical runtime shape
+
 1. Protected request arrives.
 2. Evaluation may consult a cache/materialized view first if policy allows.
 3. If derived state is missing, stale, or uncertain:
@@ -233,29 +341,33 @@ Ensure security-sensitive decisions remain correct even when derived authorizati
 4. Final decision is returned only after truth-safe evaluation.
 
 ### Examples
+
 - stale role snapshot still shows revoked role
 - delayed permission materialization misses a recent grant
 - replay/backfill has not yet repaired a derived governance view
 - cache invalidation lag leaves old role memberships visible in a convenience layer
 
 ### Rules
-- Authorization truth wins over derived governance views.
-- Security-sensitive uncertainty must not become implicit allow.
-- Safe deny/fail-closed beats stale convenience every time.
+
+- Authorization truth wins over derived governance views
+- security-sensitive uncertainty must not become implicit allow
+- safe deny/fail-closed beats stale convenience every time
 
 ---
 
 ## Summary
 
-Authorization runtime in V1 is governed by ten rules:
+Authorization runtime in V1 is governed by the following rules:
 
-1. Governance mutations commit to Authorization truth first.  
-2. Audit is downstream evidence and must not block governance success.  
-3. Assignment/grant/revoke commands must converge deterministically.  
-4. Authorization-derived async processing is at-least-once; duplicates and replay are normal.  
-5. Policy evaluation must prefer authoritative truth over stale convenience.  
-6. If uncertain on a security-sensitive path, fail closed.  
-7. Replay of older governance-derived state must not weaken newer truth.  
-8. Reconciliation/reporting workflows may depend on governance truth, but do not redefine it.  
-9. Derived governance outputs must be bounded, observable, and safe under rerun.  
-10. Safe deny and truth fallback are preferable to stale allow.
+1. Governance mutations commit Authorization truth first.  
+2. Successful writes mean truth committed, and where needed, async intent/outbox committed.  
+3. Audit is downstream evidence and must not block governance success.  
+4. Assignment/grant/revoke commands must converge deterministically.  
+5. Authorization-derived async processing is at-least-once; duplicates and replay are normal.  
+6. Governance events use stable `MessageId` and are emitted only after truth commit.  
+7. Policy evaluation must prefer authoritative truth over stale convenience.  
+8. If uncertain on a security-sensitive path, fail closed.  
+9. Replay of older governance-derived state must not weaken newer truth.  
+10. Reconciliation/reporting workflows may depend on governance truth, but do not redefine it.  
+11. Derived governance outputs must be bounded, observable, and safe under rerun.  
+12. Safe deny and truth fallback are preferable to stale allow.
