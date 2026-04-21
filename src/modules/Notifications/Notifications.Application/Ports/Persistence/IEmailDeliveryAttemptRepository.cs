@@ -1,6 +1,6 @@
 using Notifications.Domain.Entities;
 
-namespace Notifications.Application.Ports.Persistence.Write;
+namespace Notifications.Application.Ports.Persistence;
 
 public interface IEmailDeliveryAttemptRepository
 {

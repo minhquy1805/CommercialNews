@@ -4,24 +4,56 @@ Content exposes primarily **Admin APIs**. Public read APIs live in the Reading m
 
 Base path (Admin): `/api/v1/admin/content`
 
-> All endpoints in this module require Bearer auth + explicit authorization policies.
-> Governance actions must emit audit events (async ingestion).
-> Success of Content write APIs is defined by **Content truth commit**, not by downstream completion of audit, SEO, notifications, caches, or projections.
+> All endpoints in this module require Bearer auth + explicit authorization policies.  
+> Content write APIs commit Content truth first and emit async intent through the standard post-commit path where required.  
+> Success of Content write APIs is defined by **Content truth commit**. It does **not** mean downstream audit, SEO, notifications, caches, or projections have already completed.
 
 ---
 
-## 1) Articles (admin)
+## 1) API posture in V1
 
-### POST `/articles`
+Content V1 focuses on the synchronous content-truth lane.
+
+### Included in V1
+
+- article draft creation and update
+- article lifecycle actions
+  - publish
+  - unpublish
+  - archive
+  - restore
+- edit history reads
+- category management
+- tag management
+
+### Optional in V1
+
+- archive / restore if lifecycle policy enables them
+- detailed revision diff endpoint
+- soft-delete flows if policy requires them
+
+### Not primary in V1
+
+- public content read APIs
+- synchronous SEO/notification/cache update inside content write request
+- reporting/projection APIs as truth-owning surfaces
+
+**Rule:** Content owns lifecycle and visibility truth for content objects. Downstream consumers follow committed Content truth; they do not define it.
+
+---
+
+## 2) Articles (admin)
+
+### `POST /articles`
 
 Create a draft article.
 
-**Headers**
+#### Headers
 
-* `Idempotency-Key` (recommended for safe retry under ambiguous client/network outcomes)
-* `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended for safe retry under ambiguous client/network outcomes)*
+- `X-Correlation-Id` *(optional)*
 
-**Request**
+#### Request
 
 ```json
 {
@@ -34,7 +66,7 @@ Create a draft article.
 }
 ```
 
-**Response (201)**
+#### Response (201)
 
 ```json
 {
@@ -45,46 +77,53 @@ Create a draft article.
 }
 ```
 
----
+#### Rules
 
-### GET `/articles`
+- create success means Content truth committed
+- duplicate retries should converge safely by idempotency policy
+- downstream audit, SEO, or notification effects must not block create success
 
-List articles for admin (includes non-public states).
+### `GET /articles`
 
-**Query**
+List articles for admin, including non-public states.
 
-* `page`, `pageSize`
-* `status` (optional): `Draft | Published | Unpublished | Archived`
-* `categoryId` (optional)
-* `tagId` (optional)
-* `sort` (optional, allowlist): `-updatedAt`, `-publishedAt`, `title`
+#### Query
 
-**Response (200)**
+- `page`, `pageSize`
+- `status` *(optional; must align with current lifecycle truth)*
+- `categoryId` *(optional)*
+- `tagId` *(optional)*
+- `sort` *(optional, allowlist)*: `-updatedAt`, `-publishedAt`, `title`
+
+#### Response (200)
 
 Standard list envelope.
 
-**Notes**
+#### Rules
 
-* If unpublish semantics later change by ADR, keep this enum aligned with lifecycle truth.
+- returned lifecycle states must remain aligned with current Content lifecycle policy
+- undocumented sort fields must be rejected deterministically
+- admin reads for immediate post-write confirmation should prefer authoritative Content truth
 
----
+### `GET /articles/{articleId}`
 
-### GET `/articles/{articleId}`
+Admin detail view.
 
-Admin detail view (may include edit metadata and current lifecycle/version state).
+#### Rules
 
----
+- may include edit metadata and current lifecycle/version state
+- must reflect authoritative Content truth for current lifecycle visibility state
 
-### PUT `/articles/{articleId}`
+### `PUT /articles/{articleId}`
 
-Update draft/article fields (policy-driven: allow updates in Draft only, or limited updates in Published).
+Update article fields.
 
-**Headers**
+#### Headers
 
-* `If-Match` or version-based concurrency header (recommended, if adopted by API policy)
-* `X-Correlation-Id` (optional)
+- `If-Match` or version-based concurrency header *(recommended, if adopted by API policy)*
+- `X-Correlation-Id` *(optional)*
 
-**Request**
+#### Request
 
 ```json
 {
@@ -97,7 +136,7 @@ Update draft/article fields (policy-driven: allow updates in Draft only, or limi
 }
 ```
 
-**Response (200)**
+#### Response (200)
 
 ```json
 {
@@ -106,24 +145,25 @@ Update draft/article fields (policy-driven: allow updates in Draft only, or limi
 }
 ```
 
-**Notes**
+#### Rules
 
-* Must create an edit-history entry (who/when/what changed) by policy.
-* Should enforce stale-write protection via version/rowversion/compare-and-set semantics according to module policy.
-* Update success is defined by Content truth commit only.
+- update policy must define whether changes are:
+  - draft-only
+  - or partially allowed in published state
+- must create edit-history entry by policy
+- should enforce stale-write protection via version, rowversion, or compare-and-set semantics
+- update success is defined by Content truth commit only
 
----
-
-### POST `/articles/{articleId}:publish`
+### `POST /articles/{articleId}:publish`
 
 Publish an article.
 
-**Headers**
+#### Headers
 
-* `Idempotency-Key` (recommended)
-* `X-Correlation-Id` (optional)
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
-**Request**
+#### Request
 
 ```json
 {
@@ -131,7 +171,7 @@ Publish an article.
 }
 ```
 
-**Response (200)**
+#### Response (200)
 
 ```json
 {
@@ -142,27 +182,26 @@ Publish an article.
 }
 ```
 
-**Rules**
+#### Rules
 
-* Lifecycle transition must be valid.
-* Truth change + per-article version advancement + outbox record must commit atomically.
-* Must emit `ArticlePublished` event for downstream async consumers (Audit, SEO, Notifications, future projections).
-* Must not block on async processing.
-* Repeated equivalent publish requests should converge safely as no-op or documented idempotent success.
-* Public visibility truth is determined by Content, not by downstream projection freshness.
+- lifecycle transition must be valid
+- truth change + per-article version advancement + outbox record must commit atomically
+- must emit `Content.ArticlePublished`
+- emitted async message should carry stable `MessageId`
+- must not block on downstream async processing
+- repeated equivalent publish requests should converge safely as no-op or documented idempotent success
+- public visibility truth is determined by Content, not by downstream projection freshness
 
----
+### `POST /articles/{articleId}:unpublish`
 
-### POST `/articles/{articleId}:unpublish`
+Unpublish an article and record a reason.
 
-Unpublish an article and record a reason (mandatory).
+#### Headers
 
-**Headers**
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
-* `Idempotency-Key` (recommended)
-* `X-Correlation-Id` (optional)
-
-**Request**
+#### Request
 
 ```json
 {
@@ -171,7 +210,7 @@ Unpublish an article and record a reason (mandatory).
 }
 ```
 
-**Response (200)**
+#### Response (200)
 
 ```json
 {
@@ -181,27 +220,26 @@ Unpublish an article and record a reason (mandatory).
 }
 ```
 
-**Rules**
+#### Rules
 
-* Reason is mandatory.
-* Unpublish semantics (Draft vs separate state) is an ADR decision; keep consistent.
-* Truth change + per-article version advancement + outbox record must commit atomically.
-* Must emit `ArticleUnpublished` event.
-* Public read must stop showing it immediately based on Content truth, even if downstream derived state lags.
-* Repeated equivalent unpublish requests should converge safely as no-op or documented idempotent success.
+- `reason` is mandatory
+- lifecycle semantics must remain aligned with current Content ADR/policy
+- truth change + per-article version advancement + outbox record must commit atomically
+- must emit `Content.ArticleUnpublished`
+- emitted async message should carry stable `MessageId`
+- public read must stop showing it immediately based on Content truth, even if downstream derived state lags
+- repeated equivalent unpublish requests should converge safely as no-op or documented idempotent success
 
----
+### `POST /articles/{articleId}:archive`
 
-### POST `/articles/{articleId}:archive`
+Archive an article *(optional V1)*.
 
-Archive an article (optional V1; if enabled, defines non-public state).
+#### Headers
 
-**Headers**
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
-* `Idempotency-Key` (recommended)
-* `X-Correlation-Id` (optional)
-
-**Response (200)**
+#### Response (200)
 
 ```json
 {
@@ -211,24 +249,24 @@ Archive an article (optional V1; if enabled, defines non-public state).
 }
 ```
 
-**Rules**
+#### Rules
 
-* Archive is a truth-bound lifecycle action.
-* If downstream derived state lags, archive truth still wins for visibility correctness.
-* Repeated equivalent archive requests should converge safely.
+- archive is a truth-bound lifecycle action
+- if enabled, archive semantics must remain aligned with lifecycle policy
+- if downstream derived state lags, archive truth still wins for visibility correctness
+- repeated equivalent archive requests should converge safely
+- if archive emits an async event, it must remain post-commit and non-blocking
 
----
+### `POST /articles/{articleId}:restore`
 
-### POST `/articles/{articleId}:restore`
+Restore an archived article *(optional V1)*.
 
-Restore from archived (optional V1).
+#### Headers
 
-**Headers**
+- `Idempotency-Key` *(recommended)*
+- `X-Correlation-Id` *(optional)*
 
-* `Idempotency-Key` (recommended)
-* `X-Correlation-Id` (optional)
-
-**Response (200)**
+#### Response (200)
 
 ```json
 {
@@ -238,33 +276,34 @@ Restore from archived (optional V1).
 }
 ```
 
-**Rules**
+#### Rules
 
-* Restore semantics must remain aligned with lifecycle policy.
-* Repeated equivalent restore requests should converge safely as no-op or documented idempotent success.
+- restore semantics must remain aligned with lifecycle policy
+- repeated equivalent restore requests should converge safely as no-op or documented idempotent success
+- if restore emits async events, they remain post-commit and non-blocking
+
+### `DELETE /articles/{articleId}`
+
+Delete article according to policy.
+
+#### Rules
+
+- delete/soft-delete semantics must remain consistent with lifecycle truth
+- V1 should prefer a clearly documented posture:
+  - soft delete
+  - or archive as the normal non-public terminal path
+- downstream lag must not re-expose deleted or non-public content
+- if delete emits async side effects, they remain post-commit and non-blocking
 
 ---
 
-### DELETE `/articles/{articleId}`
+## 3) Edit history (admin)
 
-Delete is policy-driven (prefer soft delete if required).
-If supported, must be audited and must not leak drafts publicly.
-
-**Rules**
-
-* Delete/soft-delete semantics must stay consistent with lifecycle truth.
-* Downstream lag must not re-expose deleted/non-public content.
-* If this operation emits async side effects, they remain post-commit and non-blocking.
-
----
-
-## 2) Edit history (admin)
-
-### GET `/articles/{articleId}/revisions`
+### `GET /articles/{articleId}/revisions`
 
 List edit history for an article.
 
-**Response (200)**
+#### Response (200)
 
 ```json
 {
@@ -285,79 +324,95 @@ List edit history for an article.
 }
 ```
 
-**Notes**
+#### Rules
 
-* Revision history is append-only by intent.
-* Historical revisions do not replace current Content truth.
+- revision history is append-only by intent
+- revisions are historical evidence/content history
+- historical revisions do not replace current Content truth
+
+### `GET /articles/{articleId}/revisions/{revisionId}`
+
+Get a specific revision snapshot or diff.
+
+#### Rules
+
+- exact snapshot/diff behavior is policy-defined
+- revision reads must not be confused with current live lifecycle truth
 
 ---
 
-### GET `/articles/{articleId}/revisions/{revisionId}`
-
-Get a specific revision snapshot/diff (policy-defined).
-
----
-
-## 3) Categories (admin)
+## 4) Categories (admin)
 
 Base: `/categories`
 
-### GET `/categories`
+### `GET /categories`
 
 List categories.
 
-### POST `/categories`
+### `POST /categories`
 
 Create category.
 
-### PUT `/categories/{categoryId}`
+### `PUT /categories/{categoryId}`
 
 Update category.
 
-### DELETE `/categories/{categoryId}`
+### `DELETE /categories/{categoryId}`
 
-Delete category (policy-defined; avoid orphan references).
+Delete category according to policy.
+
+#### Rules
+
+- category naming/uniqueness rules must be documented and enforced consistently
+- delete semantics must avoid orphan references or invalid content truth
+- if category changes trigger downstream effects, those remain post-commit and non-blocking
 
 ---
 
-## 4) Tags (admin)
+## 5) Tags (admin)
 
 Base: `/tags`
 
-### GET `/tags`
+### `GET /tags`
 
 List tags.
 
-### POST `/tags`
+### `POST /tags`
 
 Create tag.
 
-### PUT `/tags/{tagId}`
+### `PUT /tags/{tagId}`
 
 Update tag.
 
-### DELETE `/tags/{tagId}`
+### `DELETE /tags/{tagId}`
 
-Delete tag (policy-defined; avoid orphan references).
+Delete tag according to policy.
 
----
+#### Rules
 
-## 5) Versioning and conventions
-
-* All endpoints use `/api/v1`.
-* List responses use `{ items[], pageInfo{} }`.
-* Errors use the standard error envelope.
-* High-impact lifecycle actions should expose or align with Content version semantics where practical.
-* Async downstream completion is not part of API success semantics for Content writes.
+- tag naming/uniqueness rules must be documented and enforced consistently
+- delete semantics must avoid orphan references or invalid content truth
+- if tag changes trigger downstream effects, those remain post-commit and non-blocking
 
 ---
 
-## 6) Rate limiting (policy-level)
+## 6) Versioning and conventions
 
-Admin endpoints are protected by authz; still apply protection against:
+- All endpoints use `/api/v1`.
+- List responses use `{ items[], pageInfo{} }`.
+- Errors use the standard error envelope.
+- High-impact lifecycle actions should expose or align with Content version semantics where practical.
+- Async downstream completion is not part of API success semantics for Content writes.
 
-* accidental loops
-* compromised admin tokens
-* repeated ambiguous retries on high-impact lifecycle actions
+---
 
-Rate limits are implementation-defined; monitor anomalies.
+## 7) Rate limiting (policy-level)
+
+Admin endpoints are protected by authz, but still require protection against:
+
+- accidental loops
+- compromised admin tokens
+- repeated ambiguous retries on high-impact lifecycle actions
+
+Rate limits are implementation-defined; anomalies should be monitored.

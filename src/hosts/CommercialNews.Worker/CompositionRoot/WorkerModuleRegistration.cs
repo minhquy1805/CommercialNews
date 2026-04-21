@@ -21,7 +21,7 @@ public static class WorkerModuleRegistration
         services.Configure<NotificationWorkerOptions>(
             configuration.GetSection("Workers:Notifications"));
 
-        services.AddHostedService<NotificationOutboxPollingService>();
+        // services.AddHostedService<NotificationOutboxPollingService>();
 
         return services;
     }

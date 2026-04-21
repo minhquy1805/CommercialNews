@@ -5,15 +5,14 @@ using Notifications.Application.Contracts.EmailDeliveries.Requests;
 using Notifications.Application.Contracts.EmailDeliveries.Responses;
 using Notifications.Application.Errors;
 using Notifications.Application.Models.QueryModels;
-using Notifications.Application.Ports.Persistence.Read;
-using Notifications.Domain.Enums;
+using Notifications.Application.Ports.Persistence;
+using Notifications.Application.Validation.EmailDeliveries.GetEmailDeliveries;
 
 namespace Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveries;
 
 /// <summary>
 /// Returns a paged admin-facing list of email deliveries for operations and troubleshooting.
-/// This is a read-only use case, so it does not open a transaction.
-/// It validates filter input, queries the read repository, and maps the result to the response contract.
+/// This is a read-only use case and does not open a transaction.
 /// </summary>
 public sealed class GetEmailDeliveriesUseCase : IGetEmailDeliveriesUseCase
 {
@@ -30,75 +29,14 @@ public sealed class GetEmailDeliveriesUseCase : IGetEmailDeliveriesUseCase
         GetEmailDeliveriesRequest request,
         CancellationToken cancellationToken = default)
     {
+        Error? validationError = GetEmailDeliveriesValidator.Validate(request);
+        if (validationError is not null)
+        {
+            return Result<GetEmailDeliveriesResponse>.Failure(validationError);
+        }
+
         try
         {
-            if (request.Page <= 0)
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.ValidationFailed);
-            }
-
-            if (request.PageSize <= 0)
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.ValidationFailed);
-            }
-
-            if (request.PageSize > 200)
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.ValidationFailed);
-            }
-
-            if (request.RecipientUserId.HasValue && request.RecipientUserId.Value <= 0)
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.EmailDelivery.RecipientUserIdInvalid);
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.TemplateKey) &&
-                !NotificationTemplateKey.IsValid(request.TemplateKey))
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.EmailDelivery.TemplateKeyInvalid);
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.Status) &&
-                !EmailDeliveryStatus.IsValid(request.Status))
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.EmailDelivery.StatusInvalid);
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.ToEmailHash) &&
-                request.ToEmailHash.Trim().Length > 64)
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.EmailDelivery.ToEmailHashTooLong);
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.CorrelationId) &&
-                request.CorrelationId.Trim().Length > 100)
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.EmailDelivery.CorrelationIdTooLong);
-            }
-
-            if (!string.IsNullOrWhiteSpace(request.MessageId) &&
-                request.MessageId.Trim().Length > 26)
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.EmailDelivery.MessageIdTooLong);
-            }
-
-            if (request.FromCreatedAt.HasValue &&
-                request.ToCreatedAt.HasValue &&
-                request.FromCreatedAt.Value >= request.ToCreatedAt.Value)
-            {
-                return Result<GetEmailDeliveriesResponse>.Failure(
-                    NotificationsErrors.ValidationFailed);
-            }
-
             EmailDeliveryListQuery query = new()
             {
                 Page = request.Page,
@@ -145,7 +83,8 @@ public sealed class GetEmailDeliveriesUseCase : IGetEmailDeliveriesUseCase
             EmailDeliveryId = source.EmailDeliveryId,
             MessageId = source.MessageId,
             RecipientUserId = source.RecipientUserId,
-            ToEmail = source.ToEmail,
+            MaskedToEmail = source.MaskedToEmail,
+            ToEmailHash = source.ToEmailHash,
             TemplateKey = source.TemplateKey,
             TemplateVersion = source.TemplateVersion,
             Provider = source.Provider,
@@ -168,10 +107,9 @@ public sealed class GetEmailDeliveriesUseCase : IGetEmailDeliveriesUseCase
 
     private static Error MapPersistenceException(PersistenceException exception)
     {
-        return exception.Code switch
-        {
-            _ => NotificationsErrors.ValidationFailed
-        };
+        _ = exception;
+
+        return NotificationsErrors.DependencyUnavailable;
     }
 
     private static string? NormalizeOptional(string? value)

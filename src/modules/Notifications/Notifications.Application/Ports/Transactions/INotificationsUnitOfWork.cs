@@ -1,4 +1,4 @@
-namespace Notifications.Application.Ports.Persistence.Transactions;
+namespace Notifications.Application.Ports.Transactions;
 
 public interface INotificationsUnitOfWork
 {

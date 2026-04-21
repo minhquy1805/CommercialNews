@@ -8,7 +8,9 @@ public sealed class EmailDeliveryListItemResponse
 
     public long? RecipientUserId { get; init; }
 
-    public string? ToEmail { get; init; }
+    public string? MaskedToEmail { get; init; }
+
+    public string? ToEmailHash { get; init; }
 
     public string TemplateKey { get; init; } = string.Empty;
 

@@ -4,10 +4,10 @@
   Purpose:
   - Create Notifications tables for CommercialNews V1.
   - Includes:
-      * [notifications].[OutboxMessage]      -> durable async intent
-      * [notifications].[EmailDelivery]      -> canonical delivery-state truth
-      * [notifications].[EmailDeliveryAttempt] -> attempt-level operational history
-      * [notifications].[EmailRateLimitLog]  -> optional investigation log
+      * [notifications].[OutboxMessage]         -> durable async intent / shared outbox artifact
+      * [notifications].[EmailDelivery]         -> canonical delivery-state truth
+      * [notifications].[EmailDeliveryAttempt]  -> attempt-level operational history
+      * [notifications].[EmailRateLimitLog]     -> optional investigation log
 
   Design principles:
   - Core flows write truth + outbox only; delivery is async.
@@ -16,6 +16,11 @@
       2) business-intent dedupe
   - Never store raw secrets/tokens in payloads or errors.
   - Provider timeout may be ambiguous; do not assume "not sent".
+  - Notifications owns delivery workflow truth, not upstream business truth.
+
+  Notes:
+  - [notifications].[OutboxMessage] is physically placed in the [notifications] schema in V1,
+    but semantically serves as a shared system outbox artifact.
 */
 
 SET NOCOUNT ON;
@@ -51,6 +56,7 @@ GO
 
 /* =========================================================
    1) [notifications].[OutboxMessage]
+   Shared async intent / publication artifact
    ========================================================= */
 IF OBJECT_ID(N'[notifications].[OutboxMessage]', N'U') IS NULL
 BEGIN
@@ -100,7 +106,7 @@ BEGIN
             UNIQUE ([MessageId]),
 
         CONSTRAINT [CK_OutboxMessage_Status]
-            CHECK ([Status] IN ('Pending', 'Processing', 'Published', 'Failed', 'DeadLetter')),
+            CHECK ([Status] IN ('Pending', 'Publishing', 'Published', 'Failed', 'Dead')),
 
         CONSTRAINT [CK_OutboxMessage_Priority]
             CHECK ([Priority] BETWEEN 1 AND 9),
@@ -128,6 +134,7 @@ GO
 
 /* =========================================================
    2) [notifications].[EmailDelivery]
+   Canonical delivery workflow truth
    ========================================================= */
 IF OBJECT_ID(N'[notifications].[EmailDelivery]', N'U') IS NULL
 BEGIN
@@ -149,6 +156,9 @@ BEGIN
 
         [Provider]             VARCHAR(30)          NOT NULL
             CONSTRAINT [DF_EmailDelivery_Provider] DEFAULT ('smtp'),
+
+        [Priority]             TINYINT              NOT NULL
+            CONSTRAINT [DF_EmailDelivery_Priority] DEFAULT (5),
 
         [ProviderMessageId]    NVARCHAR(200)        NULL,
 
@@ -198,6 +208,9 @@ BEGIN
         CONSTRAINT [CK_EmailDelivery_Status]
             CHECK ([Status] IN ('Queued', 'Sending', 'Sent', 'Failed', 'Dead', 'Suppressed', 'Ambiguous')),
 
+        CONSTRAINT [CK_EmailDelivery_Priority]
+            CHECK ([Priority] BETWEEN 1 AND 9),
+
         CONSTRAINT [CK_EmailDelivery_AttemptCount]
             CHECK ([AttemptCount] >= 0),
 
@@ -239,6 +252,7 @@ GO
 
 /* =========================================================
    3) [notifications].[EmailDeliveryAttempt]
+   Attempt-level operational history
    ========================================================= */
 IF OBJECT_ID(N'[notifications].[EmailDeliveryAttempt]', N'U') IS NULL
 BEGIN
@@ -246,6 +260,7 @@ BEGIN
     (
         [EmailDeliveryAttemptId] BIGINT IDENTITY(1,1) NOT NULL,
         [EmailDeliveryId]        BIGINT               NOT NULL,
+        [MessageId]              CHAR(26)             NOT NULL,
 
         [AttemptNumber]          INT                  NOT NULL,
 
@@ -277,6 +292,10 @@ BEGIN
         CONSTRAINT [FK_EmailDeliveryAttempt_EmailDelivery]
             FOREIGN KEY ([EmailDeliveryId])
             REFERENCES [notifications].[EmailDelivery]([EmailDeliveryId]),
+
+        CONSTRAINT [FK_EmailDeliveryAttempt_OutboxMessage_MessageId]
+            FOREIGN KEY ([MessageId])
+            REFERENCES [notifications].[OutboxMessage]([MessageId]),
 
         CONSTRAINT [CK_EmailDeliveryAttempt_AttemptNumber]
             CHECK ([AttemptNumber] >= 1),

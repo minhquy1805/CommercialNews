@@ -82,6 +82,11 @@ Table OutboxMessage {
   LastErrorClass varchar(30) [null]         // EmailErrorClassEnum
   ProcessedAt datetime2(3) [null]
 
+  // Claim / lease hooks to avoid naive Processing-state assumptions
+  ClaimedAt datetime2(3) [null]
+  ClaimedBy nvarchar(100) [null]
+  ProcessingLeaseUntil datetime2(3) [null]
+
   // V2 hooks
   PartitionKey nvarchar(100) [null]
   ExpiresAt datetime2(3) [null]
@@ -96,29 +101,30 @@ Table OutboxMessage {
     (OccurredAt) [name: "IX_Outbox_OccurredAt"]
     (AggregateType, AggregateId, OccurredAt) [name: "IX_Outbox_Aggregate"]
     (CorrelationId, OccurredAt) [name: "IX_Outbox_CorrelationId_OccurredAt"]
+    (ClaimedBy, ProcessingLeaseUntil) [name: "IX_Outbox_ClaimedBy_ProcessingLeaseUntil"]
   }
 
-  Note: "Durable async intent. Raw verification/reset tokens must never be stored here."
+  Note: "Durable async intent. Raw verification/reset tokens must never be stored here. Processing must use claim/lease semantics rather than naive singleton assumptions."
 }
 
 Table EmailDelivery {
   EmailDeliveryId bigint [pk, increment]
 
-  // Message-level identity
+  // Message-level identity (one outbox message / event envelope -> at most one canonical EmailDelivery row)
   MessageKey uniqueidentifier [not null]
   EventId uniqueidentifier [not null]
 
   // Business-intent dedupe (canonical harmful-duplicate protection)
   // Example:
-  // - verify-email|user:123|token:abc-hash
-  // - reset-password|user:123|token:def-hash
-  // - new-article|user:123|article:456|pubver:7
+  // - verify-email|user:u123|token:t789
+  // - reset-password|user:u123|token:r456
+  // - new-article|user:u123|article:a456|pubver:7
   BusinessDedupeKey nvarchar(300) [not null]
 
   CorrelationId nvarchar(100) [null]
 
-  RecipientUserId bigint [null]             // external ref -> Identity.UserAccount
-  ToEmail nvarchar(320) [not null]          // actual recipient (PII)
+  RecipientUserId nvarchar(100) [null]      // external ref -> Identity.UserAccount (string/public id safe)
+  ToEmail nvarchar(320) [not null]          // actual recipient (PII; never expose raw by default in admin APIs)
   ToEmailHash varchar(64) [null]            // sha-256/hex or similar for safer ops lookups
 
   TemplateKey nvarchar(80) [not null]       // VerifyEmail/ResetPassword/NewArticle
@@ -126,7 +132,7 @@ Table EmailDelivery {
   Subject nvarchar(200) [null]
 
   Provider varchar(30) [not null, default: "smtp"] // smtp/sendgrid/...
-  ProviderMessageId nvarchar(120) [null]           // V2/V1.1 helpful for ops if policy allows
+  ProviderMessageId nvarchar(120) [null]           // optional for ops if policy allows
 
   Status varchar(20) [not null, default: "Queued"] // Queued/Sending/Sent/Failed/Dead/Suppressed/Ambiguous
 
@@ -164,7 +170,7 @@ Table EmailDelivery {
     (Provider, Status, LastAttemptAt) [name: "IX_EmailDelivery_Provider_Status_LastAttemptAt"]
   }
 
-  Note: "Canonical delivery-state truth. MessageKey = message-level identity; BusinessDedupeKey = harmful-duplicate protection."
+  Note: "Canonical delivery-state truth. MessageKey = message-level identity for one canonical row per envelope. BusinessDedupeKey = harmful-duplicate protection across retry/replay. Sending is recoverable/transient, not proof of provider certainty."
 }
 
 Table EmailDeliveryAttempt {
@@ -194,13 +200,13 @@ Table EmailDeliveryAttempt {
     (IsAmbiguous, StartedAt) [name: "IX_EmailDeliveryAttempt_IsAmbiguous_StartedAt"]
   }
 
-  Note: "Attempt-level operational history. Useful for admin detail API and incident investigation."
+  Note: "Attempt-level operational history. Duplicate suppression observations may be recorded here only if explicitly modeled as non-send attempts."
 }
 
 Table EmailSuppression {
   EmailSuppressionId bigint [pk, increment]
 
-  RecipientUserId bigint [null]
+  RecipientUserId nvarchar(100) [null]
   ToEmailHash varchar(64) [not null]
 
   Reason nvarchar(120) [null]               // Bounce/Complaint/Manual/Policy/...
@@ -209,9 +215,9 @@ Table EmailSuppression {
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
   ExpiresAt datetime2(3) [null]
 
-  CreatedByUserId bigint [null]             // operator/admin if manual
+  CreatedByUserId nvarchar(100) [null]      // operator/admin if manual
   RemovedAt datetime2(3) [null]
-  RemovedByUserId bigint [null]
+  RemovedByUserId nvarchar(100) [null]
 
   CorrelationId nvarchar(100) [null]
 
@@ -220,15 +226,14 @@ Table EmailSuppression {
     (RecipientUserId, IsActive) [name: "IX_EmailSuppression_RecipientUserId_IsActive"]
   }
 
-  Note: "Optional but recommended. Supports suppressed delivery outcome and admin unsuppress operation."
+  Note: "Optional but recommended. Supports suppressed delivery outcome and admin unsuppress operation. SQL should enforce at most one active suppression row per ToEmailHash (prefer filtered unique index WHERE IsActive = 1)."
 }
 
 Table EmailRateLimitLog {
   RateLogId bigint [pk, increment]
 
-  RecipientUserId bigint [null]
+  RecipientUserId nvarchar(100) [null]
   Endpoint nvarchar(60) [not null]          // register/forgot/resend
-  ToEmail nvarchar(320) [null]
   ToEmailHash varchar(64) [null]
   IpAddress nvarchar(45) [null]
 
@@ -245,12 +250,12 @@ Table EmailRateLimitLog {
     (ToEmailHash, OccurredAt) [name: "IX_RateLog_ToEmailHash_OccurredAt"]
   }
 
-  Note: "Optional. Rate limiting remains primarily Redis/app-layer; DB log is for investigations."
+  Note: "Optional and observational only. Primary rate limiting remains app-layer/Redis; DB log supports investigations and should prefer hashed recipient identifiers."
 }
 
 // ---------- External stubs (ERD readability only) ----------
 Table IdentityUserAccount {
-  UserId bigint [pk]
+  UserId nvarchar(100) [pk]
   Note: "EXTERNAL (Identity module). Stub for ERD readability only."
 }
 
@@ -272,3 +277,7 @@ Ref: EmailRateLimitLog.RecipientUserId > IdentityUserAccount.UserId
 // 7) PayloadJson, ErrorDetail, LastError must be redacted (no raw tokens/secrets).
 // 8) Redis may be used for hot dedupe/rate limit, but durable duplicate protection lives in SQL.
 // 9) BusinessDedupeKey must be canonical and stable per notification type.
+// 10) EmailDelivery.MessageKey uniqueness means one outbox message/event envelope produces at most one canonical EmailDelivery row.
+// 11) Processing and Sending states must use claim/lease or stale-recovery rules; they are not safe permanence signals by themselves.
+// 12) Prefer filtered unique index on EmailSuppression(ToEmailHash) WHERE IsActive = 1.
+// 13) Attempt outcome -> delivery-state transition must be defined in service logic (for example Timeout may lead to Ambiguous by policy).

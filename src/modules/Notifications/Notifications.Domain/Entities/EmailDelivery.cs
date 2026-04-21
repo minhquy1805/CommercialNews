@@ -15,17 +15,11 @@ public sealed class EmailDelivery
 
     public string ToEmail { get; private set; } = null!;
 
-    public string? ToEmailHash { get; private set; }
-
     public string TemplateKey { get; private set; } = null!;
-
-    public int? TemplateVersion { get; private set; }
-
-    public string? Subject { get; private set; }
 
     public string Provider { get; private set; } = null!;
 
-    public string? ProviderMessageId { get; private set; }
+    public byte Priority { get; private set; }
 
     public string Status { get; private set; } = null!;
 
@@ -36,16 +30,6 @@ public sealed class EmailDelivery
     public DateTime? NextRetryAt { get; private set; }
 
     public DateTime? SentAt { get; private set; }
-
-    public DateTime? FailedAt { get; private set; }
-
-    public DateTime? DeadAt { get; private set; }
-
-    public DateTime? SuppressedAt { get; private set; }
-
-    public DateTime? AmbiguousAt { get; private set; }
-
-    public string? LastError { get; private set; }
 
     public string? LastErrorCode { get; private set; }
 
@@ -67,22 +51,18 @@ public sealed class EmailDelivery
         string toEmail,
         string templateKey,
         string provider,
+        byte priority,
         DateTime nowUtc,
         long? recipientUserId = null,
-        string? toEmailHash = null,
-        int? templateVersion = null,
-        string? subject = null,
         string? correlationId = null)
     {
         ValidateMessageId(messageId);
         ValidateBusinessDedupeKey(businessDedupeKey);
         ValidateRecipientUserId(recipientUserId);
         ValidateToEmail(toEmail);
-        ValidateToEmailHash(toEmailHash);
         ValidateTemplateKey(templateKey);
-        ValidateTemplateVersion(templateVersion);
-        ValidateSubject(subject);
         ValidateProvider(provider);
+        ValidatePriority(priority);
         ValidateCorrelationId(correlationId);
         ValidateNowUtc(nowUtc);
 
@@ -92,11 +72,9 @@ public sealed class EmailDelivery
             BusinessDedupeKey = NormalizeRequired(businessDedupeKey),
             RecipientUserId = recipientUserId,
             ToEmail = NormalizeRequired(toEmail),
-            ToEmailHash = NormalizeOptional(toEmailHash),
             TemplateKey = NormalizeRequired(templateKey),
-            TemplateVersion = templateVersion,
-            Subject = NormalizeOptional(subject),
             Provider = NormalizeRequired(provider),
+            Priority = priority,
             Status = EmailDeliveryStatus.Queued,
             AttemptCount = 0,
             CorrelationId = NormalizeOptional(correlationId),
@@ -111,22 +89,14 @@ public sealed class EmailDelivery
         string businessDedupeKey,
         long? recipientUserId,
         string toEmail,
-        string? toEmailHash,
         string templateKey,
-        int? templateVersion,
-        string? subject,
         string provider,
-        string? providerMessageId,
+        byte priority,
         string status,
         int attemptCount,
         DateTime? lastAttemptAt,
         DateTime? nextRetryAt,
         DateTime? sentAt,
-        DateTime? failedAt,
-        DateTime? deadAt,
-        DateTime? suppressedAt,
-        DateTime? ambiguousAt,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         string? correlationId,
@@ -144,16 +114,19 @@ public sealed class EmailDelivery
         ValidateBusinessDedupeKey(businessDedupeKey);
         ValidateRecipientUserId(recipientUserId);
         ValidateToEmail(toEmail);
-        ValidateToEmailHash(toEmailHash);
         ValidateTemplateKey(templateKey);
-        ValidateTemplateVersion(templateVersion);
-        ValidateSubject(subject);
         ValidateProvider(provider);
+        ValidatePriority(priority);
         ValidateStatus(status);
         ValidateAttemptCount(attemptCount);
-        ValidateErrorCode(lastErrorCode);
-        ValidateErrorClass(lastErrorClass);
+        ValidateLastErrorCode(lastErrorCode);
+        ValidateLastErrorClass(lastErrorClass);
         ValidateCorrelationId(correlationId);
+        ValidateCreatedAt(createdAt);
+        ValidateUpdatedAt(createdAt, updatedAt);
+        ValidateLastAttemptAt(createdAt, lastAttemptAt);
+        ValidateNextRetryAt(createdAt, nextRetryAt);
+        ValidateSentAt(createdAt, sentAt);
 
         return new EmailDelivery
         {
@@ -162,28 +135,47 @@ public sealed class EmailDelivery
             BusinessDedupeKey = NormalizeRequired(businessDedupeKey),
             RecipientUserId = recipientUserId,
             ToEmail = NormalizeRequired(toEmail),
-            ToEmailHash = NormalizeOptional(toEmailHash),
             TemplateKey = NormalizeRequired(templateKey),
-            TemplateVersion = templateVersion,
-            Subject = NormalizeOptional(subject),
             Provider = NormalizeRequired(provider),
-            ProviderMessageId = NormalizeOptional(providerMessageId),
+            Priority = priority,
             Status = NormalizeRequired(status),
             AttemptCount = attemptCount,
             LastAttemptAt = lastAttemptAt,
             NextRetryAt = nextRetryAt,
             SentAt = sentAt,
-            FailedAt = failedAt,
-            DeadAt = deadAt,
-            SuppressedAt = suppressedAt,
-            AmbiguousAt = ambiguousAt,
-            LastError = NormalizeOptional(lastError),
             LastErrorCode = NormalizeOptional(lastErrorCode),
             LastErrorClass = NormalizeOptional(lastErrorClass),
             CorrelationId = NormalizeOptional(correlationId),
             CreatedAt = createdAt,
             UpdatedAt = updatedAt
         };
+    }
+
+    public bool IsTerminal =>
+        Status.Equals(EmailDeliveryStatus.Sent, StringComparison.OrdinalIgnoreCase) ||
+        Status.Equals(EmailDeliveryStatus.Dead, StringComparison.OrdinalIgnoreCase) ||
+        Status.Equals(EmailDeliveryStatus.Suppressed, StringComparison.OrdinalIgnoreCase);
+
+    public bool IsRetryable =>
+        Status.Equals(EmailDeliveryStatus.Failed, StringComparison.OrdinalIgnoreCase) ||
+        Status.Equals(EmailDeliveryStatus.Ambiguous, StringComparison.OrdinalIgnoreCase);
+
+    public bool CanBeClaimed(DateTime nowUtc)
+    {
+        ValidateNowUtc(nowUtc);
+
+        if (Status.Equals(EmailDeliveryStatus.Queued, StringComparison.OrdinalIgnoreCase))
+        {
+            return NextRetryAt is null || NextRetryAt <= nowUtc;
+        }
+
+        if (Status.Equals(EmailDeliveryStatus.Failed, StringComparison.OrdinalIgnoreCase) ||
+            Status.Equals(EmailDeliveryStatus.Ambiguous, StringComparison.OrdinalIgnoreCase))
+        {
+            return NextRetryAt is not null && NextRetryAt <= nowUtc;
+        }
+
+        return false;
     }
 
     public void MarkSending(DateTime nowUtc)
@@ -200,7 +192,7 @@ public sealed class EmailDelivery
         UpdatedAt = nowUtc;
     }
 
-    public void MarkSent(DateTime nowUtc, string? providerMessageId = null)
+    public void MarkSent(DateTime nowUtc)
     {
         ValidateNowUtc(nowUtc);
 
@@ -210,23 +202,11 @@ public sealed class EmailDelivery
             EmailDeliveryStatus.Failed,
             EmailDeliveryStatus.Ambiguous);
 
-        if (!string.IsNullOrWhiteSpace(providerMessageId) && providerMessageId.Trim().Length > 200)
-        {
-            throw new NotificationsDomainException(
-                "NOTIFICATIONS.EMAIL_DELIVERY_PROVIDER_MESSAGE_ID_TOO_LONG",
-                "Provider message id must not exceed 200 characters.");
-        }
-
         Status = EmailDeliveryStatus.Sent;
         AttemptCount++;
-        ProviderMessageId = NormalizeOptional(providerMessageId);
+        LastAttemptAt ??= nowUtc;
         SentAt = nowUtc;
-        FailedAt = null;
-        DeadAt = null;
-        SuppressedAt = null;
-        AmbiguousAt = null;
         NextRetryAt = null;
-        LastError = null;
         LastErrorCode = null;
         LastErrorClass = null;
         UpdatedAt = nowUtc;
@@ -235,13 +215,13 @@ public sealed class EmailDelivery
     public void MarkFailed(
         DateTime nowUtc,
         DateTime? nextRetryAt,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass)
     {
         ValidateNowUtc(nowUtc);
-        ValidateErrorCode(lastErrorCode);
-        ValidateErrorClass(lastErrorClass);
+        ValidateNextRetryAt(nowUtc, nextRetryAt);
+        ValidateLastErrorCode(lastErrorCode);
+        ValidateLastErrorClass(lastErrorClass);
 
         EnsureCanTransitionFrom(
             EmailDeliveryStatus.Queued,
@@ -251,9 +231,8 @@ public sealed class EmailDelivery
 
         Status = EmailDeliveryStatus.Failed;
         AttemptCount++;
-        FailedAt = nowUtc;
+        LastAttemptAt ??= nowUtc;
         NextRetryAt = nextRetryAt;
-        LastError = NormalizeOptional(lastError);
         LastErrorCode = NormalizeOptional(lastErrorCode);
         LastErrorClass = NormalizeOptional(lastErrorClass);
         UpdatedAt = nowUtc;
@@ -261,13 +240,12 @@ public sealed class EmailDelivery
 
     public void MarkDead(
         DateTime nowUtc,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass)
     {
         ValidateNowUtc(nowUtc);
-        ValidateErrorCode(lastErrorCode);
-        ValidateErrorClass(lastErrorClass);
+        ValidateLastErrorCode(lastErrorCode);
+        ValidateLastErrorClass(lastErrorClass);
 
         EnsureCanTransitionFrom(
             EmailDeliveryStatus.Queued,
@@ -277,9 +255,8 @@ public sealed class EmailDelivery
 
         Status = EmailDeliveryStatus.Dead;
         AttemptCount++;
-        DeadAt = nowUtc;
+        LastAttemptAt ??= nowUtc;
         NextRetryAt = null;
-        LastError = NormalizeOptional(lastError);
         LastErrorCode = NormalizeOptional(lastErrorCode);
         LastErrorClass = NormalizeOptional(lastErrorClass);
         UpdatedAt = nowUtc;
@@ -287,13 +264,12 @@ public sealed class EmailDelivery
 
     public void MarkSuppressed(
         DateTime nowUtc,
-        string? lastError = null,
         string? lastErrorCode = null,
         string? lastErrorClass = EmailErrorClass.Policy)
     {
         ValidateNowUtc(nowUtc);
-        ValidateErrorCode(lastErrorCode);
-        ValidateErrorClass(lastErrorClass);
+        ValidateLastErrorCode(lastErrorCode);
+        ValidateLastErrorClass(lastErrorClass);
 
         EnsureCanTransitionFrom(
             EmailDeliveryStatus.Queued,
@@ -302,9 +278,7 @@ public sealed class EmailDelivery
             EmailDeliveryStatus.Ambiguous);
 
         Status = EmailDeliveryStatus.Suppressed;
-        SuppressedAt = nowUtc;
         NextRetryAt = null;
-        LastError = NormalizeOptional(lastError);
         LastErrorCode = NormalizeOptional(lastErrorCode);
         LastErrorClass = NormalizeOptional(lastErrorClass);
         UpdatedAt = nowUtc;
@@ -313,13 +287,13 @@ public sealed class EmailDelivery
     public void MarkAmbiguous(
         DateTime nowUtc,
         DateTime? nextRetryAt,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass = EmailErrorClass.Ambiguous)
     {
         ValidateNowUtc(nowUtc);
-        ValidateErrorCode(lastErrorCode);
-        ValidateErrorClass(lastErrorClass);
+        ValidateNextRetryAt(nowUtc, nextRetryAt);
+        ValidateLastErrorCode(lastErrorCode);
+        ValidateLastErrorClass(lastErrorClass);
 
         EnsureCanTransitionFrom(
             EmailDeliveryStatus.Queued,
@@ -329,9 +303,8 @@ public sealed class EmailDelivery
 
         Status = EmailDeliveryStatus.Ambiguous;
         AttemptCount++;
-        AmbiguousAt = nowUtc;
+        LastAttemptAt ??= nowUtc;
         NextRetryAt = nextRetryAt;
-        LastError = NormalizeOptional(lastError);
         LastErrorCode = NormalizeOptional(lastErrorCode);
         LastErrorClass = NormalizeOptional(lastErrorClass);
         UpdatedAt = nowUtc;
@@ -350,9 +323,24 @@ public sealed class EmailDelivery
 
         Status = EmailDeliveryStatus.Queued;
         NextRetryAt = null;
-        LastError = null;
         LastErrorCode = null;
         LastErrorClass = null;
+        UpdatedAt = nowUtc;
+    }
+
+    public void RaisePriority(byte priority, DateTime nowUtc)
+    {
+        ValidatePriority(priority);
+        ValidateNowUtc(nowUtc);
+
+        if (priority > Priority)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_PRIORITY_ESCALATION_INVALID",
+                "Priority escalation must move toward a higher priority level.");
+        }
+
+        Priority = priority;
         UpdatedAt = nowUtc;
     }
 
@@ -427,16 +415,6 @@ public sealed class EmailDelivery
         }
     }
 
-    private static void ValidateToEmailHash(string? toEmailHash)
-    {
-        if (!string.IsNullOrWhiteSpace(toEmailHash) && toEmailHash.Trim().Length > 64)
-        {
-            throw new NotificationsDomainException(
-                "NOTIFICATIONS.EMAIL_DELIVERY_TO_EMAIL_HASH_TOO_LONG",
-                "Recipient email hash must not exceed 64 characters.");
-        }
-    }
-
     private static void ValidateTemplateKey(string? templateKey)
     {
         if (!NotificationTemplateKey.IsValid(templateKey))
@@ -444,26 +422,6 @@ public sealed class EmailDelivery
             throw new NotificationsDomainException(
                 "NOTIFICATIONS.EMAIL_DELIVERY_TEMPLATE_KEY_INVALID",
                 "Template key is invalid.");
-        }
-    }
-
-    private static void ValidateTemplateVersion(int? templateVersion)
-    {
-        if (templateVersion is not null && templateVersion <= 0)
-        {
-            throw new NotificationsDomainException(
-                "NOTIFICATIONS.EMAIL_DELIVERY_TEMPLATE_VERSION_INVALID",
-                "Template version must be greater than zero.");
-        }
-    }
-
-    private static void ValidateSubject(string? subject)
-    {
-        if (!string.IsNullOrWhiteSpace(subject) && subject.Trim().Length > 300)
-        {
-            throw new NotificationsDomainException(
-                "NOTIFICATIONS.EMAIL_DELIVERY_SUBJECT_TOO_LONG",
-                "Subject must not exceed 300 characters.");
         }
     }
 
@@ -481,6 +439,16 @@ public sealed class EmailDelivery
             throw new NotificationsDomainException(
                 "NOTIFICATIONS.EMAIL_DELIVERY_PROVIDER_TOO_LONG",
                 "Provider must not exceed 30 characters.");
+        }
+    }
+
+    private static void ValidatePriority(byte priority)
+    {
+        if (priority is < 1 or > 9)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_PRIORITY_INVALID",
+                "Priority must be between 1 and 9.");
         }
     }
 
@@ -504,23 +472,23 @@ public sealed class EmailDelivery
         }
     }
 
-    private static void ValidateErrorCode(string? errorCode)
+    private static void ValidateLastErrorCode(string? lastErrorCode)
     {
-        if (!string.IsNullOrWhiteSpace(errorCode) && errorCode.Trim().Length > 100)
+        if (!string.IsNullOrWhiteSpace(lastErrorCode) && lastErrorCode.Trim().Length > 100)
         {
             throw new NotificationsDomainException(
-                "NOTIFICATIONS.EMAIL_DELIVERY_ERROR_CODE_TOO_LONG",
-                "Error code must not exceed 100 characters.");
+                "NOTIFICATIONS.EMAIL_DELIVERY_LAST_ERROR_CODE_TOO_LONG",
+                "Last error code must not exceed 100 characters.");
         }
     }
 
-    private static void ValidateErrorClass(string? errorClass)
+    private static void ValidateLastErrorClass(string? lastErrorClass)
     {
-        if (!string.IsNullOrWhiteSpace(errorClass) && !EmailErrorClass.IsValid(errorClass))
+        if (!string.IsNullOrWhiteSpace(lastErrorClass) && !EmailErrorClass.IsValid(lastErrorClass))
         {
             throw new NotificationsDomainException(
-                "NOTIFICATIONS.EMAIL_DELIVERY_ERROR_CLASS_INVALID",
-                "Error class is invalid.");
+                "NOTIFICATIONS.EMAIL_DELIVERY_LAST_ERROR_CLASS_INVALID",
+                "Last error class is invalid.");
         }
     }
 
@@ -541,6 +509,63 @@ public sealed class EmailDelivery
             throw new NotificationsDomainException(
                 "NOTIFICATIONS.EMAIL_DELIVERY_NOW_UTC_REQUIRED",
                 "Current UTC time is required.");
+        }
+    }
+
+    private static void ValidateCreatedAt(DateTime createdAt)
+    {
+        if (createdAt == default)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_CREATED_AT_REQUIRED",
+                "CreatedAt is required.");
+        }
+    }
+
+    private static void ValidateUpdatedAt(DateTime createdAt, DateTime updatedAt)
+    {
+        if (updatedAt == default)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_UPDATED_AT_REQUIRED",
+                "UpdatedAt is required.");
+        }
+
+        if (updatedAt < createdAt)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_UPDATED_AT_INVALID",
+                "UpdatedAt must be greater than or equal to CreatedAt.");
+        }
+    }
+
+    private static void ValidateLastAttemptAt(DateTime createdAt, DateTime? lastAttemptAt)
+    {
+        if (lastAttemptAt is not null && lastAttemptAt < createdAt)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_LAST_ATTEMPT_AT_INVALID",
+                "LastAttemptAt must be greater than or equal to CreatedAt.");
+        }
+    }
+
+    private static void ValidateNextRetryAt(DateTime baselineUtc, DateTime? nextRetryAt)
+    {
+        if (nextRetryAt is not null && nextRetryAt < baselineUtc)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_NEXT_RETRY_AT_INVALID",
+                "NextRetryAt must be greater than or equal to the baseline time.");
+        }
+    }
+
+    private static void ValidateSentAt(DateTime createdAt, DateTime? sentAt)
+    {
+        if (sentAt is not null && sentAt < createdAt)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_SENT_AT_INVALID",
+                "SentAt must be greater than or equal to CreatedAt.");
         }
     }
 

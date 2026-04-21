@@ -1,17 +1,20 @@
 # Identity — Runtime Flows (V1)
 
 This module supports arc42 runtime scenarios:
+
 - Scenario 4: registration + verification
 - Scenario 5: forgot + reset password
 
 Related:
+
 - `../../../../architecture/arc42/04-runtime-view-v1.md`
 - `../../../../architecture/arc42/13-transactions-and-consistency-v1.md`
-- `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
-- `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../architecture/arc42/16-batch-processing-and-derived-data-v1.md`
 - `../../../../architecture/arc42/17-dataflow-and-batch-workflows-v1.md`
+- `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
+- `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../decisions/adr-0013-outbox-and-delivery-semantics-v1.md`
+- `../../../../decisions/adr-0020-timeout-retry-and-failure-detection-policy-v1.md`
 - `../../../../decisions/adr-0027-stream-processing-and-derived-state-policy-v1.md`
 - `../../../../decisions/adr-0028-consumer-idempotency-replay-and-rebuild-policy-v1.md`
 
@@ -19,10 +22,12 @@ Related:
 
 ## Runtime posture in V1
 
-Identity primarily participates in two runtime lanes:
+Identity primarily participates in three runtime lanes:
 
 ### A) Synchronous truth lane
+
 Used for:
+
 - register
 - verify email
 - login
@@ -32,106 +37,182 @@ Used for:
 - token revoke / reuse-detection response
 
 ### B) Async side-effect lane
-Used for:
-- verification email delivery
-- reset-password email delivery
-- optional audit side effects
-- optional security notification signals
 
-Identity may also participate in a lighter third lane:
+Used for:
+
+- verification email delivery triggers
+- password-reset email delivery triggers
+- audit side effects
+- optional security notification signals
+- optional login-history style derived consumers
 
 ### C) Batch / cleanup / maintenance lane
+
 Used for:
+
 - cleanup expired verification/reset tokens
 - cleanup revoked/expired refresh tokens
 - retention cleanup for auth/session artifacts
 - optional archival / summarization for login history or auth maintenance outputs
 - reconciliation/reporting for stuck or orphan auth artifacts
 
-**Rule:** Identity owns security/account truth.  
+### Core runtime rules
+
+**Rule:** Identity owns account and security truth.  
 Cleanup, reporting, and maintenance workflows may lag, but they do not redefine current security truth.
 
-**Rule:** Identity success is defined by **truth commit**, not by downstream email/audit completion.
+**Rule:** Identity success is defined by **truth commit**.  
+When async side effects are required, success means:
+- truth committed
+- async intent/outbox committed
+
+It does **not** mean:
+- broker publish already happened
+- Notifications already sent mail
+- Audit already persisted
+- downstream consumers are already caught up
 
 **Rule:** Identity-derived async processing is assumed **at-least-once**.  
 Duplicates, replay, lag, and worker restart must be tolerated safely.
 
+**Rule:** Identity resolves security ambiguity from authoritative truth, not from delivery state, timeout guesswork, or client belief.
+
 ---
 
-## Flow A — Register → Verification email (async) → Verify
+## Flow A — Register → Verification email trigger → Verify
 
 ### Goal
-Create account truth synchronously, then verify asynchronously without blocking registration success.
 
-### Flow
+Create account truth synchronously, then trigger verification delivery asynchronously without blocking registration success.
+
+### Upstream truth boundary
+
 1. Client calls `POST /auth/register`.
-2. Identity creates user in **Unverified** state.
-3. Identity creates verification intent/token according to policy.
-4. Identity emits `UserRegistered` (or `VerificationEmailRequested`) through Outbox.
-5. Notifications worker sends verification email (retry-safe, idempotent).
-6. Client calls `POST /auth/verify-email` with token.
-7. Identity validates token and marks user verified/active.
-8. Identity emits `UserEmailVerified`.
+2. Identity validates request and policy.
+3. Identity creates user in `Unverified` state.
+4. Identity creates verification intent/token according to policy.
+5. Identity writes async intent/outbox in the same truth transaction.
+
+### Async events emitted
+
+Identity may emit:
+
+- `Auth.UserRegistered`
+  - business/audit timeline event
+- `Auth.EmailVerificationRequested`
+  - canonical delivery-trigger event for Notifications
+
+### Required event semantics
+
+- each emitted async message carries a stable `MessageId`
+- payload must be minimal and privacy-aware
+- raw verification token must **not** be emitted
+- only token identifier or safe delivery context may be emitted where needed
+
+### Downstream flow
+
+6. Notifications consumes `Auth.EmailVerificationRequested`.
+7. Notifications creates or loads delivery workflow state.
+8. Notifications attempts provider send using its own delivery-state rules.
+9. Client later calls `POST /auth/verify-email` with token.
+10. Identity validates token against authoritative token/account truth.
+11. Identity marks user verified/active.
+12. Identity emits `Auth.UserEmailVerified`.
 
 ### Runtime stream semantics
+
 - verification email delivery is a **downstream effect**, not part of registration truth
-- duplicate notification delivery must not create duplicate harmful sends
-- replay of verification-email events is normal under at-least-once delivery
+- duplicate delivery-trigger message handling is normal and must be safe
+- replay of verification-delivery events is expected under at-least-once delivery
 - verification truth is determined by Identity token/account state, not by provider status
+- a delivered email does not prove verification happened
+- a missing/delayed email does not invalidate already-committed registration truth
 
 ### Failure modes
-- Email provider down: register still succeeds; email retries; no duplicate emails.
-- Token expired: client uses `/resend-verification` (rate-limited).
-- Timeout during verify: reconcile from Identity truth, not from email state.
-- Duplicate verify attempts: converge safely to verified state or documented no-op/conflict.
-- Replay of stale delivery events must not change already-verified truth.
+
+- notification provider down:
+  - register still succeeds
+  - delivery may retry/remediate later
+- duplicate delivery-trigger publish:
+  - downstream dedupe/business-intent safeguards must converge safely
+- token expired:
+  - client uses resend-verification flow according to policy
+- timeout during verify:
+  - reconcile from Identity truth, not from delivery state
+- duplicate verify attempts:
+  - converge safely to verified state or documented no-op/conflict behavior
+- replay of stale verification-delivery events:
+  - must not change already-verified truth
 
 ### Batch / cleanup hooks
+
 - expired verification tokens may later be cleaned up by bounded maintenance workflows
-- stale or orphan verification intents may be reconciled/reported
-- email delivery/reporting artifacts remain derived, not identity truth
+- stale/orphan verification intents may be reconciled or reported
+- notification delivery artifacts remain derived and downstream
 
 ### Runtime rules
+
 - account creation and verified-state change are truth-bound operations
-- email may lag, but account/security truth must remain authoritative
+- email may lag, but account/security truth remains authoritative
 - read-your-writes applies after successful verify
+- downstream lag must not weaken current verification truth
 
 ---
 
 ## Flow B — Login → Refresh rotation
 
 ### Goal
+
 Issue and rotate session credentials safely with deterministic token-family behavior.
 
-### Flow
+### Truth flow
+
 1. Client calls `POST /auth/login`.
-2. Identity validates credentials and returns access token + refresh token.
-3. Refresh token truth is persisted according to policy.
-4. Client calls `POST /auth/refresh` to rotate refresh token.
-5. Identity validates current refresh token.
-6. Identity revokes old token, issues new refresh token, returns new pair.
-7. Identity records replacement relation / token-family linkage if modeled.
+2. Identity validates credentials and policy.
+3. Identity returns access token + refresh token according to policy.
+4. Refresh-token truth is persisted server-side.
+5. Client later calls `POST /auth/refresh`.
+6. Identity validates current refresh token against authoritative truth.
+7. Identity revokes old token, issues new refresh token, and returns new token pair.
+8. Identity persists replacement relation / token-family linkage if modeled.
+
+### Optional async events
+
+Identity may emit optional operational/audit events such as:
+
+- `Auth.UserLoggedIn`
+
+These are derived side effects and do not define session validity.
 
 ### Runtime stream semantics
+
 - refresh rotation is a truth-first security transition
 - old/new token-family state must converge deterministically
 - delayed audit/notification signals do not define session validity
 - replayed refresh or reused old token must be evaluated against current token-family truth
+- timeout ambiguity must be resolved from refresh-token truth, not from client belief
 
 ### Failure modes
-- Reuse detection: revoked token used again → apply policy (revoke family, force re-login).
-- Timeout during refresh: reconcile from refresh-token truth, not from client belief.
-- Duplicate refresh attempt: stale or reused token must not mint multiple valid successor states incorrectly.
-- Stale client retry after successful rotation must not resurrect old token authority.
+
+- reuse detection:
+  - revoked token used again → apply configured policy
+- timeout during refresh:
+  - reconcile from refresh-token truth
+- duplicate refresh attempt:
+  - stale or reused token must not mint multiple valid successor states incorrectly
+- stale client retry after successful rotation:
+  - must not resurrect old token authority
 
 ### Batch / cleanup hooks
+
 - revoked/expired refresh tokens may be cleaned up later
 - token-family drift or suspicious reuse may be summarized in derived reports
 - cleanup must not weaken current token-validity truth
 
 ### Runtime rules
+
 - refresh is security-critical and truth-backed
-- old token authority must end at truth boundary, not when a downstream effect catches up
+- old token authority ends at the truth boundary, not when downstream effects catch up
 - read-your-writes applies for immediate post-refresh session validity checks
 
 ---
@@ -139,83 +220,137 @@ Issue and rotate session credentials safely with deterministic token-family beha
 ## Flow C — Forgot → Reset
 
 ### Goal
-Allow secure password reset without leaking account existence.
 
-### Flow
-1. Client calls `POST /auth/forgot-password` (always returns accepted).
-2. If email exists, Identity creates password-reset intent/token.
-3. Identity emits `PasswordResetRequested`.
-4. Notifications worker sends reset email (async).
-5. Client calls `POST /auth/reset-password` with token and new password.
-6. Identity validates token and updates password.
-7. Identity revokes relevant refresh tokens by policy.
-8. Identity emits `UserPasswordChanged`.
+Allow secure password reset without leaking account existence and without coupling truth success to delivery completion.
+
+### Truth flow
+
+1. Client calls `POST /auth/forgot-password`.
+2. Identity applies anti-enumeration response policy.
+3. If account exists and policy allows, Identity creates password-reset intent/token.
+4. Identity writes async intent/outbox in the same truth transaction.
+
+### Async event emitted
+
+Identity emits:
+
+- `Auth.PasswordResetRequested`
+
+### Required event semantics
+
+- message carries stable `MessageId`
+- payload is minimal and delivery-safe
+- raw reset token must **not** be emitted
+- token identifier or safe delivery context only
+
+### Downstream flow
+
+5. Notifications consumes `Auth.PasswordResetRequested`.
+6. Notifications handles delivery workflow asynchronously.
+7. Client calls `POST /auth/reset-password` with token and new password.
+8. Identity validates token against authoritative truth.
+9. Identity updates password.
+10. Identity revokes relevant refresh tokens by policy.
+11. Identity emits `Auth.UserPasswordChanged`.
 
 ### Runtime stream semantics
-- forgot-password request and reset email delivery are decoupled from reset truth
-- duplicate reset-email delivery must not create duplicate harmful business outcomes
-- password/security truth is determined by Identity, not by email delivery timing
+
+- forgot-password acceptance and reset email delivery are decoupled from reset truth
+- duplicate reset-delivery processing must not create duplicate harmful outward effects for the same protected reset intent
+- password/security truth is determined by Identity, not by email timing or provider outcome
 - replay of old reset-related events must not override fresher token/session truth
 
 ### Non-blocking rule
-- forgot/register must not block on email delivery.
+
+The following must not block on notification delivery:
+
+- register
+- forgot-password
+- resend-verification
 
 ### Failure modes
-- Duplicate forgot requests: anti-enumeration still holds.
-- Token expired/used: deterministic failure.
-- Timeout during reset: reconcile from Identity truth, not from email provider outcome.
-- Duplicate reset attempt with same token: must not produce contradictory password truth.
-- Stale refresh/session state must not survive policy-defined revocation after reset.
+
+- duplicate forgot requests:
+  - anti-enumeration still holds
+- token expired or already consumed:
+  - deterministic truth-backed failure
+- timeout during reset:
+  - reconcile from Identity truth, not email provider outcome
+- duplicate reset attempt with same token:
+  - must not produce contradictory password truth
+- stale refresh/session state:
+  - must not survive policy-defined revocation after reset
+- replay of stale reset-delivery event:
+  - must not cause a newer valid reset intent to be weakened or overridden
 
 ### Batch / cleanup hooks
+
 - expired reset tokens may later be cleaned up
 - stale reset intents may be reported for maintenance
-- delivery artifacts remain derived
+- delivery artifacts remain derived and downstream
 
 ### Runtime rules
+
 - reset consumes truth-owned token lifecycle
 - password change and session revocation are truth-first
-- downstream lag must not weaken the reset security effect
+- downstream lag must not weaken reset security effect
 
 ---
 
-## Flow D — Resend verification / auth maintenance
+## Flow D — Resend verification / auth maintenance trigger
 
 ### Goal
-Create a valid new verification intent safely without being blocked by old delivery artifacts.
 
-### Flow
+Create a valid **new** verification intent safely without being blocked by old delivery artifacts or stale dedupe state.
+
+### Truth flow
+
 1. Client calls `POST /auth/resend-verification`.
 2. Identity enforces anti-abuse / rate-limit policy.
-3. Identity creates a new verification intent/token if policy allows.
-4. Identity emits a new delivery-trigger event.
-5. Notifications handles async delivery.
+3. Identity determines whether resend is allowed under current verification truth.
+4. Identity creates a **new logical verification intent/token** if policy allows.
+5. Identity writes a new async intent/outbox record.
 
-### Runtime stream semantics
-- resend is a **new logical intent**, not a replay of the old one
-- old business dedupe state must not suppress a valid new verification intent
-- replay of the same resend event must not multiply harmful delivery effects
+### Async event emitted
 
-### Rules
-- new resend must be a new logical intent
-- old delivery dedupe state must not block a valid new token
-- old expired intents may remain for cleanup until retention policy removes them
+Identity emits a new delivery-trigger event:
+
+- `Auth.EmailVerificationRequested`
+
+### Runtime semantics
+
+- resend is a **new logical intent**, not replay of the old one
+- new resend must create:
+  - a new protected business intent
+  - a new async `MessageId`
+- old delivery dedupe state must not suppress a valid new verification intent
+- replay of the same resend message must not multiply harmful delivery effects
+- downstream dedupe must treat the valid new resend as a new allowed intent, not as replay of the old intent
 
 ### Failure modes
+
 - rate-limit or abuse control rejects resend
 - old expired token remains in storage but does not define current verification truth
 - notification lag delays convenience, not account truth
 - retry ambiguity must reconcile from current verification-intent truth
+
+### Runtime rules
+
+- resend validity is determined by Identity truth and policy
+- notification completion does not define whether resend truth/intention was created
+- old expired intents may remain for cleanup until retention policy removes them
 
 ---
 
 ## Flow E — Cleanup / retention workflow
 
 ### Goal
+
 Control growth of auth/security artifacts without changing current truth incorrectly.
 
 ### Typical workflow shape
-1. Select bounded expired or terminal auth artifacts:
+
+1. Select bounded expired or terminal auth artifacts such as:
    - verification tokens
    - reset tokens
    - revoked/expired refresh tokens
@@ -223,13 +358,18 @@ Control growth of auth/security artifacts without changing current truth incorre
 3. Record cleanup outcome.
 
 ### Rules
+
 - cleanup is bounded
-- cleanup must not remove artifacts still required for current security truth or investigation policy
+- cleanup must not remove artifacts still required for:
+  - current security truth
+  - investigation policy
+  - compliance/retention policy
 - cleanup is maintenance, not a replacement for synchronous validity checks
 - rerun on the same bounded scope must remain safe
 - if cleanup uncertainty exists, preserving live security truth wins over aggressive removal
 
 ### Typical derived outputs
+
 - cleanup candidate sets
 - expired-token summaries
 - suspicious token-family reports
@@ -240,13 +380,15 @@ Control growth of auth/security artifacts without changing current truth incorre
 ## Flow F — Truth-safe security under derived lag
 
 ### Goal
+
 Ensure security-sensitive behavior remains correct even when email, audit, or maintenance workflows lag.
 
 ### Typical runtime shape
-1. A security-sensitive request arrives:
-   - verify
-   - reset
-   - refresh
+
+1. A security-sensitive request arrives, such as:
+   - verify email
+   - reset password
+   - refresh token
    - self-state read after security change
 2. Identity reads authoritative account/token truth.
 3. Derived systems may still lag:
@@ -256,29 +398,35 @@ Ensure security-sensitive behavior remains correct even when email, audit, or ma
 4. Identity returns outcome based on truth-backed security state only.
 
 ### Examples
+
 - verification email delivered late but account already verified
 - password reset succeeded but audit not yet visible
 - refresh rotation committed but cleanup job has not removed old revoked tokens yet
-- email missing does not imply token or account truth failed
+- missing or delayed email does not imply token/account truth failed
+- timeout does not imply side effect did not happen or truth did not commit
 
 ### Rules
+
 - Identity truth wins over all derived operational views
 - timeout ambiguity must be resolved from truth
 - safe deny/reject beats stale or guessed security behavior
+- downstream delivery/reporting lag must not weaken security correctness
 
 ---
 
 ## Summary
 
-Identity runtime in V1 is governed by ten rules:
+Identity runtime in V1 is governed by the following rules:
 
 1. Identity owns account and security truth synchronously.  
 2. Email delivery is downstream and non-blocking.  
-3. Identity-derived async processing is at-least-once; duplicates and replay are normal.  
-4. Verification/reset flows depend on committed identity intents, not provider success.  
-5. Refresh rotation and reuse detection must converge deterministically.  
-6. Read-your-writes is required after security-sensitive truth changes.  
-7. Expired/revoked artifacts may be cleaned up later without redefining current truth.  
-8. Maintenance/reporting workflows are derived and subordinate to identity truth.  
-9. Timeout ambiguity must be resolved from Identity truth, not from client belief or delivery state.  
-10. Truth-backed security decisions must remain correct even while downstream systems lag.
+3. Successful Identity writes mean truth committed, and where needed, async intent/outbox committed.  
+4. Identity-derived async processing is at-least-once; duplicates and replay are normal.  
+5. Verification/reset flows depend on committed identity intents, not provider success.  
+6. `Auth.EmailVerificationRequested` and `Auth.PasswordResetRequested` are canonical delivery-trigger events for Notifications.  
+7. Async events use stable `MessageId` and minimal privacy-aware payloads.  
+8. Raw verification/reset tokens must never appear in async event payloads.  
+9. Refresh rotation and reuse detection must converge deterministically from authoritative token truth.  
+10. Read-your-writes is required after security-sensitive truth changes.  
+11. Expired/revoked artifacts may be cleaned up later without redefining current truth.  
+12. Timeout ambiguity must be resolved from Identity truth, not from client belief or delivery state.
