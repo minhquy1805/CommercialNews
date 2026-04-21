@@ -132,22 +132,26 @@ Represents one concrete attempt to perform the outward delivery effect.
 #### Core attributes
 
 - `StartedAt`
-- `CompletedAt?`
+- `FinishedAt?`
 - `Outcome`
-  - `Succeeded`
+  - `Sent`
   - `Failed`
-  - `TimedOut`
-  - `Rejected`
+  - `Timeout`
+  - `Suppressed`
+  - `Skipped`
+  - `ProviderRejected`
   - other policy-approved provider outcome classes
-- `Provider`
 - `ProviderMessageId?` *(only if policy allows exposure/storage)*
 - `ErrorClass?`
-  - transient
-  - permanent
-  - policy
-  - unknown
-- `ErrorCode?`
-- `ErrorMessage?` *(sanitized)*
+  - `Transient`
+  - `Permanent`
+  - `Ambiguous`
+  - `Policy`
+  - `Template`
+  - `Provider`
+  - `Validation`
+- `ProviderErrorCode?`
+- `ErrorDetail?` *(sanitized)*
 - `CorrelationId?`
 
 #### Role

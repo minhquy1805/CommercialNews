@@ -214,7 +214,7 @@ The following canonical business dedupe keys are recommended as the V1 contract 
 
 Canonical key:
 
-`(TemplateKey = "verify-email", RecipientUserId, VerificationTokenId)`
+`(TemplateKey = "VerifyEmail", RecipientUserId, VerificationTokenId)`
 
 Rules:
 
@@ -226,7 +226,7 @@ Rules:
 
 Canonical key:
 
-`(TemplateKey = "reset-password", RecipientUserId, ResetTokenId)`
+`(TemplateKey = "ResetPassword", RecipientUserId, ResetTokenId)`
 
 Rules:
 
@@ -238,11 +238,11 @@ Rules:
 
 Canonical key:
 
-`(TemplateKey = "new-article", RecipientUserId, ArticleId, PublishedVersion)`
+`(TemplateKey = "NewArticle", RecipientUserId, ArticleId, PublishedVersion)`
 
 If `PublishedVersion` is not modeled explicitly, policy may use:
 
-`(TemplateKey = "new-article", RecipientUserId, ArticleId, PublishedAt)`
+`(TemplateKey = "NewArticle", RecipientUserId, ArticleId, PublishedAt)`
 
 Rules:
 
