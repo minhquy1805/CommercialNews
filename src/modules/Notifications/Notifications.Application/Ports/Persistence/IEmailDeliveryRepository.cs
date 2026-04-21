@@ -1,6 +1,6 @@
 using Notifications.Domain.Entities;
 
-namespace Notifications.Application.Ports.Persistence.Write;
+namespace Notifications.Application.Ports.Persistence;
 
 public interface IEmailDeliveryRepository
 {
@@ -27,27 +27,23 @@ public interface IEmailDeliveryRepository
 
     Task<int> MarkSentAsync(
         long emailDeliveryId,
-        string? providerMessageId,
         CancellationToken cancellationToken = default);
 
     Task<int> MarkFailedAsync(
         long emailDeliveryId,
         DateTime? nextRetryAt,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         CancellationToken cancellationToken = default);
 
     Task<int> MarkDeadAsync(
         long emailDeliveryId,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         CancellationToken cancellationToken = default);
 
     Task<int> MarkSuppressedAsync(
         long emailDeliveryId,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         CancellationToken cancellationToken = default);
@@ -55,7 +51,6 @@ public interface IEmailDeliveryRepository
     Task<int> MarkAmbiguousAsync(
         long emailDeliveryId,
         DateTime? nextRetryAt,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         CancellationToken cancellationToken = default);
