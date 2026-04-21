@@ -5,87 +5,68 @@ using Notifications.Application.Contracts.EmailDeliveries.Responses;
 using Notifications.Application.Errors;
 using Notifications.Application.Models.QueryModels;
 using Notifications.Application.Ports.Persistence;
-using Notifications.Application.Validation.EmailDeliveries.GetEmailDeliveryById;
+using Notifications.Application.Validation.EmailDeliveries.GetEmailDeliveryAttempts;
 
-namespace Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryById;
+namespace Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryAttempts;
 
 /// <summary>
-/// Returns a detailed admin-facing view of a single email delivery,
-/// including its attempt history for troubleshooting and operations.
+/// Returns attempt history for a single email delivery for admin troubleshooting and operations.
 /// This is a read-only use case and does not open a transaction.
+/// If the delivery does not exist, returns Delivery.NotFound.
+/// If the delivery exists but has no attempts yet, returns an empty list.
 /// </summary>
-public sealed class GetEmailDeliveryByIdUseCase : IGetEmailDeliveryByIdUseCase
+public sealed class GetEmailDeliveryAttemptsUseCase : IGetEmailDeliveryAttemptsUseCase
 {
     private readonly IEmailDeliveryQueryRepository _emailDeliveryQueryRepository;
 
-    public GetEmailDeliveryByIdUseCase(
+    public GetEmailDeliveryAttemptsUseCase(
         IEmailDeliveryQueryRepository emailDeliveryQueryRepository)
     {
         _emailDeliveryQueryRepository = emailDeliveryQueryRepository
             ?? throw new ArgumentNullException(nameof(emailDeliveryQueryRepository));
     }
 
-    public async Task<Result<GetEmailDeliveryByIdResponse>> ExecuteAsync(
-        GetEmailDeliveryByIdRequest request,
+    public async Task<Result<GetEmailDeliveryAttemptsResponse>> ExecuteAsync(
+        GetEmailDeliveryAttemptsRequest request,
         CancellationToken cancellationToken = default)
     {
-        Error? validationError = GetEmailDeliveryByIdValidator.Validate(request);
+        Error? validationError = GetEmailDeliveryAttemptsValidator.Validate(request);
         if (validationError is not null)
         {
-            return Result<GetEmailDeliveryByIdResponse>.Failure(validationError);
+            return Result<GetEmailDeliveryAttemptsResponse>.Failure(validationError);
         }
 
         try
         {
-            EmailDeliveryDetailResult? detail =
+            EmailDeliveryDetailResult? delivery =
                 await _emailDeliveryQueryRepository.GetByIdAsync(
                     request.EmailDeliveryId,
                     cancellationToken);
 
-            if (detail is null)
+            if (delivery is null)
             {
-                return Result<GetEmailDeliveryByIdResponse>.Failure(
+                return Result<GetEmailDeliveryAttemptsResponse>.Failure(
                     NotificationsErrors.Delivery.NotFound);
             }
 
-            GetEmailDeliveryByIdResponse response = new()
+            IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
+                await _emailDeliveryQueryRepository.GetAttemptsByEmailDeliveryIdAsync(
+                    request.EmailDeliveryId,
+                    cancellationToken);
+
+            GetEmailDeliveryAttemptsResponse response = new()
             {
-                EmailDeliveryId = detail.EmailDeliveryId,
-                MessageId = detail.MessageId,
-                BusinessDedupeKey = detail.BusinessDedupeKey,
-                RecipientUserId = detail.RecipientUserId,
-                ToEmail = detail.ToEmail,
-                ToEmailHash = detail.ToEmailHash,
-                TemplateKey = detail.TemplateKey,
-                TemplateVersion = detail.TemplateVersion,
-                Subject = detail.Subject,
-                Provider = detail.Provider,
-                ProviderMessageId = detail.ProviderMessageId,
-                Status = detail.Status,
-                AttemptCount = detail.AttemptCount,
-                LastAttemptAt = detail.LastAttemptAt,
-                NextRetryAt = detail.NextRetryAt,
-                SentAt = detail.SentAt,
-                FailedAt = detail.FailedAt,
-                DeadAt = detail.DeadAt,
-                SuppressedAt = detail.SuppressedAt,
-                AmbiguousAt = detail.AmbiguousAt,
-                LastError = detail.LastError,
-                LastErrorCode = detail.LastErrorCode,
-                LastErrorClass = detail.LastErrorClass,
-                CorrelationId = detail.CorrelationId,
-                CreatedAt = detail.CreatedAt,
-                UpdatedAt = detail.UpdatedAt,
-                Attempts = detail.Attempts
+                EmailDeliveryId = request.EmailDeliveryId,
+                Items = attempts
                     .Select(MapAttempt)
                     .ToArray()
             };
 
-            return Result<GetEmailDeliveryByIdResponse>.Success(response);
+            return Result<GetEmailDeliveryAttemptsResponse>.Success(response);
         }
         catch (PersistenceException exception)
         {
-            return Result<GetEmailDeliveryByIdResponse>.Failure(
+            return Result<GetEmailDeliveryAttemptsResponse>.Failure(
                 MapPersistenceException(exception));
         }
     }
