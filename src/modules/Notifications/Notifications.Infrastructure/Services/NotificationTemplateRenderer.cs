@@ -81,18 +81,18 @@ public sealed class NotificationTemplateRenderer : INotificationTemplateRenderer
         string subject = "Verify your email address";
 
         string body =
-$"""
-Hello {userName},
+            $"""
+            Hello {userName},
 
-Thank you for registering.
+            Thank you for registering.
 
-Please verify your email address by clicking the link below:
-{verificationUrl}
+            Please verify your email address by clicking the link below:
+            {verificationUrl}
 
-If you did not request this email, you can safely ignore it.
+            If you did not request this email, you can safely ignore it.
 
-CommercialNews
-""";
+            CommercialNews
+            """;
 
         return Success(subject, body);
     }
@@ -109,18 +109,18 @@ CommercialNews
         string subject = "Reset your password";
 
         string body =
-$"""
-Hello {userName},
+            $"""
+            Hello {userName},
 
-We received a request to reset your password.
+            We received a request to reset your password.
 
-You can reset it using the link below:
-{resetUrl}
+            You can reset it using the link below:
+            {resetUrl}
 
-If you did not request a password reset, please ignore this email.
+            If you did not request a password reset, please ignore this email.
 
-CommercialNews
-""";
+            CommercialNews
+            """;
 
         return Success(subject, body);
     }
@@ -139,17 +139,17 @@ CommercialNews
         string subject = $"New article published: {articleTitle}";
 
         string body =
-$"""
-A new article has been published.
+            $"""
+            A new article has been published.
 
-Title: {articleTitle}
-{(string.IsNullOrWhiteSpace(summary) ? string.Empty : $"Summary: {summary}")}
+            Title: {articleTitle}
+            {(string.IsNullOrWhiteSpace(summary) ? string.Empty : $"Summary: {summary}")}
 
-Read more:
-{articleUrl}
+            Read more:
+            {articleUrl}
 
-CommercialNews
-""";
+            CommercialNews
+            """;
 
         return Success(subject, body);
     }

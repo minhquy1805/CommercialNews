@@ -3,11 +3,11 @@ using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Microsoft.Data.SqlClient;
 using Notifications.Application.Models.QueryModels;
-using Notifications.Application.Ports.Persistence.Read;
+using Notifications.Application.Ports.Persistence;
 using Notifications.Infrastructure.Persistence.Exceptions;
 using Notifications.Infrastructure.Persistence.Sql;
 
-namespace Notifications.Infrastructure.Persistence.Repositories.Read;
+namespace Notifications.Infrastructure.Persistence.Repositories;
 
 public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
 {
@@ -62,7 +62,7 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
                     return null;
                 }
 
-               EmailDeliveryDetailResult detail = MapEmailDeliveryDetail(reader);
+                EmailDeliveryDetailResult detail = MapEmailDeliveryDetail(reader);
 
                 IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
                     await GetAttemptsInternalAsync(
@@ -340,12 +340,14 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
 
     private static EmailDeliveryListResultItem MapEmailDeliveryListItem(SqlDataReader reader)
     {
+        string? toEmail = GetNullableString(reader, "ToEmail");
+
         return new EmailDeliveryListResultItem
         {
             EmailDeliveryId = reader.GetInt64(reader.GetOrdinal("EmailDeliveryId")),
             MessageId = reader.GetString(reader.GetOrdinal("MessageId")),
             RecipientUserId = GetNullableInt64(reader, "RecipientUserId"),
-            ToEmail = GetNullableString(reader, "ToEmail"),
+            MaskedToEmail = MaskEmail(toEmail),
             ToEmailHash = GetNullableString(reader, "ToEmailHash"),
             TemplateKey = reader.GetString(reader.GetOrdinal("TemplateKey")),
             TemplateVersion = GetNullableInt32(reader, "TemplateVersion"),
@@ -418,6 +420,32 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
             CorrelationId = GetNullableString(reader, "CorrelationId"),
             CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt"))
         };
+    }
+
+    private static string? MaskEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return null;
+        }
+
+        int atIndex = email.IndexOf('@');
+        if (atIndex <= 1 || atIndex == email.Length - 1)
+        {
+            return "***";
+        }
+
+        string local = email[..atIndex];
+        string domain = email[(atIndex + 1)..];
+
+        string maskedLocal = local.Length switch
+        {
+            <= 1 => "*",
+            2 => $"{local[0]}*",
+            _ => $"{local[0]}***{local[^1]}"
+        };
+
+        return $"{maskedLocal}@{domain}";
     }
 
     private static object ToDbValue(object? value) => value ?? DBNull.Value;

@@ -1,5 +1,5 @@
 using Notifications.Application.Contracts.Services;
-using Notifications.Application.Ports.Persistence.Write;
+using Notifications.Application.Ports.Persistence;
 using Notifications.Application.Ports.Services;
 using Notifications.Domain.Enums;
 
@@ -21,34 +21,22 @@ public sealed class NotificationDedupeService : INotificationDedupeService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (string.IsNullOrWhiteSpace(request.MessageId))
+        string messageId = request.MessageId?.Trim()
+            ?? throw new ArgumentException("MessageId is required.", nameof(request));
+
+        string businessDedupeKey = request.BusinessDedupeKey?.Trim()
+            ?? throw new ArgumentException("BusinessDedupeKey is required.", nameof(request));
+
+        if (messageId.Length == 0)
         {
-            return new DedupeCheckResult
-            {
-                IsDuplicateMessage = false,
-                IsDuplicateBusinessIntent = false,
-                ShouldSuppress = false,
-                Reason = "Message id is missing."
-            };
+            throw new ArgumentException("MessageId is required.", nameof(request));
         }
 
-        if (string.IsNullOrWhiteSpace(request.BusinessDedupeKey))
+        if (businessDedupeKey.Length == 0)
         {
-            return new DedupeCheckResult
-            {
-                IsDuplicateMessage = false,
-                IsDuplicateBusinessIntent = false,
-                ShouldSuppress = false,
-                Reason = "Business dedupe key is missing."
-            };
+            throw new ArgumentException("BusinessDedupeKey is required.", nameof(request));
         }
 
-        string messageId = request.MessageId.Trim();
-        string businessDedupeKey = request.BusinessDedupeKey.Trim();
-
-        // Important:
-        // Message-level dedupe protects against re-processing the exact same
-        // technical message more than once.
         var existingByMessageId = await _emailDeliveryRepository.GetByMessageIdAsync(
             messageId,
             cancellationToken);
@@ -64,9 +52,6 @@ public sealed class NotificationDedupeService : INotificationDedupeService
             };
         }
 
-        // Important:
-        // Business-intent dedupe protects against duplicate notification sends
-        // for the same underlying business action, even if the technical message id changes.
         var existingByBusinessKey = await _emailDeliveryRepository.GetByBusinessDedupeKeyAsync(
             businessDedupeKey,
             cancellationToken);
@@ -82,10 +67,6 @@ public sealed class NotificationDedupeService : INotificationDedupeService
             };
         }
 
-        // Important:
-        // If the business intent already produced a delivery that is still meaningful
-        // (queued, sending, sent, ambiguous, failed, dead, or suppressed),
-        // phase 1 chooses to suppress creating a new duplicate delivery.
         return new DedupeCheckResult
         {
             IsDuplicateMessage = false,

@@ -1,12 +1,12 @@
 using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
-using Notifications.Application.Ports.Persistence.Write;
+using Notifications.Application.Ports.Persistence;
 using Notifications.Domain.Entities;
 using Notifications.Infrastructure.Persistence.Exceptions;
 using Notifications.Infrastructure.Persistence.Sql;
 
-namespace Notifications.Infrastructure.Persistence.Repositories.Write;
+namespace Notifications.Infrastructure.Persistence.Repositories;
 
 public sealed class EmailDeliveryAttemptRepository : IEmailDeliveryAttemptRepository
 {
@@ -48,6 +48,7 @@ public sealed class EmailDeliveryAttemptRepository : IEmailDeliveryAttemptReposi
             command.Parameters.AddRange(
             [
                 new SqlParameter("@EmailDeliveryId", SqlDbType.BigInt) { Value = emailDeliveryAttempt.EmailDeliveryId },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26) { Value = emailDeliveryAttempt.MessageId },
                 new SqlParameter("@AttemptNumber", SqlDbType.Int) { Value = emailDeliveryAttempt.AttemptNumber },
                 new SqlParameter("@StartedAt", SqlDbType.DateTime2) { Value = emailDeliveryAttempt.StartedAt },
                 new SqlParameter("@FinishedAt", SqlDbType.DateTime2) { Value = ToDbValue(emailDeliveryAttempt.FinishedAt) },
@@ -156,6 +157,7 @@ public sealed class EmailDeliveryAttemptRepository : IEmailDeliveryAttemptReposi
         return EmailDeliveryAttempt.Rehydrate(
             emailDeliveryAttemptId: reader.GetInt64(reader.GetOrdinal("EmailDeliveryAttemptId")),
             emailDeliveryId: reader.GetInt64(reader.GetOrdinal("EmailDeliveryId")),
+            messageId: reader.GetString(reader.GetOrdinal("MessageId")),
             attemptNumber: reader.GetInt32(reader.GetOrdinal("AttemptNumber")),
             startedAt: reader.GetDateTime(reader.GetOrdinal("StartedAt")),
             finishedAt: GetNullableDateTime(reader, "FinishedAt"),

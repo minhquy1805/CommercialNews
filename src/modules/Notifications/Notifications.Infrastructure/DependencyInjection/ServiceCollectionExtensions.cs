@@ -1,12 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Notifications.Application.Ports.Persistence.Read;
-using Notifications.Application.Ports.Persistence.Transactions;
-using Notifications.Application.Ports.Persistence.Write;
+using Notifications.Application.Ports.Persistence;
 using Notifications.Application.Ports.Services;
+using Notifications.Application.Ports.Transactions;
 using Notifications.Infrastructure.Persistence.Exceptions;
-using Notifications.Infrastructure.Persistence.Repositories.Read;
-using Notifications.Infrastructure.Persistence.Repositories.Write;
+using Notifications.Infrastructure.Persistence.Repositories;
 using Notifications.Infrastructure.Persistence.Sql;
 using Notifications.Infrastructure.Services;
 
@@ -25,15 +23,13 @@ public static class ServiceCollectionExtensions
             configuration.GetSection("Notifications:Email"));
 
         services.AddScoped<NotificationsUnitOfWork>();
-        services.AddScoped<INotificationsUnitOfWork>(sp => sp.GetRequiredService<NotificationsUnitOfWork>());
+        services.AddScoped<INotificationsUnitOfWork>(
+            sp => sp.GetRequiredService<NotificationsUnitOfWork>());
 
         services.AddSingleton<NotificationsSqlExceptionTranslator>();
 
-        services.AddScoped<IOutboxMessageRepository, OutboxMessageRepository>();
         services.AddScoped<IEmailDeliveryRepository, EmailDeliveryRepository>();
         services.AddScoped<IEmailDeliveryAttemptRepository, EmailDeliveryAttemptRepository>();
-
-        services.AddScoped<IOutboxMessageQueryRepository, OutboxMessageQueryRepository>();
         services.AddScoped<IEmailDeliveryQueryRepository, EmailDeliveryQueryRepository>();
 
         services.AddScoped<INotificationRetryPolicy, NotificationRetryPolicy>();

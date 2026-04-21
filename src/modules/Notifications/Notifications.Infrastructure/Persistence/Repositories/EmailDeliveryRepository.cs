@@ -1,12 +1,12 @@
 using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
-using Notifications.Application.Ports.Persistence.Write;
+using Notifications.Application.Ports.Persistence;
 using Notifications.Domain.Entities;
 using Notifications.Infrastructure.Persistence.Exceptions;
 using Notifications.Infrastructure.Persistence.Sql;
 
-namespace Notifications.Infrastructure.Persistence.Repositories.Write;
+namespace Notifications.Infrastructure.Persistence.Repositories;
 
 public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
 {
@@ -78,11 +78,9 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
                 new SqlParameter("@BusinessDedupeKey", SqlDbType.NVarChar, 300) { Value = emailDelivery.BusinessDedupeKey },
                 new SqlParameter("@RecipientUserId", SqlDbType.BigInt) { Value = ToDbValue(emailDelivery.RecipientUserId) },
                 new SqlParameter("@ToEmail", SqlDbType.NVarChar, 320) { Value = emailDelivery.ToEmail },
-                new SqlParameter("@ToEmailHash", SqlDbType.VarChar, 64) { Value = ToDbValue(emailDelivery.ToEmailHash) },
                 new SqlParameter("@TemplateKey", SqlDbType.NVarChar, 100) { Value = emailDelivery.TemplateKey },
-                new SqlParameter("@TemplateVersion", SqlDbType.Int) { Value = ToDbValue(emailDelivery.TemplateVersion) },
-                new SqlParameter("@Subject", SqlDbType.NVarChar, 300) { Value = ToDbValue(emailDelivery.Subject) },
                 new SqlParameter("@Provider", SqlDbType.VarChar, 30) { Value = emailDelivery.Provider },
+                new SqlParameter("@Priority", SqlDbType.TinyInt) { Value = emailDelivery.Priority },
                 new SqlParameter("@CorrelationId", SqlDbType.NVarChar, 100) { Value = ToDbValue(emailDelivery.CorrelationId) },
                 emailDeliveryIdParameter
             ]);
@@ -271,7 +269,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
 
     public async Task<int> MarkSentAsync(
         long emailDeliveryId,
-        string? providerMessageId,
         CancellationToken cancellationToken = default)
     {
         try
@@ -286,7 +283,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
             command.Parameters.AddRange(
             [
                 new SqlParameter("@EmailDeliveryId", SqlDbType.BigInt) { Value = emailDeliveryId },
-                new SqlParameter("@ProviderMessageId", SqlDbType.NVarChar, 200) { Value = ToDbValue(providerMessageId) },
                 affectedRowsParameter
             ]);
 
@@ -305,7 +301,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
     public async Task<int> MarkFailedAsync(
         long emailDeliveryId,
         DateTime? nextRetryAt,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         CancellationToken cancellationToken = default)
@@ -323,7 +318,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
             [
                 new SqlParameter("@EmailDeliveryId", SqlDbType.BigInt) { Value = emailDeliveryId },
                 new SqlParameter("@NextRetryAt", SqlDbType.DateTime2) { Value = ToDbValue(nextRetryAt) },
-                new SqlParameter("@LastError", SqlDbType.NVarChar, 2000) { Value = ToDbValue(lastError) },
                 new SqlParameter("@LastErrorCode", SqlDbType.NVarChar, 100) { Value = ToDbValue(lastErrorCode) },
                 new SqlParameter("@LastErrorClass", SqlDbType.VarChar, 30) { Value = ToDbValue(lastErrorClass) },
                 affectedRowsParameter
@@ -343,7 +337,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
 
     public async Task<int> MarkDeadAsync(
         long emailDeliveryId,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         CancellationToken cancellationToken = default)
@@ -360,7 +353,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
             command.Parameters.AddRange(
             [
                 new SqlParameter("@EmailDeliveryId", SqlDbType.BigInt) { Value = emailDeliveryId },
-                new SqlParameter("@LastError", SqlDbType.NVarChar, 2000) { Value = ToDbValue(lastError) },
                 new SqlParameter("@LastErrorCode", SqlDbType.NVarChar, 100) { Value = ToDbValue(lastErrorCode) },
                 new SqlParameter("@LastErrorClass", SqlDbType.VarChar, 30) { Value = ToDbValue(lastErrorClass) },
                 affectedRowsParameter
@@ -380,7 +372,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
 
     public async Task<int> MarkSuppressedAsync(
         long emailDeliveryId,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         CancellationToken cancellationToken = default)
@@ -397,7 +388,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
             command.Parameters.AddRange(
             [
                 new SqlParameter("@EmailDeliveryId", SqlDbType.BigInt) { Value = emailDeliveryId },
-                new SqlParameter("@LastError", SqlDbType.NVarChar, 2000) { Value = ToDbValue(lastError) },
                 new SqlParameter("@LastErrorCode", SqlDbType.NVarChar, 100) { Value = ToDbValue(lastErrorCode) },
                 new SqlParameter("@LastErrorClass", SqlDbType.VarChar, 30) { Value = ToDbValue(lastErrorClass) },
                 affectedRowsParameter
@@ -418,7 +408,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
     public async Task<int> MarkAmbiguousAsync(
         long emailDeliveryId,
         DateTime? nextRetryAt,
-        string? lastError,
         string? lastErrorCode,
         string? lastErrorClass,
         CancellationToken cancellationToken = default)
@@ -436,7 +425,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
             [
                 new SqlParameter("@EmailDeliveryId", SqlDbType.BigInt) { Value = emailDeliveryId },
                 new SqlParameter("@NextRetryAt", SqlDbType.DateTime2) { Value = ToDbValue(nextRetryAt) },
-                new SqlParameter("@LastError", SqlDbType.NVarChar, 2000) { Value = ToDbValue(lastError) },
                 new SqlParameter("@LastErrorCode", SqlDbType.NVarChar, 100) { Value = ToDbValue(lastErrorCode) },
                 new SqlParameter("@LastErrorClass", SqlDbType.VarChar, 30) { Value = ToDbValue(lastErrorClass) },
                 affectedRowsParameter
@@ -528,22 +516,14 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
             businessDedupeKey: reader.GetString(reader.GetOrdinal("BusinessDedupeKey")),
             recipientUserId: GetNullableInt64(reader, "RecipientUserId"),
             toEmail: reader.GetString(reader.GetOrdinal("ToEmail")),
-            toEmailHash: GetNullableString(reader, "ToEmailHash"),
             templateKey: reader.GetString(reader.GetOrdinal("TemplateKey")),
-            templateVersion: GetNullableInt32(reader, "TemplateVersion"),
-            subject: GetNullableString(reader, "Subject"),
             provider: reader.GetString(reader.GetOrdinal("Provider")),
-            providerMessageId: GetNullableString(reader, "ProviderMessageId"),
+            priority: reader.GetByte(reader.GetOrdinal("Priority")),
             status: reader.GetString(reader.GetOrdinal("Status")),
             attemptCount: reader.GetInt32(reader.GetOrdinal("AttemptCount")),
             lastAttemptAt: GetNullableDateTime(reader, "LastAttemptAt"),
             nextRetryAt: GetNullableDateTime(reader, "NextRetryAt"),
             sentAt: GetNullableDateTime(reader, "SentAt"),
-            failedAt: GetNullableDateTime(reader, "FailedAt"),
-            deadAt: GetNullableDateTime(reader, "DeadAt"),
-            suppressedAt: GetNullableDateTime(reader, "SuppressedAt"),
-            ambiguousAt: GetNullableDateTime(reader, "AmbiguousAt"),
-            lastError: GetNullableString(reader, "LastError"),
             lastErrorCode: GetNullableString(reader, "LastErrorCode"),
             lastErrorClass: GetNullableString(reader, "LastErrorClass"),
             correlationId: GetNullableString(reader, "CorrelationId"),
@@ -563,12 +543,6 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
     {
         int ordinal = reader.GetOrdinal(columnName);
         return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
-    }
-
-    private static int? GetNullableInt32(SqlDataReader reader, string columnName)
-    {
-        int ordinal = reader.GetOrdinal(columnName);
-        return reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
     }
 
     private static DateTime? GetNullableDateTime(SqlDataReader reader, string columnName)
