@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Notifications.Application.Contracts.EmailDeliveries.Requests;
 using Notifications.Application.Contracts.EmailDeliveries.Responses;
 using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveries;
+using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryAttempts;
 using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryById;
 using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryByMessageId;
 using Notifications.Application.UseCases.EmailDeliveries.RetryEmailDelivery;
@@ -20,21 +21,29 @@ public sealed class NotificationsAdminController : ControllerBase
     private readonly IGetEmailDeliveriesUseCase _getEmailDeliveriesUseCase;
     private readonly IGetEmailDeliveryByIdUseCase _getEmailDeliveryByIdUseCase;
     private readonly IGetEmailDeliveryByMessageIdUseCase _getEmailDeliveryByMessageIdUseCase;
+    private readonly IGetEmailDeliveryAttemptsUseCase _getEmailDeliveryAttemptsUseCase;
     private readonly IRetryEmailDeliveryUseCase _retryEmailDeliveryUseCase;
 
     public NotificationsAdminController(
         IGetEmailDeliveriesUseCase getEmailDeliveriesUseCase,
         IGetEmailDeliveryByIdUseCase getEmailDeliveryByIdUseCase,
         IGetEmailDeliveryByMessageIdUseCase getEmailDeliveryByMessageIdUseCase,
+        IGetEmailDeliveryAttemptsUseCase getEmailDeliveryAttemptsUseCase,
         IRetryEmailDeliveryUseCase retryEmailDeliveryUseCase)
     {
-        _getEmailDeliveriesUseCase = getEmailDeliveriesUseCase;
-        _getEmailDeliveryByIdUseCase = getEmailDeliveryByIdUseCase;
-        _getEmailDeliveryByMessageIdUseCase = getEmailDeliveryByMessageIdUseCase;
-        _retryEmailDeliveryUseCase = retryEmailDeliveryUseCase;
+        _getEmailDeliveriesUseCase = getEmailDeliveriesUseCase
+            ?? throw new ArgumentNullException(nameof(getEmailDeliveriesUseCase));
+        _getEmailDeliveryByIdUseCase = getEmailDeliveryByIdUseCase
+            ?? throw new ArgumentNullException(nameof(getEmailDeliveryByIdUseCase));
+        _getEmailDeliveryByMessageIdUseCase = getEmailDeliveryByMessageIdUseCase
+            ?? throw new ArgumentNullException(nameof(getEmailDeliveryByMessageIdUseCase));
+        _getEmailDeliveryAttemptsUseCase = getEmailDeliveryAttemptsUseCase
+            ?? throw new ArgumentNullException(nameof(getEmailDeliveryAttemptsUseCase));
+        _retryEmailDeliveryUseCase = retryEmailDeliveryUseCase
+            ?? throw new ArgumentNullException(nameof(retryEmailDeliveryUseCase));
     }
 
-    [HttpGet("emails")]
+    [HttpGet("email-deliveries")]
     [ProducesResponseType(typeof(GetEmailDeliveriesHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetEmailDeliveriesAsync(
@@ -74,13 +83,8 @@ public sealed class NotificationsAdminController : ControllerBase
                     EmailDeliveryId = item.EmailDeliveryId,
                     MessageId = item.MessageId,
                     RecipientUserId = item.RecipientUserId,
-                    ToEmail = item.ToEmail,
-
-                    // Important:
-                    // Application list item currently does not expose ToEmailHash.
-                    // Keep the HTTP field for future compatibility, but map null here.
-                    ToEmailHash = null,
-
+                    MaskedToEmail = item.MaskedToEmail,
+                    ToEmailHash = item.ToEmailHash,
                     TemplateKey = item.TemplateKey,
                     TemplateVersion = item.TemplateVersion,
                     Provider = item.Provider,
@@ -112,7 +116,7 @@ public sealed class NotificationsAdminController : ControllerBase
             Result<GetEmailDeliveriesHttpResponse>.Success(response));
     }
 
-    [HttpGet("emails/{emailDeliveryId:long}")]
+    [HttpGet("email-deliveries/{emailDeliveryId:long}")]
     [ProducesResponseType(typeof(GetEmailDeliveryByIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
@@ -136,59 +140,13 @@ public sealed class NotificationsAdminController : ControllerBase
 
         GetEmailDeliveryByIdResponse value = result.Value!;
 
-        var response = new GetEmailDeliveryByIdHttpResponse
-        {
-            EmailDeliveryId = value.EmailDeliveryId,
-            MessageId = value.MessageId,
-            BusinessDedupeKey = value.BusinessDedupeKey,
-            RecipientUserId = value.RecipientUserId,
-            ToEmail = value.ToEmail,
-            ToEmailHash = value.ToEmailHash,
-            TemplateKey = value.TemplateKey,
-            TemplateVersion = value.TemplateVersion,
-            Subject = value.Subject,
-            Provider = value.Provider,
-            ProviderMessageId = value.ProviderMessageId,
-            Status = value.Status,
-            AttemptCount = value.AttemptCount,
-            LastAttemptAt = value.LastAttemptAt,
-            NextRetryAt = value.NextRetryAt,
-            SentAt = value.SentAt,
-            FailedAt = value.FailedAt,
-            DeadAt = value.DeadAt,
-            SuppressedAt = value.SuppressedAt,
-            AmbiguousAt = value.AmbiguousAt,
-            LastError = value.LastError,
-            LastErrorCode = value.LastErrorCode,
-            LastErrorClass = value.LastErrorClass,
-            CorrelationId = value.CorrelationId,
-            CreatedAt = value.CreatedAt,
-            UpdatedAt = value.UpdatedAt,
-            Attempts = value.Attempts
-                .Select(static attempt => new EmailDeliveryAttemptHttpResponse
-                {
-                    EmailDeliveryAttemptId = attempt.EmailDeliveryAttemptId,
-                    EmailDeliveryId = attempt.EmailDeliveryId,
-                    AttemptNumber = attempt.AttemptNumber,
-                    StartedAt = attempt.StartedAt,
-                    FinishedAt = attempt.FinishedAt,
-                    Outcome = attempt.Outcome,
-                    IsAmbiguous = attempt.IsAmbiguous,
-                    ProviderMessageId = attempt.ProviderMessageId,
-                    ProviderErrorCode = attempt.ProviderErrorCode,
-                    ErrorClass = attempt.ErrorClass,
-                    ErrorDetail = attempt.ErrorDetail,
-                    CorrelationId = attempt.CorrelationId,
-                    CreatedAt = attempt.CreatedAt
-                })
-                .ToArray()
-        };
+        var response = MapDetailResponse(value);
 
         return this.ToActionResult(
             Result<GetEmailDeliveryByIdHttpResponse>.Success(response));
     }
 
-    [HttpGet("emails/by-message/{messageId}")]
+    [HttpGet("email-deliveries/by-message/{messageId}")]
     [ProducesResponseType(typeof(GetEmailDeliveryByIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
@@ -212,35 +170,40 @@ public sealed class NotificationsAdminController : ControllerBase
 
         GetEmailDeliveryByIdResponse value = result.Value!;
 
-        var response = new GetEmailDeliveryByIdHttpResponse
+        var response = MapDetailResponse(value);
+
+        return this.ToActionResult(
+            Result<GetEmailDeliveryByIdHttpResponse>.Success(response));
+    }
+
+    [HttpGet("email-deliveries/{emailDeliveryId:long}/attempts")]
+    [ProducesResponseType(typeof(GetEmailDeliveryAttemptsHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetEmailDeliveryAttemptsAsync(
+        [FromRoute] long emailDeliveryId,
+        CancellationToken cancellationToken)
+    {
+        Result<GetEmailDeliveryAttemptsResponse> result =
+            await _getEmailDeliveryAttemptsUseCase.ExecuteAsync(
+                new GetEmailDeliveryAttemptsRequest
+                {
+                    EmailDeliveryId = emailDeliveryId
+                },
+                cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<GetEmailDeliveryAttemptsHttpResponse>.Failure(result.Error!));
+        }
+
+        GetEmailDeliveryAttemptsResponse value = result.Value!;
+
+        var response = new GetEmailDeliveryAttemptsHttpResponse
         {
             EmailDeliveryId = value.EmailDeliveryId,
-            MessageId = value.MessageId,
-            BusinessDedupeKey = value.BusinessDedupeKey,
-            RecipientUserId = value.RecipientUserId,
-            ToEmail = value.ToEmail,
-            ToEmailHash = value.ToEmailHash,
-            TemplateKey = value.TemplateKey,
-            TemplateVersion = value.TemplateVersion,
-            Subject = value.Subject,
-            Provider = value.Provider,
-            ProviderMessageId = value.ProviderMessageId,
-            Status = value.Status,
-            AttemptCount = value.AttemptCount,
-            LastAttemptAt = value.LastAttemptAt,
-            NextRetryAt = value.NextRetryAt,
-            SentAt = value.SentAt,
-            FailedAt = value.FailedAt,
-            DeadAt = value.DeadAt,
-            SuppressedAt = value.SuppressedAt,
-            AmbiguousAt = value.AmbiguousAt,
-            LastError = value.LastError,
-            LastErrorCode = value.LastErrorCode,
-            LastErrorClass = value.LastErrorClass,
-            CorrelationId = value.CorrelationId,
-            CreatedAt = value.CreatedAt,
-            UpdatedAt = value.UpdatedAt,
-            Attempts = value.Attempts
+            Items = value.Items
                 .Select(static attempt => new EmailDeliveryAttemptHttpResponse
                 {
                     EmailDeliveryAttemptId = attempt.EmailDeliveryAttemptId,
@@ -261,10 +224,10 @@ public sealed class NotificationsAdminController : ControllerBase
         };
 
         return this.ToActionResult(
-            Result<GetEmailDeliveryByIdHttpResponse>.Success(response));
+            Result<GetEmailDeliveryAttemptsHttpResponse>.Success(response));
     }
 
-    [HttpPost("emails/{emailDeliveryId:long}/retry")]
+    [HttpPost("email-deliveries/{emailDeliveryId:long}:retry")]
     [ProducesResponseType(typeof(RetryEmailDeliveryHttpResponse), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
@@ -296,5 +259,57 @@ public sealed class NotificationsAdminController : ControllerBase
         };
 
         return StatusCode(StatusCodes.Status202Accepted, response);
+    }
+
+    private static GetEmailDeliveryByIdHttpResponse MapDetailResponse(
+        GetEmailDeliveryByIdResponse value)
+    {
+        return new GetEmailDeliveryByIdHttpResponse
+        {
+            EmailDeliveryId = value.EmailDeliveryId,
+            MessageId = value.MessageId,
+            BusinessDedupeKey = value.BusinessDedupeKey,
+            RecipientUserId = value.RecipientUserId,
+            ToEmail = value.ToEmail,
+            ToEmailHash = value.ToEmailHash,
+            TemplateKey = value.TemplateKey,
+            TemplateVersion = value.TemplateVersion,
+            Subject = value.Subject,
+            Provider = value.Provider,
+            ProviderMessageId = value.ProviderMessageId,
+            Status = value.Status,
+            AttemptCount = value.AttemptCount,
+            LastAttemptAt = value.LastAttemptAt,
+            NextRetryAt = value.NextRetryAt,
+            SentAt = value.SentAt,
+            FailedAt = value.FailedAt,
+            DeadAt = value.DeadAt,
+            SuppressedAt = value.SuppressedAt,
+            AmbiguousAt = value.AmbiguousAt,
+            LastError = value.LastError,
+            LastErrorCode = value.LastErrorCode,
+            LastErrorClass = value.LastErrorClass,
+            CorrelationId = value.CorrelationId,
+            CreatedAt = value.CreatedAt,
+            UpdatedAt = value.UpdatedAt,
+            Attempts = value.Attempts
+                .Select(static attempt => new EmailDeliveryAttemptHttpResponse
+                {
+                    EmailDeliveryAttemptId = attempt.EmailDeliveryAttemptId,
+                    EmailDeliveryId = attempt.EmailDeliveryId,
+                    AttemptNumber = attempt.AttemptNumber,
+                    StartedAt = attempt.StartedAt,
+                    FinishedAt = attempt.FinishedAt,
+                    Outcome = attempt.Outcome,
+                    IsAmbiguous = attempt.IsAmbiguous,
+                    ProviderMessageId = attempt.ProviderMessageId,
+                    ProviderErrorCode = attempt.ProviderErrorCode,
+                    ErrorClass = attempt.ErrorClass,
+                    ErrorDetail = attempt.ErrorDetail,
+                    CorrelationId = attempt.CorrelationId,
+                    CreatedAt = attempt.CreatedAt
+                })
+                .ToArray()
+        };
     }
 }

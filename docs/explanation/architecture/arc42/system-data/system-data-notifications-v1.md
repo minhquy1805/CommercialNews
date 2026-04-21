@@ -2,224 +2,498 @@
 
 > **Recommended file:** `explanation/architecture/arc42/system-data/system-data-notifications-v1.md`  
 > **Module:** Notifications  
-> **Purpose:** Deliver system emails (verification/reset/optional new-article) **reliably** without blocking core flows, using **Outbox + delivery state machine**.
+> **Purpose:** Deliver system emails reliably **after committed truth exists**, without blocking core flows, using the standard **Outbox → Broker/Worker → Delivery State** pattern.
 
 ---
 
 ## 0) Data System fit (V1)
 
-Notifications is a **non-critical side-effect module** that must not break core flows.
+Notifications is a **non-critical side-effect module**.
 
-- **Truth store for async intent:** `OutboxMessage` (durable, retry-driven)
-- **Delivery workflow:** `EmailDelivery` (visibility + dedup + provider outcomes)
-- **Transport:** broker/worker processes outbox; email provider is external
-- **Redis:** rate limiting + idempotency/dedup (required by constraints)
+Its job is to:
 
-**Non-negotiables (from Quality Requirements)**
-- Register/verify/forgot/reset **must work even if email provider is down**
-- Retries must be **safe** (idempotent; no duplicate successful sends)
-- Logs/events must avoid secrets/PII leakage (minimum necessary payload)
+- react to already-committed domain events
+- manage email delivery workflow
+- preserve delivery visibility, retry safety, and operability
+- avoid duplicate successful sends under at-least-once delivery
+
+### Architectural posture
+
+Notifications is **not** an owner of Identity truth, Authorization truth, or Content truth.
+
+Notifications is a **downstream follower** of committed truth:
+
+- Identity owns registration / verification / reset truth
+- Authorization owns governance truth
+- Content owns publication truth
+- Notifications owns only **delivery workflow truth**
+
+### Data role split
+
+Notifications V1 contains two different data concerns:
+
+1. **Replication / async intent artifact**
+   - `OutboxMessage`
+   - written atomically with truth change
+   - used to cross the async boundary safely
+
+2. **Notification-owned delivery workflow truth**
+   - `EmailDelivery`
+   - `EmailDeliveryAttempt`
+   - used to track dedup, attempts, provider outcomes, retries, and terminal status
+
+### V1 implementation note
+
+If CommercialNews uses a **shared system outbox**, Notifications should **reuse** that outbox rather than redefine a separate domain-owned outbox model.
+
+Therefore:
+
+- `OutboxMessage` is treated as a **system/messaging artifact**
+- `EmailDelivery` and `EmailDeliveryAttempt` are treated as **Notifications-owned operational truth**
+
+### Non-negotiables
+
+- register / verify / forgot / reset must still work if the email provider is down
+- retries must be safe
+- duplicate successful sends must be prevented
+- logs and payloads must avoid secrets / unnecessary PII
+- auth-critical emails must have higher delivery priority than low-priority notification traffic
 
 ---
 
 ## 1) Scope & boundaries (V1)
 
 ### In scope (V1)
-- System emails:
+
+- system emails:
   - verification email
   - password reset email
-  - optional “new article” notification
-- Outbox-driven processing (retry + backlog visibility)
-- Delivery state machine (queued/sent/failed + attempts)
+  - optional new-article notification
+- async processing of committed events
+- delivery state machine
+- retry and backlog visibility
+- idempotent delivery behavior
+- operational querying for delivery status and failures
 
 ### Out of scope (V2+)
-- Template versioning storage (`EmailTemplate`)
-- Subscriptions/preferences for “new article” notifications
-- DLQ in DB as a first-class store (`DeadLetterMessage`) if desired
+
+- template registry / template version management as first-class storage
+- subscription / preference management for content notifications
+- campaign / marketing delivery
+- advanced engagement tracking
+- DLQ as a first-class domain entity if not required yet
 
 ### Cross-module dependencies
-- Identity triggers verification/reset events; Notifications sends emails
-- Content triggers article published events (optional notifications)
-- Notifications does **not** own Identity or Content state; it reacts to events.
+
+- Identity emits verification/reset-related events; Notifications delivers emails
+- Content may emit article-published events; Notifications may optionally deliver article notifications
+- Authorization may emit governance events; Notifications may consume them only if policy requires email side effects
+- Notifications does **not** own Identity, Authorization, or Content lifecycle/state
+
+### Ownership boundary rule
+
+Notifications may store:
+
+- recipient address used for a send attempt
+- template key/version used for delivery
+- delivery outcome, attempts, timestamps, provider metadata
+
+Notifications must **not** become the owner of:
+
+- user verification state
+- password reset validity
+- role assignment truth
+- article publication truth
 
 ---
 
 ## 2) Capability → Entity mapping
 
-### 2.1 System email (verification, reset, optional new-article)
-**Entities**
-- `OutboxMessage` — durable intent + retry scheduling
-- `EmailDelivery` — email workflow state machine and provider attempts
+### 2.1 Async email delivery from committed events
 
-**V2 hooks**
-- `EmailTemplate` (versioned templates)
-- `NotificationSubscription` / `NotificationPreference`
+**System / messaging artifact**
+- `OutboxMessage`
+  - durable async intent
+  - scheduling / retry metadata for publication/processing
+  - not business truth of Notifications itself
 
-### 2.2 Abuse prevention (rate-limit)
-- Enforced primarily in **Redis/app layer**
-- Optional DB visibility via:
-  - `EmailRateLimitLog`, or
-  - analysis using `EmailDelivery` outcomes (less explicit)
+**Notifications-owned workflow truth**
+- `EmailDelivery`
+  - one delivery workflow per `MessageKey`
+  - delivery-level visibility and terminal state
+- `EmailDeliveryAttempt`
+  - append-only or near-append-only attempt history
+  - provider outcome / classification / error detail / timestamps
+
+### 2.2 Abuse prevention
+
+Primarily enforced outside delivery truth:
+
+- Redis / app-layer rate limit for resend / forgot / similar endpoints
+- optional DB visibility through a log table if operationally justified
+
+### 2.3 V2 hooks
+
+- `EmailTemplate`
+- `NotificationSubscription`
+- `NotificationPreference`
+- `DeadLetterMessage`
 
 ---
 
-## 3) Workload & hot paths (V1) (DDIA Ch3)
+## 3) Workload & hot paths (V1)
 
-- Writes are moderate (register/forgot/resend spikes possible during abuse)
-- Reads are mostly operational (dashboards, investigating failures)
-- The key “hot path” is **worker pulling backlog efficiently**:
-  - pending messages ordered by priority + next retry time
+### Write patterns
+
+- moderate steady delivery volume
+- bursty spikes during:
+  - register surges
+  - forgot password abuse
+  - resend storms
+  - provider recovery after outage
+
+### Read patterns
+
+Mostly operational:
+
+- inspect failed deliveries
+- inspect pending backlog
+- inspect attempts for a message
+- inspect delivery status for a user or correlation id
+
+### True hot path
+
+The dominant operational hot path is:
+
+- selecting pending work efficiently
+- applying priority-aware and retry-aware processing
+- preventing duplicate successful sends
+- draining backlog without starving auth-critical messages
 
 ---
 
-## 4) Dataflows (V1) — REST / DB / Broker (DDIA Ch4)
+## 4) Dataflows (V1) — REST / DB / Broker
 
-> Principle: core flows write business state + outbox in the same transaction; delivery is async.
+> Principle: core flows commit business truth and async intent first; Notifications acts later.
 
 ### 4.1 Email verification request (Identity → Notifications)
-**Sync (Identity API → DB)**
-- Create `UserAccount` (unverified)
-- Create `EmailVerificationToken` (store token hash in Identity)
-- Insert `OutboxMessage` event:
-  - `EventType = Auth.EmailVerificationRequested`
-  - payload contains only identifiers and template data (no raw token)
 
-**Async (Worker → Provider)**
-- Worker reads Outbox, creates/updates `EmailDelivery`
-- Sends email via provider
+**Sync (Identity API → DB)**
+
+Identity:
+
+- creates `UserAccount` in unverified state
+- creates `EmailVerificationToken` storing only token hash
+- writes `OutboxMessage` in the same transaction:
+  - `EventType = Auth.EmailVerificationRequested`
+
+**Async (Worker / consumer → Notifications)**
+
+Notifications:
+
+- consumes the committed event
+- resolves recipient + template inputs
+- creates `EmailDelivery` if not already created for the `MessageKey`
+- records an `EmailDeliveryAttempt`
+- sends via provider
+- updates delivery status safely
 
 **Failure behavior**
-- Provider failure does not break registration
-- Retries safe; duplicate successful sends are prevented
 
-### 4.2 Resend verification (rate-limited)
-- Rate limit in Redis/app
-- Insert new OutboxMessage (new MessageKey) only if allowed
-- Policy: older verification tokens can remain valid or be revoked (Identity policy)
+- provider failure does not break registration
+- retry is safe
+- duplicate successful sends are prevented by workflow state + dedup checks
 
-### 4.3 Forgot password / Reset email
-- Identity inserts Outbox event:
-  - `Auth.PasswordResetRequested`
-- Notifications sends reset email async
-- Token raw value is only in email; DB stores only hash
+---
 
-### 4.4 Optional: New article notification (Content → Notifications)
-- Content emits `Content.ArticlePublished`
-- Notifications may send subscriber emails (V2 subscription model)
+### 4.2 Resend verification
+
+**Sync**
+
+- rate-limited in Redis / app layer
+- Identity emits a new outbox event only when allowed
+
+**Async**
+
+- Notifications processes the new event independently
+- dedup is by `MessageKey`, not merely by user id
+
+**Policy note**
+
+Older verification tokens may remain valid or may be revoked by Identity policy; Notifications does not own that decision.
+
+---
+
+### 4.3 Forgot password / reset email
+
+**Sync**
+
+- Identity writes `Auth.PasswordResetRequested`
+- only identifiers / safe template data are carried in the event
+- raw reset secret must not be stored in outbox payload
+
+**Async**
+
+- Notifications creates/updates delivery workflow
+- sends reset email
+- records attempts and provider outcomes
+
+---
+
+### 4.4 Optional new article notification (Content → Notifications)
+
+**Sync**
+
+- Content commits publication truth
+- Content writes `Content.ArticlePublished` to outbox
+
+**Async**
+
+- Notifications may process this event if article notifications are enabled by policy
+- lower priority than auth-critical notifications
+
+---
+
+### 4.5 Optional governance email (Authorization → Notifications)
+
+**Sync**
+
+- Authorization commits governance truth
+- Authorization writes governance event to outbox
+
+**Async**
+
+- Notifications may process governance-related emails only when policy explicitly requires them
+
+**Boundary rule**
+
+Governance truth remains in Authorization regardless of notification success/failure.
 
 ---
 
 ## 5) Invariants (V1 rules)
 
 ### 5.1 Non-blocking core flows
-- Register/reset/publish flows only write Outbox; sending is async.
-- Failures in Notifications must not fail core writes.
 
-### 5.2 Idempotency & retry safety
-- Each email-trigger event has a unique `MessageKey`.
-- `EmailDelivery` allows **at most one successful send** per `MessageKey`.
-- Worker may process same outbox multiple times; must check state before sending.
+Core writes only require:
 
-### 5.3 Delivery state machine (monotonic)
-- `Queued → Sending → Sent | Failed`
-- `Sent` is terminal.
-- `Failed` may be terminal or may allow retry depending on policy; do not flip-flop.
+- business truth commit
+- outbox write in the same transaction
 
-### 5.4 Privacy & safety
-- Never store raw secrets/tokens in Outbox payload.
-- LastError fields must be redacted (no tokens, no stack traces with secrets).
-- Templates must sanitize variables (avoid injecting untrusted HTML).
-
-### 5.5 Burst handling
-- Backpressure is allowed for non-critical emails (new-article can lag).
-- Verification/reset should have higher priority than marketing-style sends.
+Email delivery is not part of core success.
 
 ---
 
-## 6) Redis plan (Notifications V1) — required
+### 5.2 Idempotency & retry safety
 
-### 6.1 Rate limiting (shared with Identity policy)
-Keys (examples):
+- each email-triggering event has a unique `MessageKey`
+- `EmailDelivery` allows **at most one terminal successful send** per `MessageKey`
+- the same message may be observed multiple times by workers/consumers
+- reprocessing must not create harmful duplicate successful sends
+
+---
+
+### 5.3 Delivery workflow ownership
+
+Notifications owns:
+
+- whether a delivery is queued, sending, sent, retryable-failed, or terminal-failed
+- how many attempts were made
+- provider result classification
+- what operational error was seen last
+
+Notifications does not own:
+
+- whether the originating business action is still valid
+- whether user/account/content/governance truth changed later
+
+---
+
+### 5.4 Delivery state machine
+
+Recommended monotonic workflow:
+
+- `Queued → Sending → Sent`
+- `Queued/Sending → Failed`
+- `Failed → Queued` only when retry policy explicitly re-queues the delivery
+- `Sent` is terminal
+
+Do not allow uncontrolled flip-flop across terminal states.
+
+---
+
+### 5.5 Attempt history correctness
+
+- every provider send attempt should be traceable
+- an attempt record must correspond to a real processing attempt
+- attempt history must support incident investigation and replay reasoning
+
+---
+
+### 5.6 Privacy & safety
+
+- never store raw verification/reset secrets in outbox or delivery tables
+- redact `LastError`
+- do not persist provider payloads that contain secrets unless explicitly sanitized
+- avoid storing more recipient/context data than necessary
+
+---
+
+### 5.7 Burst handling
+
+- backpressure is acceptable for low-priority notification traffic
+- verification/reset emails must outrank optional content notifications
+- retry storms must not starve fresh auth-critical deliveries
+
+---
+
+## 6) Redis plan (Notifications V1)
+
+Redis is allowed for acceleration and protection, but it is **not the source of truth**.
+
+### 6.1 Rate limiting
+
+Examples:
+
 - `cn:rl:resend:email:{emailNorm}:{window}`
 - `cn:rl:forgot:email:{emailNorm}:{window}`
 - `cn:rl:forgot:ip:{ip}:{window}`
 
-### 6.2 Dedup for consumers (at-least-once safe)
-- `cn:msg:processed:{MessageKey}` TTL 7–30 days  
-(align with max replay window / troubleshooting retention)
+### 6.2 Consumer dedup support
 
-### 6.3 Optional idempotency for REST commands
-If endpoints may be retried (timeouts):
-- `cn:idem:{operation}:{idempotencyKey}` TTL 10–60 minutes  
-Operations: register, resend, forgot.
+Examples:
+
+- `cn:msg:processed:{MessageKey}` with TTL aligned to replay/troubleshooting window
+
+This is a **supporting optimization**, not the only correctness mechanism.
+
+### 6.3 REST idempotency support (optional)
+
+Examples:
+
+- `cn:idem:{operation}:{idempotencyKey}`
+
+Useful for retryable public endpoints such as:
+
+- register
+- resend
+- forgot
+
+### 6.4 Redis correctness rule
+
+Redis may help reduce duplicate work, but durable delivery correctness must still be enforced by:
+
+- database uniqueness
+- delivery workflow checks
+- retry-safe application logic
 
 ---
 
 ## 7) Entities (Logical schema) — SQL Server (V1)
 
+---
+
 ### 7.1 `OutboxMessage`
-> If you already have a shared system outbox, reuse it. This schema is recommended for Notifications processing.
+
+> Preferred interpretation: a **shared system outbox** or shared messaging artifact.  
+> Reuse existing system outbox if present.
 
 | Field | Type | Null | Default | Notes |
 |---|---|---:|---|---|
 | OutboxId | BIGINT IDENTITY | NO |  | PK |
-| MessageKey | UNIQUEIDENTIFIER | NO | NEWID() | idempotency key |
-| EventType | NVARCHAR(120) | NO |  | `Auth.EmailVerificationRequested`, ... |
-| AggregateType | NVARCHAR(60) | NO |  | `User`, `Article` |
-| AggregateId | NVARCHAR(100) | NO |  | string for cross-module ids |
-| PayloadJson | NVARCHAR(MAX) | NO |  | **minimal + redacted** |
-| Priority | TINYINT | NO | `5` | 1=highest |
+| MessageKey | UNIQUEIDENTIFIER | NO | NEWID() | unique async message identity |
+| EventType | NVARCHAR(120) | NO |  | `Auth.EmailVerificationRequested`, `Auth.PasswordResetRequested`, ... |
+| AggregateType | NVARCHAR(60) | NO |  | `User`, `Article`, `RoleAssignment`, ... |
+| AggregateId | NVARCHAR(100) | NO |  | string-form cross-module id |
+| PayloadJson | NVARCHAR(MAX) | NO |  | minimal + redacted |
+| Priority | TINYINT | NO | `5` | 1 = highest |
 | OccurredAt | DATETIME2(3) | NO | SYSUTCDATETIME() | |
-| Status | VARCHAR(20) | NO | `'Pending'` | Pending/Processing/Processed/Failed |
-| RetryCount | INT | NO | `0` | |
-| NextRetryAt | DATETIME2(3) | YES |  | backoff |
+| Status | VARCHAR(20) | NO | `'Pending'` | Pending / Processing / Processed / Failed |
+| RetryCount | INT | NO | `0` | publication/processing retries |
+| NextRetryAt | DATETIME2(3) | YES |  | |
 | LastError | NVARCHAR(500) | YES |  | redacted |
 | ProcessedAt | DATETIME2(3) | YES |  | |
 
 **V2 hooks**
-- `PartitionKey` (burst control)
-- `ExpiresAt` (drop stale messages)
+- `PartitionKey`
+- `ExpiresAt`
+
+**Ownership note**
+- system/messaging concern
+- not notification business truth by itself
 
 ---
 
 ### 7.2 `EmailDelivery`
-> Delivery workflow visibility + dedup (one workflow per MessageKey).
+
+> One delivery workflow per `MessageKey`.
 
 | Field | Type | Null | Default | Notes |
 |---|---|---:|---|---|
 | EmailDeliveryId | BIGINT IDENTITY | NO |  | PK |
-| MessageKey | UNIQUEIDENTIFIER | NO |  | link to Outbox |
-| UserId | BIGINT | YES |  | optional |
-| ToEmail | NVARCHAR(320) | NO |  | recipient |
-| TemplateKey | NVARCHAR(80) | NO |  | VerifyEmail/ResetPassword/NewArticle |
+| MessageKey | UNIQUEIDENTIFIER | NO |  | unique workflow key |
+| UserId | BIGINT | YES |  | optional recipient identity reference |
+| ToEmail | NVARCHAR(320) | NO |  | recipient used for this workflow |
+| TemplateKey | NVARCHAR(80) | NO |  | `VerifyEmail`, `ResetPassword`, `NewArticle`, ... |
 | TemplateVersion | INT | YES |  | V2-ready |
-| Subject | NVARCHAR(200) | YES |  | optional |
-| Provider | VARCHAR(30) | NO | `'smtp'` | smtp/sendgrid… |
-| Status | VARCHAR(20) | NO | `'Queued'` | Queued/Sending/Sent/Failed |
-| AttemptCount | INT | NO | `0` | |
+| Subject | NVARCHAR(200) | YES |  | optional rendered subject snapshot |
+| Provider | VARCHAR(30) | NO | `'smtp'` | smtp / sendgrid / ... |
+| Status | VARCHAR(20) | NO | `'Queued'` | Queued / Sending / Sent / Failed |
+| AttemptCount | INT | NO | `0` | total attempts made |
 | LastAttemptAt | DATETIME2(3) | YES |  | |
-| SentAt | DATETIME2(3) | YES |  | terminal |
+| SentAt | DATETIME2(3) | YES |  | terminal success time |
 | LastError | NVARCHAR(500) | YES |  | redacted |
-| CorrelationId | NVARCHAR(100) | YES |  | trace |
+| CorrelationId | NVARCHAR(100) | YES |  | traceability |
 | CreatedAt | DATETIME2(3) | NO | SYSUTCDATETIME() | |
 | UpdatedAt | DATETIME2(3) | NO | SYSUTCDATETIME() | |
 
+**Rules**
+- one row per `MessageKey`
+- at most one successful terminal outcome per `MessageKey`
+
 **V2 hooks**
 - `ProviderMessageId`
-- `OpenCount`, `ClickCount` (engagement tracking)
+- engagement counters if ever needed
 
 ---
 
-### 7.3 (Optional) `EmailRateLimitLog`
+### 7.3 `EmailDeliveryAttempt`
+
+> Delivery attempt history for visibility, retry reasoning, and incident investigation.
+
+| Field | Type | Null | Default | Notes |
+|---|---|---:|---|---|
+| EmailDeliveryAttemptId | BIGINT IDENTITY | NO |  | PK |
+| EmailDeliveryId | BIGINT | NO |  | parent workflow |
+| MessageKey | UNIQUEIDENTIFIER | NO |  | denormalized lookup aid |
+| AttemptNumber | INT | NO |  | 1..N within workflow |
+| StartedAt | DATETIME2(3) | NO | SYSUTCDATETIME() | |
+| CompletedAt | DATETIME2(3) | YES |  | |
+| Outcome | VARCHAR(20) | NO |  | Succeeded / Failed / TimedOut / Rejected |
+| Provider | VARCHAR(30) | NO | `'smtp'` | |
+| ErrorClass | VARCHAR(30) | YES |  | transient / permanent / policy / unknown |
+| ErrorCode | NVARCHAR(80) | YES |  | provider/app classification |
+| ErrorMessage | NVARCHAR(500) | YES |  | redacted |
+| CorrelationId | NVARCHAR(100) | YES |  | |
+| CreatedAt | DATETIME2(3) | NO | SYSUTCDATETIME() | |
+
+**Rules**
+- attempt history must be append-safe
+- one attempt number per workflow must be unique
+
+---
+
+### 7.4 `EmailRateLimitLog` (optional)
+
 | Field | Type | Null | Default | Notes |
 |---|---|---:|---|---|
 | RateLogId | BIGINT IDENTITY | NO |  | PK |
 | UserId | BIGINT | YES |  | |
-| Endpoint | NVARCHAR(60) | NO |  | register/forgot/resend |
+| Endpoint | NVARCHAR(60) | NO |  | register / forgot / resend |
 | ToEmail | NVARCHAR(320) | YES |  | |
 | IpAddress | NVARCHAR(45) | YES |  | |
 | Allowed | BIT | NO | `1` | decision |
-| Reason | NVARCHAR(120) | YES |  | RateLimited/Blocked |
+| Reason | NVARCHAR(120) | YES |  | RateLimited / Blocked / ... |
 | OccurredAt | DATETIME2(3) | NO | SYSUTCDATETIME() | |
 | CorrelationId | NVARCHAR(100) | YES |  | |
 
@@ -228,11 +502,12 @@ Operations: register, resend, forgot.
 ## 8) Constraints & indexes — Notifications (V1)
 
 ### 8.1 OutboxMessage
+
 **Constraints**
 - PK: `PK_OutboxMessage(OutboxId)`
 - UNIQUE: `UQ_Outbox_MessageKey(MessageKey)`
 
-**Indexes (backlog + processing)**
+**Indexes**
 - `IX_Outbox_Status_Priority_NextRetryAt`
   - Key: `(Status, Priority, NextRetryAt)`
 - `IX_Outbox_OccurredAt`
@@ -240,25 +515,50 @@ Operations: register, resend, forgot.
 - `IX_Outbox_Aggregate`
   - Key: `(AggregateType, AggregateId, OccurredAt DESC)`
 
+---
+
 ### 8.2 EmailDelivery
+
 **Constraints**
 - PK: `PK_EmailDelivery(EmailDeliveryId)`
-- UNIQUE (dedup): `UQ_EmailDelivery_MessageKey(MessageKey)`
+- UNIQUE: `UQ_EmailDelivery_MessageKey(MessageKey)`
 - CHECK:
   - `Status IN ('Queued','Sending','Sent','Failed')`
   - `AttemptCount >= 0`
 
-**Indexes (ops/dashboards)**
+**Indexes**
 - `IX_EmailDelivery_Status_LastAttemptAt`
   - Key: `(Status, LastAttemptAt DESC)`
 - `IX_EmailDelivery_UserId_CreatedAt`
   - Key: `(UserId, CreatedAt DESC)`
 - `IX_EmailDelivery_TemplateKey_CreatedAt`
   - Key: `(TemplateKey, CreatedAt DESC)`
-- `IX_EmailDelivery_ToEmail_CreatedAt` (optional; PII)
+- `IX_EmailDelivery_ToEmail_CreatedAt` *(optional / PII-sensitive)*
   - Key: `(ToEmail, CreatedAt DESC)`
 
-### 8.3 EmailRateLimitLog (optional)
+---
+
+### 8.3 EmailDeliveryAttempt
+
+**Constraints**
+- PK: `PK_EmailDeliveryAttempt(EmailDeliveryAttemptId)`
+- FK/logical ref: `EmailDeliveryId -> EmailDelivery.EmailDeliveryId`
+- UNIQUE: `(EmailDeliveryId, AttemptNumber)`
+- CHECK:
+  - `AttemptNumber > 0`
+
+**Indexes**
+- `IX_EmailDeliveryAttempt_EmailDeliveryId_AttemptNumber`
+  - Key: `(EmailDeliveryId, AttemptNumber DESC)`
+- `IX_EmailDeliveryAttempt_MessageKey_CreatedAt`
+  - Key: `(MessageKey, CreatedAt DESC)`
+- `IX_EmailDeliveryAttempt_Outcome_CreatedAt`
+  - Key: `(Outcome, CreatedAt DESC)`
+
+---
+
+### 8.4 EmailRateLimitLog (optional)
+
 - `IX_RateLog_UserId_OccurredAt`
 - `IX_RateLog_IpAddress_OccurredAt`
 - `IX_RateLog_Endpoint_OccurredAt`
@@ -268,238 +568,113 @@ Operations: register, resend, forgot.
 ## 9) Retention & operational jobs (V1 policy)
 
 ### 9.1 Outbox retention
-- Keep successful outbox messages for a short window (troubleshooting/replay), then purge.
-- Keep failed/DLQ messages longer for investigations.
+
+- keep successfully processed outbox rows for a short troubleshooting/replay window
+- keep failed/poison rows longer for investigation
+- purge policy must not remove data needed for active replay/debug windows
 
 ### 9.2 Delivery retention
-- Keep EmailDelivery records long enough for ops + audit needs.
-- Purge/redact PII fields if required by privacy policy.
 
-### 9.3 Replay policy
-- Reprocessing must be safe due to idempotency (MessageKey dedup).
-- Poison messages beyond max attempts move to Failed/DLQ and require manual action.
+- keep `EmailDelivery` long enough for ops, troubleshooting, and audit-adjacent needs
+- redact or purge PII where policy requires it
+
+### 9.3 Attempt retention
+
+- keep `EmailDeliveryAttempt` long enough to support incident investigation and retry analysis
+- attempts may be retained longer than transient outbox rows when useful operationally
+
+### 9.4 Replay policy
+
+- replay must be safe because correctness is guarded by `MessageKey` + delivery workflow state
+- poison messages beyond max attempts move to terminal-failed / DLQ-style handling according to policy
+- replay must not cause multiple successful sends for the same `MessageKey`
 
 ---
 
-## 10) V2 hooks (Notifications)
-- New-article notifications:
-  - `NotificationSubscription(UserId, Type, CategoryId?, IsEnabled, CreatedAt)`
-  - `NotificationPreference(UserId, Channel, IsEnabled)`
-- Template safety/versioning:
-  - `EmailTemplate(TemplateKey, Version, Subject, BodyHtml, BodyText, UpdatedAt, UpdatedBy)`
-- DLQ as DB entity:
-  - `DeadLetterMessage(MessageKey, EventType, PayloadJson, Reason, FailedAt)`
+## 10) V2 hooks
+
+- `NotificationSubscription(UserId, Type, CategoryId?, IsEnabled, CreatedAt)`
+- `NotificationPreference(UserId, Channel, IsEnabled)`
+- `EmailTemplate(TemplateKey, Version, Subject, BodyHtml, BodyText, UpdatedAt, UpdatedBy)`
+- `DeadLetterMessage(MessageKey, EventType, PayloadJson, Reason, FailedAt)`
 
 ---
 
 ## 11) ADR candidates
-- Outbox strategy: shared system outbox vs module-specific outbox
-- Retry/backoff policy: attempt thresholds and backoff schedule
-- Redis policy: rate-limit keys + dedup TTL window
-- Provider strategy: SMTP vs provider API and provider id handling
-- PII policy: what to store in EmailDelivery and how long
+
+- shared system outbox vs module-specific outbox
+- retry/backoff schedule and max-attempt policy
+- Redis dedup TTL and replay window alignment
+- provider strategy and provider result classification
+- PII storage/redaction/retention policy
+- whether `EmailDeliveryAttempt` is mandatory in V1 or can be introduced incrementally
 
 ---
 
-## 12) Partitioning Readiness (V1/V2)
+## 12) Partitioning readiness (V1/V2)
 
-> This section captures **partitioning and workload-partitioning readiness** for Notifications.
-> V1 remains **non-sharded by default**; priority is reliable async processing and backlog control without impacting core flows.
+Notifications is a **bursty async processing module**.
 
-### 12.1 Why Notifications is a partitioning-risk module
+### 12.1 Main scaling risk
 
-Notifications is a **bursty async side-effect module**:
+The first scaling bottleneck is usually:
 
-* register/forgot/resend spikes can create backlog quickly
-* provider slowdowns/failures amplify retries and queue pressure
-* worker pull efficiency becomes the operational hot path
+- worker throughput
+- retry storms
+- backlog drain time
+- priority starvation
 
-**V1 principle:** optimize for **reliable backlog processing** and **safe retries** before DB sharding.
+before database sharding becomes necessary.
 
----
+### 12.2 Dominant access patterns
 
-### 12.2 Primary access patterns (V1)
-
-**Hot path (worker)**
-
-* pull pending outbox messages by `(Status, Priority, NextRetryAt)`
-* process and update delivery state machine
-* retry failed deliveries safely
+**Hot path**
+- poll pending outbox by `(Status, Priority, NextRetryAt)`
+- create/update delivery workflow
+- append attempt history
+- classify failures and schedule retry
 
 **Operational reads**
-
-* backlog inspection
-* failed deliveries investigation
-* delivery status by message/user/template/time
-
-**Core flows dependency rule**
-
-* register/verify/forgot/reset/publish only write business state + outbox
-* email sending is async and must not block core flows
-
----
-
-### 12.3 Secondary-index-heavy queries (present and future)
-
-**V1**
-
-* Outbox polling by status/priority/retry time
-* EmailDelivery operational queries by status/time/user/template
-* failure investigations (`Failed`, `LastAttemptAt`, `MessageKey`)
-
-**V2+**
-
-* subscription/preference queries
-* campaign/new-article delivery analytics
-* DLQ search and replay tooling
-
-**Implication**
-
-* Notifications is operational-query-heavy, but the dominant scale risk is usually **worker throughput and backlog**, not immediate truth-store sharding.
-
----
-
-### 12.4 Candidate partitioning strategy (future)
-
-Partitioning choices should be driven by **workflow shape** (queue/retry/backoff), not just table size.
-
-#### A) `OutboxMessage` (durable async intent)
-
-**Likely fit (future):** **workload lanes first**, then optional data partitioning
-
-* lane ownership by logical shard (e.g., hash bucket / priority class / event family)
-* optional DB partitioning later if backlog volume or retention pressure grows
-
-**V2 hook already present**
-
-* `PartitionKey` (burst control) is a strong future-ready field
-
-#### B) `EmailDelivery` (workflow state / dedup)
-
-**Likely fit:** defer DB partitioning in V1
-
-* prioritize dedup uniqueness (`MessageKey`) and operational indexes
-* scale reads via ops queries/indexes before sharding
-
-#### C) Retry / DLQ workloads
-
-**Likely fit:** workload partitioning (retry lanes, priority lanes)
-
-* separate urgent auth emails from non-critical sends (e.g., new-article notifications)
-
----
-
-### 12.5 Hotspot and skew risks (V1)
-
-#### A) Workload hotspots (most important)
-
-* many pending messages with similar `NextRetryAt`
-* retry storms after provider outage/recovery
-* all workers competing for the same pending set
-
-#### B) Priority skew
-
-* verification/reset should outrank lower-priority sends
-* poor scheduling can cause starvation or latency spikes for security-related emails
-
-#### C) Operational read skew
-
-* repeated dashboard/ops queries on failed/sending states during incidents
-
----
-
-### 12.6 V1 mitigations (no sharding yet)
-
-CommercialNews V1 already has the right baseline mitigations:
-
-* **Outbox + async delivery** (core flows remain non-blocking)
-* **Idempotent processing** with `MessageKey` and dedup checks
-* **Retry/backoff + failure visibility** (`RetryCount`, `NextRetryAt`, `LastError`)
-* **Priority-aware polling** (`Status`, `Priority`, `NextRetryAt`)
-* **Redis rate-limit + dedup keys** (abuse and at-least-once safety)
-* **Operational indexes** for backlog and delivery state visibility
-
-These are preferred before introducing shard complexity.
-
----
-
-### 12.7 V2+ scale options (selective)
-
-Introduce stronger partitioning only when sustained signals justify it.
-
-#### Option A — Worker lanes / ownership partitioning (recommended first)
-
-Partition processing work by logical lane, for example:
-
-* priority lane (auth-critical vs non-critical)
-* hash bucket (`MessageKey` / `AggregateId`)
-* event family (`Auth.*`, `Content.*`)
-
-**Why first**
-
-* directly improves throughput and contention control
-* lower complexity than DB sharding
-* aligns with API + Worker topology
-
-#### Option B — Retry lanes / backoff buckets
-
-Separate retry-heavy workloads from fresh pending workloads to avoid queue starvation and retry storms overwhelming normal delivery.
-
-#### Option C — Data partitioning for outbox/delivery tables (later)
-
-Consider when:
-
-* retention/purge/replay becomes operationally expensive
-* polling/update contention persists despite lane ownership and indexing
-* recovery/rebuild windows become too slow
-
----
-
-### 12.8 Rebalancing and routing readiness (future)
-
-Notifications is a strong candidate for **workload rebalancing** before data-store sharding.
-
-**Likely rebalance unit**
-
-* worker lane / ownership shard
-* retry lane / priority lane
-
-**Routing requirement**
-
-* authoritative mapping for `lane -> worker owner`
-* safe reassignment with throttling and observability
-
-**Guardrail**
-
-* rebalance/scale changes must not worsen:
-
-  * auth email lag (verification/reset)
-  * outbox oldest pending age
-  * consumer failure/DLQ rates
-
----
-
-### 12.9 Partition-readiness observability signals (Notifications)
-
-Use existing V1 measurement signals to decide when stronger partitioning is needed:
-
-* outbox pending count
-* outbox oldest pending age
-* queue depth (ready/unacked)
-* consumer processing latency P95/P99
-* consumer failure/retry rate
-* DLQ rate / DLQ oldest age (if enabled)
-* dedupe hits / idempotency rejects
-* delivery lag for verification/reset emails vs lower-priority sends
-* provider failure bursts and recovery backlog drain time
-
-**Scale trigger (policy-level)**
-Consider stronger workload/data partitioning when sustained pressure causes:
-
-* backlog/lag that does not self-recover after provider recovery
-* retry storms causing contention or starvation
-* auth email latency degradation despite current indexing + backoff policy
-* replay/recovery operations becoming operationally unsafe
+- backlog inspection
+- failed delivery inspection
+- attempt history by message/delivery/user/template/time
+
+### 12.3 Workload partitioning posture
+
+Prefer workload partitioning before DB sharding:
+
+- auth-critical lane vs low-priority lane
+- retry lane vs fresh-pending lane
+- event-family lane (`Auth.*`, `Content.*`, `Authorization.*`)
+- hash-bucket ownership if needed later
+
+### 12.4 Hotspot/skew risks
+
+- many messages sharing similar `NextRetryAt`
+- provider outage causing retry wave
+- all workers competing for the same pending set
+- auth-critical notifications being starved by low-priority traffic
+
+### 12.5 V1 mitigations
+
+- outbox-driven async delivery
+- priority-aware polling
+- durable dedup/correctness via workflow state
+- Redis rate limit + duplicate-work reduction
+- retry/backoff and failure visibility
+- operational indexes for backlog and attempt analysis
+
+### 12.6 Readiness signals
+
+- outbox pending count
+- outbox oldest pending age
+- delivery lag for verification/reset
+- queue depth ready/unacked
+- worker P95/P99 processing latency
+- failure/retry rate
+- terminal-failed / DLQ rate
+- dedupe hits / idempotency rejects
+- backlog drain time after provider recovery
 
 ---
 

@@ -8,7 +8,7 @@ public sealed class EmailDeliveryListResultItem
 
     public long? RecipientUserId { get; init; }
 
-    public string? ToEmail { get; init; }
+    public string? MaskedToEmail { get; init; }
 
     public string? ToEmailHash { get; init; }
 

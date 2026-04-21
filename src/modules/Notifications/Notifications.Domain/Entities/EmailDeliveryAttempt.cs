@@ -9,6 +9,8 @@ public sealed class EmailDeliveryAttempt
 
     public long EmailDeliveryId { get; private set; }
 
+    public string MessageId { get; private set; } = null!;
+
     public int AttemptNumber { get; private set; }
 
     public DateTime StartedAt { get; private set; }
@@ -35,50 +37,36 @@ public sealed class EmailDeliveryAttempt
     {
     }
 
-    public static EmailDeliveryAttempt Create(
+    public static EmailDeliveryAttempt Start(
         long emailDeliveryId,
+        string messageId,
         int attemptNumber,
         DateTime startedAt,
-        string outcome,
-        bool isAmbiguous = false,
-        DateTime? finishedAt = null,
-        string? providerMessageId = null,
-        string? providerErrorCode = null,
-        string? errorClass = null,
-        string? errorDetail = null,
         string? correlationId = null)
     {
         ValidateEmailDeliveryId(emailDeliveryId);
+        ValidateMessageId(messageId);
         ValidateAttemptNumber(attemptNumber);
         ValidateStartedAt(startedAt);
-        ValidateFinishedAt(startedAt, finishedAt);
-        ValidateOutcome(outcome);
-        ValidateProviderMessageId(providerMessageId);
-        ValidateProviderErrorCode(providerErrorCode);
-        ValidateErrorClass(errorClass);
-        ValidateErrorDetail(errorDetail);
         ValidateCorrelationId(correlationId);
 
         return new EmailDeliveryAttempt
         {
             EmailDeliveryId = emailDeliveryId,
+            MessageId = NormalizeRequired(messageId),
             AttemptNumber = attemptNumber,
             StartedAt = startedAt,
-            FinishedAt = finishedAt,
-            Outcome = NormalizeRequired(outcome),
-            IsAmbiguous = isAmbiguous,
-            ProviderMessageId = NormalizeOptional(providerMessageId),
-            ProviderErrorCode = NormalizeOptional(providerErrorCode),
-            ErrorClass = NormalizeOptional(errorClass),
-            ErrorDetail = NormalizeOptional(errorDetail),
+            Outcome = EmailAttemptOutcome.Skipped,
+            IsAmbiguous = false,
             CorrelationId = NormalizeOptional(correlationId),
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = startedAt
         };
     }
 
     public static EmailDeliveryAttempt Rehydrate(
         long emailDeliveryAttemptId,
         long emailDeliveryId,
+        string messageId,
         int attemptNumber,
         DateTime startedAt,
         DateTime? finishedAt,
@@ -99,6 +87,7 @@ public sealed class EmailDeliveryAttempt
         }
 
         ValidateEmailDeliveryId(emailDeliveryId);
+        ValidateMessageId(messageId);
         ValidateAttemptNumber(attemptNumber);
         ValidateStartedAt(startedAt);
         ValidateFinishedAt(startedAt, finishedAt);
@@ -108,11 +97,13 @@ public sealed class EmailDeliveryAttempt
         ValidateErrorClass(errorClass);
         ValidateErrorDetail(errorDetail);
         ValidateCorrelationId(correlationId);
+        ValidateCreatedAt(createdAt, startedAt);
 
         return new EmailDeliveryAttempt
         {
             EmailDeliveryAttemptId = emailDeliveryAttemptId,
             EmailDeliveryId = emailDeliveryId,
+            MessageId = NormalizeRequired(messageId),
             AttemptNumber = attemptNumber,
             StartedAt = startedAt,
             FinishedAt = finishedAt,
@@ -127,6 +118,131 @@ public sealed class EmailDeliveryAttempt
         };
     }
 
+    public bool IsCompleted => FinishedAt is not null;
+
+    public void CompleteAsSent(
+        DateTime finishedAt,
+        string? providerMessageId = null)
+    {
+        EnsureNotCompleted();
+        ValidateFinishedAt(StartedAt, finishedAt);
+        ValidateProviderMessageId(providerMessageId);
+
+        Outcome = EmailAttemptOutcome.Sent;
+        IsAmbiguous = false;
+        FinishedAt = finishedAt;
+        ProviderMessageId = NormalizeOptional(providerMessageId);
+        ProviderErrorCode = null;
+        ErrorClass = null;
+        ErrorDetail = null;
+    }
+
+    public void CompleteAsFailed(
+        DateTime finishedAt,
+        string? providerErrorCode = null,
+        string? errorClass = null,
+        string? errorDetail = null)
+    {
+        EnsureNotCompleted();
+        ValidateFinishedAt(StartedAt, finishedAt);
+        ValidateProviderErrorCode(providerErrorCode);
+        ValidateErrorClass(errorClass);
+        ValidateErrorDetail(errorDetail);
+
+        Outcome = EmailAttemptOutcome.Failed;
+        IsAmbiguous = false;
+        FinishedAt = finishedAt;
+        ProviderErrorCode = NormalizeOptional(providerErrorCode);
+        ErrorClass = NormalizeOptional(errorClass);
+        ErrorDetail = NormalizeOptional(errorDetail);
+    }
+
+    public void CompleteAsTimeout(
+        DateTime finishedAt,
+        string? providerErrorCode = null,
+        string? errorDetail = null,
+        bool isAmbiguous = true)
+    {
+        EnsureNotCompleted();
+        ValidateFinishedAt(StartedAt, finishedAt);
+        ValidateProviderErrorCode(providerErrorCode);
+        ValidateErrorDetail(errorDetail);
+
+        Outcome = EmailAttemptOutcome.Timeout;
+        IsAmbiguous = isAmbiguous;
+        FinishedAt = finishedAt;
+        ProviderErrorCode = NormalizeOptional(providerErrorCode);
+        ErrorClass = isAmbiguous
+            ? EmailErrorClass.Ambiguous
+            : EmailErrorClass.Transient;
+        ErrorDetail = NormalizeOptional(errorDetail);
+    }
+
+    public void CompleteAsSuppressed(
+        DateTime finishedAt,
+        string? providerErrorCode = null,
+        string? errorDetail = null)
+    {
+        EnsureNotCompleted();
+        ValidateFinishedAt(StartedAt, finishedAt);
+        ValidateProviderErrorCode(providerErrorCode);
+        ValidateErrorDetail(errorDetail);
+
+        Outcome = EmailAttemptOutcome.Suppressed;
+        IsAmbiguous = false;
+        FinishedAt = finishedAt;
+        ProviderErrorCode = NormalizeOptional(providerErrorCode);
+        ErrorClass = EmailErrorClass.Policy;
+        ErrorDetail = NormalizeOptional(errorDetail);
+    }
+
+    public void CompleteAsSkipped(
+        DateTime finishedAt,
+        string? errorDetail = null)
+    {
+        EnsureNotCompleted();
+        ValidateFinishedAt(StartedAt, finishedAt);
+        ValidateErrorDetail(errorDetail);
+
+        Outcome = EmailAttemptOutcome.Skipped;
+        IsAmbiguous = false;
+        FinishedAt = finishedAt;
+        ProviderErrorCode = null;
+        ErrorClass = null;
+        ErrorDetail = NormalizeOptional(errorDetail);
+    }
+
+    public void CompleteAsProviderRejected(
+        DateTime finishedAt,
+        string? providerMessageId = null,
+        string? providerErrorCode = null,
+        string? errorDetail = null)
+    {
+        EnsureNotCompleted();
+        ValidateFinishedAt(StartedAt, finishedAt);
+        ValidateProviderMessageId(providerMessageId);
+        ValidateProviderErrorCode(providerErrorCode);
+        ValidateErrorDetail(errorDetail);
+
+        Outcome = EmailAttemptOutcome.ProviderRejected;
+        IsAmbiguous = false;
+        FinishedAt = finishedAt;
+        ProviderMessageId = NormalizeOptional(providerMessageId);
+        ProviderErrorCode = NormalizeOptional(providerErrorCode);
+        ErrorClass = EmailErrorClass.Provider;
+        ErrorDetail = NormalizeOptional(errorDetail);
+    }
+
+    private void EnsureNotCompleted()
+    {
+        if (FinishedAt is not null)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_ATTEMPT_ALREADY_COMPLETED",
+                "Email delivery attempt has already been completed.");
+        }
+    }
+
     private static void ValidateEmailDeliveryId(long emailDeliveryId)
     {
         if (emailDeliveryId <= 0)
@@ -134,6 +250,23 @@ public sealed class EmailDeliveryAttempt
             throw new NotificationsDomainException(
                 "NOTIFICATIONS.EMAIL_DELIVERY_ATTEMPT_INVALID_EMAIL_DELIVERY_ID",
                 "Email delivery id must be greater than zero.");
+        }
+    }
+
+    private static void ValidateMessageId(string? messageId)
+    {
+        if (string.IsNullOrWhiteSpace(messageId))
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_ATTEMPT_MESSAGE_ID_REQUIRED",
+                "Message id is required.");
+        }
+
+        if (messageId.Trim().Length > 26)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_ATTEMPT_MESSAGE_ID_TOO_LONG",
+                "Message id must not exceed 26 characters.");
         }
     }
 
@@ -224,6 +357,23 @@ public sealed class EmailDeliveryAttempt
             throw new NotificationsDomainException(
                 "NOTIFICATIONS.EMAIL_DELIVERY_ATTEMPT_CORRELATION_ID_TOO_LONG",
                 "Correlation id must not exceed 100 characters.");
+        }
+    }
+
+    private static void ValidateCreatedAt(DateTime createdAt, DateTime startedAt)
+    {
+        if (createdAt == default)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_ATTEMPT_CREATED_AT_REQUIRED",
+                "CreatedAt is required.");
+        }
+
+        if (createdAt < startedAt)
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_ATTEMPT_CREATED_AT_INVALID",
+                "CreatedAt must be greater than or equal to StartedAt.");
         }
     }
 

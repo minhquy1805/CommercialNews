@@ -4,14 +4,15 @@ using Notifications.Application.Contracts.EmailDeliveries.Requests;
 using Notifications.Application.Contracts.EmailDeliveries.Responses;
 using Notifications.Application.Errors;
 using Notifications.Application.Models.QueryModels;
-using Notifications.Application.Ports.Persistence.Read;
+using Notifications.Application.Ports.Persistence;
+using Notifications.Application.Validation.EmailDeliveries.GetEmailDeliveryById;
 
 namespace Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryById;
 
 /// <summary>
 /// Returns a detailed admin-facing view of a single email delivery,
 /// including its attempt history for troubleshooting and operations.
-/// This is a read-only use case, so it does not open a transaction.
+/// This is a read-only use case and does not open a transaction.
 /// </summary>
 public sealed class GetEmailDeliveryByIdUseCase : IGetEmailDeliveryByIdUseCase
 {
@@ -28,14 +29,14 @@ public sealed class GetEmailDeliveryByIdUseCase : IGetEmailDeliveryByIdUseCase
         GetEmailDeliveryByIdRequest request,
         CancellationToken cancellationToken = default)
     {
+        Error? validationError = GetEmailDeliveryByIdValidator.Validate(request);
+        if (validationError is not null)
+        {
+            return Result<GetEmailDeliveryByIdResponse>.Failure(validationError);
+        }
+
         try
         {
-            if (request.EmailDeliveryId <= 0)
-            {
-                return Result<GetEmailDeliveryByIdResponse>.Failure(
-                    NotificationsErrors.EmailDelivery.InvalidId);
-            }
-
             EmailDeliveryDetailResult? detail =
                 await _emailDeliveryQueryRepository.GetByIdAsync(
                     request.EmailDeliveryId,
@@ -44,7 +45,7 @@ public sealed class GetEmailDeliveryByIdUseCase : IGetEmailDeliveryByIdUseCase
             if (detail is null)
             {
                 return Result<GetEmailDeliveryByIdResponse>.Failure(
-                    NotificationsErrors.EmailDelivery.NotFound);
+                    NotificationsErrors.Delivery.NotFound);
             }
 
             GetEmailDeliveryByIdResponse response = new()
@@ -112,9 +113,8 @@ public sealed class GetEmailDeliveryByIdUseCase : IGetEmailDeliveryByIdUseCase
 
     private static Error MapPersistenceException(PersistenceException exception)
     {
-        return exception.Code switch
-        {
-            _ => NotificationsErrors.ValidationFailed
-        };
+        _ = exception;
+
+        return NotificationsErrors.DependencyUnavailable;
     }
 }

@@ -45,8 +45,8 @@ Rules:
 
 #### 204 No Content
 
-- delete success, only if physical delete is supported and the endpoint contract explicitly uses 204
-- V1 should prefer 200 for relationship revokes when a response body is returned
+- delete success, only if physical delete is supported and the endpoint contract explicitly uses `204`
+- V1 should prefer `200` for relationship revokes when a response body is returned
 
 ### 2.2 Client error codes
 
@@ -70,6 +70,7 @@ Rules:
 - authenticated caller lacks required permission/policy
 - protected system role/permission mutation denied by policy
 - object-level authorization denied when combined with centralized authorization
+- fail-closed deny on a security-sensitive path when policy chooses deny semantics
 
 #### 404 Not Found
 
@@ -101,7 +102,8 @@ Rules:
 #### 503 Service Unavailable
 
 - required dependency unavailable for authoritative truth path
-- should be used carefully; downstream async failure alone must not force 503
+- should be used carefully
+- downstream async failure alone must not force `503`
 
 ## 3) Core rule: truth success vs downstream side effects
 
@@ -115,8 +117,9 @@ API success does not guarantee that:
 - cache invalidation has propagated
 - derived authorization snapshots are rebuilt
 - reporting views are updated
+- optional downstream notification side effects have completed
 
-Async side-effect delay or retry must not turn a committed governance write into 5xx.
+Async side-effect delay or retry must not turn a committed governance write into `5xx`.
 
 ## 4) Error code catalog (V1 baseline)
 
@@ -202,6 +205,13 @@ The implementation must not mix:
 
 for the same semantic operation without documenting the rule explicitly.
 
+Codes such as:
+
+- `AUTHORIZATION.USER_ROLE_ALREADY_ASSIGNED`
+- `AUTHORIZATION.ROLE_PERMISSION_ALREADY_GRANTED`
+
+should only be surfaced on API paths that intentionally choose conflict semantics instead of stable idempotent success semantics.
+
 ## 6) Validation error shape
 
 For validation failures, use the standard validation pattern:
@@ -235,7 +245,7 @@ Authorization must use safe not-found behavior where appropriate.
 Rules:
 
 - do not leak protected governance internals unnecessarily
-- return 404 for missing role/permission/user targets using safe resource semantics
+- return `404` for missing role/permission/user targets using safe resource semantics
 - do not reveal extra protected metadata in error messages
 - prefer stable machine-readable error codes over verbose internals
 
