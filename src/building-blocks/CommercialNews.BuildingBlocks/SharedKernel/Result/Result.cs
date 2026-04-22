@@ -1,5 +1,7 @@
 namespace CommercialNews.BuildingBlocks.SharedKernel.Results;
 
+using System.Diagnostics.CodeAnalysis;
+
 public class Result
 {
     protected Result(bool isSuccess, Error? error)
@@ -22,6 +24,7 @@ public class Result
         Error = error;
     }
 
+    [MemberNotNullWhen(false, nameof(Error))]
     public bool IsSuccess { get; }
 
     public bool IsFailure => !IsSuccess;
@@ -44,12 +47,29 @@ public sealed class Result<T> : Result
     private Result(T? value, bool isSuccess, Error? error)
         : base(isSuccess, error)
     {
+        if (isSuccess && value is null)
+        {
+            throw new ArgumentNullException(
+                nameof(value),
+                "A successful result must contain a value.");
+        }
+
         _value = value;
     }
 
-    public T? Value => _value;
+    public T Value =>
+        IsSuccess
+            ? _value!
+            : throw new InvalidOperationException(
+                "A failed result does not contain a value.");
 
-    public static Result<T> Success(T value) => new(value, true, null);
+    private T? ValueOrDefault => _value;
+
+    public static Result<T> Success(T value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return new(value, true, null);
+    }
 
     public static new Result<T> Failure(Error error)
     {
