@@ -3,18 +3,7 @@
   Module: Notifications
   Purpose:
   - Create stored procedures for Notifications V1.
-  - Includes:
-      * [notifications].[OutboxMessage]
-      * [notifications].[EmailDelivery]
-      * [notifications].[EmailDeliveryAttempt]
-      * [notifications].[EmailRateLimitLog]
-
-  Notes:
-  - Broker is transport only; SQL remains durable truth.
-  - Outbox is durable async intent / shared outbox artifact in V1.
-  - EmailDelivery is canonical delivery-state truth.
-  - Mutating procedures return @AffectedRows OUTPUT where appropriate.
-  - Provider timeout is ambiguous; retry/remediation must remain safe.
+  - Refactored to match the current EmailDelivery table/domain shape.
 */
 
 SET ANSI_NULLS ON;
@@ -115,7 +104,7 @@ BEGIN
         @OccurredAt
     );
 
-    SET @OutboxMessageId = SCOPE_IDENTITY();
+    SET @OutboxMessageId = CONVERT(BIGINT, SCOPE_IDENTITY());
 END;
 GO
 
@@ -448,7 +437,7 @@ END;
 GO
 
 /* =========================================================
-   [notifications].[EmailDelivery]
+   [notifications].[EmailDelivery] - new shape
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_Insert]
@@ -456,10 +445,8 @@ CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_Insert]
     @BusinessDedupeKey  NVARCHAR(300),
     @RecipientUserId    BIGINT = NULL,
     @ToEmail            NVARCHAR(320),
-    @ToEmailHash        VARCHAR(64) = NULL,
     @TemplateKey        NVARCHAR(100),
-    @TemplateVersion    INT = NULL,
-    @Subject            NVARCHAR(300) = NULL,
+    @VariablesJson      NVARCHAR(MAX),
     @Provider           VARCHAR(30) = 'smtp',
     @Priority           TINYINT = 5,
     @CorrelationId      NVARCHAR(100) = NULL,
@@ -475,10 +462,8 @@ BEGIN
         [BusinessDedupeKey],
         [RecipientUserId],
         [ToEmail],
-        [ToEmailHash],
         [TemplateKey],
-        [TemplateVersion],
-        [Subject],
+        [VariablesJson],
         [Provider],
         [Priority],
         [CorrelationId]
@@ -489,16 +474,14 @@ BEGIN
         @BusinessDedupeKey,
         @RecipientUserId,
         @ToEmail,
-        @ToEmailHash,
         @TemplateKey,
-        @TemplateVersion,
-        @Subject,
+        @VariablesJson,
         @Provider,
         @Priority,
         @CorrelationId
     );
 
-    SET @EmailDeliveryId = SCOPE_IDENTITY();
+    SET @EmailDeliveryId = CONVERT(BIGINT, SCOPE_IDENTITY());
 END;
 GO
 
@@ -514,23 +497,15 @@ BEGIN
         [BusinessDedupeKey],
         [RecipientUserId],
         [ToEmail],
-        [ToEmailHash],
         [TemplateKey],
-        [TemplateVersion],
-        [Subject],
+        [VariablesJson],
         [Provider],
         [Priority],
-        [ProviderMessageId],
         [Status],
         [AttemptCount],
         [LastAttemptAt],
         [NextRetryAt],
         [SentAt],
-        [FailedAt],
-        [DeadAt],
-        [SuppressedAt],
-        [AmbiguousAt],
-        [LastError],
         [LastErrorCode],
         [LastErrorClass],
         [CorrelationId],
@@ -553,23 +528,15 @@ BEGIN
         [BusinessDedupeKey],
         [RecipientUserId],
         [ToEmail],
-        [ToEmailHash],
         [TemplateKey],
-        [TemplateVersion],
-        [Subject],
+        [VariablesJson],
         [Provider],
         [Priority],
-        [ProviderMessageId],
         [Status],
         [AttemptCount],
         [LastAttemptAt],
         [NextRetryAt],
         [SentAt],
-        [FailedAt],
-        [DeadAt],
-        [SuppressedAt],
-        [AmbiguousAt],
-        [LastError],
         [LastErrorCode],
         [LastErrorClass],
         [CorrelationId],
@@ -592,23 +559,15 @@ BEGIN
         [BusinessDedupeKey],
         [RecipientUserId],
         [ToEmail],
-        [ToEmailHash],
         [TemplateKey],
-        [TemplateVersion],
-        [Subject],
+        [VariablesJson],
         [Provider],
         [Priority],
-        [ProviderMessageId],
         [Status],
         [AttemptCount],
         [LastAttemptAt],
         [NextRetryAt],
         [SentAt],
-        [FailedAt],
-        [DeadAt],
-        [SuppressedAt],
-        [AmbiguousAt],
-        [LastError],
         [LastErrorCode],
         [LastErrorClass],
         [CorrelationId],
@@ -625,7 +584,6 @@ CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_Search]
     @FromCreatedAt DATETIME2(3) = NULL,
     @ToCreatedAt DATETIME2(3) = NULL,
     @RecipientUserId BIGINT = NULL,
-    @ToEmailHash VARCHAR(64) = NULL,
     @TemplateKey NVARCHAR(100) = NULL,
     @Status VARCHAR(20) = NULL,
     @CorrelationId NVARCHAR(100) = NULL,
@@ -648,22 +606,15 @@ BEGIN
             [BusinessDedupeKey],
             [RecipientUserId],
             [ToEmail],
-            [ToEmailHash],
             [TemplateKey],
-            [TemplateVersion],
-            [Subject],
+            [VariablesJson],
             [Provider],
             [Priority],
-            [ProviderMessageId],
             [Status],
             [AttemptCount],
             [LastAttemptAt],
             [NextRetryAt],
             [SentAt],
-            [FailedAt],
-            [DeadAt],
-            [SuppressedAt],
-            [AmbiguousAt],
             [LastErrorCode],
             [LastErrorClass],
             [CorrelationId],
@@ -674,7 +625,6 @@ BEGIN
             (@FromCreatedAt IS NULL OR [CreatedAt] >= @FromCreatedAt)
             AND (@ToCreatedAt IS NULL OR [CreatedAt] < @ToCreatedAt)
             AND (@RecipientUserId IS NULL OR [RecipientUserId] = @RecipientUserId)
-            AND (@ToEmailHash IS NULL OR [ToEmailHash] = @ToEmailHash)
             AND (@TemplateKey IS NULL OR [TemplateKey] = @TemplateKey)
             AND (@Status IS NULL OR [Status] = @Status)
             AND (@CorrelationId IS NULL OR [CorrelationId] = @CorrelationId)
@@ -686,22 +636,15 @@ BEGIN
         [BusinessDedupeKey],
         [RecipientUserId],
         [ToEmail],
-        [ToEmailHash],
         [TemplateKey],
-        [TemplateVersion],
-        [Subject],
+        [VariablesJson],
         [Provider],
         [Priority],
-        [ProviderMessageId],
         [Status],
         [AttemptCount],
         [LastAttemptAt],
         [NextRetryAt],
         [SentAt],
-        [FailedAt],
-        [DeadAt],
-        [SuppressedAt],
-        [AmbiguousAt],
         [LastErrorCode],
         [LastErrorClass],
         [CorrelationId],
@@ -762,23 +705,15 @@ BEGIN
         INSERTED.[BusinessDedupeKey],
         INSERTED.[RecipientUserId],
         INSERTED.[ToEmail],
-        INSERTED.[ToEmailHash],
         INSERTED.[TemplateKey],
-        INSERTED.[TemplateVersion],
-        INSERTED.[Subject],
+        INSERTED.[VariablesJson],
         INSERTED.[Provider],
         INSERTED.[Priority],
-        INSERTED.[ProviderMessageId],
         INSERTED.[Status],
         INSERTED.[AttemptCount],
         INSERTED.[LastAttemptAt],
         INSERTED.[NextRetryAt],
         INSERTED.[SentAt],
-        INSERTED.[FailedAt],
-        INSERTED.[DeadAt],
-        INSERTED.[SuppressedAt],
-        INSERTED.[AmbiguousAt],
-        INSERTED.[LastError],
         INSERTED.[LastErrorCode],
         INSERTED.[LastErrorClass],
         INSERTED.[CorrelationId],
@@ -792,7 +727,6 @@ GO
 
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkSent]
     @EmailDeliveryId BIGINT,
-    @ProviderMessageId NVARCHAR(200) = NULL,
     @AffectedRows INT OUTPUT
 AS
 BEGIN
@@ -803,14 +737,8 @@ BEGIN
     SET
         [Status] = 'Sent',
         [AttemptCount] = [AttemptCount] + 1,
-        [ProviderMessageId] = @ProviderMessageId,
         [SentAt] = SYSUTCDATETIME(),
-        [FailedAt] = NULL,
-        [DeadAt] = NULL,
-        [SuppressedAt] = NULL,
-        [AmbiguousAt] = NULL,
         [NextRetryAt] = NULL,
-        [LastError] = NULL,
         [LastErrorCode] = NULL,
         [LastErrorClass] = NULL,
         [UpdatedAt] = SYSUTCDATETIME()
@@ -824,7 +752,6 @@ GO
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkFailed]
     @EmailDeliveryId BIGINT,
     @NextRetryAt DATETIME2(3) = NULL,
-    @LastError NVARCHAR(2000) = NULL,
     @LastErrorCode NVARCHAR(100) = NULL,
     @LastErrorClass VARCHAR(30) = NULL,
     @AffectedRows INT OUTPUT
@@ -837,9 +764,7 @@ BEGIN
     SET
         [Status] = 'Failed',
         [AttemptCount] = [AttemptCount] + 1,
-        [FailedAt] = SYSUTCDATETIME(),
         [NextRetryAt] = @NextRetryAt,
-        [LastError] = @LastError,
         [LastErrorCode] = @LastErrorCode,
         [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
@@ -852,7 +777,6 @@ GO
 
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkDead]
     @EmailDeliveryId BIGINT,
-    @LastError NVARCHAR(2000) = NULL,
     @LastErrorCode NVARCHAR(100) = NULL,
     @LastErrorClass VARCHAR(30) = NULL,
     @AffectedRows INT OUTPUT
@@ -865,9 +789,7 @@ BEGIN
     SET
         [Status] = 'Dead',
         [AttemptCount] = [AttemptCount] + 1,
-        [DeadAt] = SYSUTCDATETIME(),
         [NextRetryAt] = NULL,
-        [LastError] = @LastError,
         [LastErrorCode] = @LastErrorCode,
         [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
@@ -880,7 +802,6 @@ GO
 
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkSuppressed]
     @EmailDeliveryId BIGINT,
-    @LastError NVARCHAR(2000) = NULL,
     @LastErrorCode NVARCHAR(100) = NULL,
     @LastErrorClass VARCHAR(30) = 'Policy',
     @AffectedRows INT OUTPUT
@@ -892,9 +813,7 @@ BEGIN
     UPDATE [notifications].[EmailDelivery]
     SET
         [Status] = 'Suppressed',
-        [SuppressedAt] = SYSUTCDATETIME(),
         [NextRetryAt] = NULL,
-        [LastError] = @LastError,
         [LastErrorCode] = @LastErrorCode,
         [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
@@ -908,7 +827,6 @@ GO
 CREATE OR ALTER PROCEDURE [notifications].[EmailDelivery_MarkAmbiguous]
     @EmailDeliveryId BIGINT,
     @NextRetryAt DATETIME2(3) = NULL,
-    @LastError NVARCHAR(2000) = NULL,
     @LastErrorCode NVARCHAR(100) = NULL,
     @LastErrorClass VARCHAR(30) = 'Ambiguous',
     @AffectedRows INT OUTPUT
@@ -921,9 +839,7 @@ BEGIN
     SET
         [Status] = 'Ambiguous',
         [AttemptCount] = [AttemptCount] + 1,
-        [AmbiguousAt] = SYSUTCDATETIME(),
         [NextRetryAt] = @NextRetryAt,
-        [LastError] = @LastError,
         [LastErrorCode] = @LastErrorCode,
         [LastErrorClass] = @LastErrorClass,
         [UpdatedAt] = SYSUTCDATETIME()
@@ -946,7 +862,6 @@ BEGIN
     SET
         [Status] = 'Queued',
         [NextRetryAt] = NULL,
-        [LastError] = NULL,
         [LastErrorCode] = NULL,
         [LastErrorClass] = NULL,
         [UpdatedAt] = SYSUTCDATETIME()
@@ -1014,7 +929,7 @@ BEGIN
         @CorrelationId
     );
 
-    SET @EmailDeliveryAttemptId = SCOPE_IDENTITY();
+    SET @EmailDeliveryAttemptId = CONVERT(BIGINT, SCOPE_IDENTITY());
 END;
 GO
 
@@ -1117,7 +1032,7 @@ BEGIN
         @CorrelationId
     );
 
-    SET @EmailRateLimitLogId = SCOPE_IDENTITY();
+    SET @EmailRateLimitLogId = CONVERT(BIGINT, SCOPE_IDENTITY());
 END;
 GO
 

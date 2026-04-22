@@ -2,6 +2,7 @@ using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
 using Notifications.Application.Ports.Persistence;
+using Notifications.Application.Ports.Transactions;
 using Notifications.Domain.Entities;
 using Notifications.Infrastructure.Persistence.Exceptions;
 using Notifications.Infrastructure.Persistence.Sql;
@@ -16,12 +17,12 @@ public sealed class EmailDeliveryAttemptRepository : IEmailDeliveryAttemptReposi
     private const string EmailDeliveryAttemptSelectByEmailDeliveryIdProc =
         "[notifications].[EmailDeliveryAttempt_SelectByEmailDeliveryId]";
 
-    private readonly NotificationsUnitOfWork _unitOfWork;
+    private readonly INotificationsUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
     private readonly NotificationsSqlExceptionTranslator _sqlExceptionTranslator;
 
     public EmailDeliveryAttemptRepository(
-        NotificationsUnitOfWork unitOfWork,
+        INotificationsUnitOfWork unitOfWork,
         ISqlConnectionFactory sqlConnectionFactory,
         NotificationsSqlExceptionTranslator sqlExceptionTranslator)
     {

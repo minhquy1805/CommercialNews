@@ -23,6 +23,7 @@ public static class ServiceCollectionExtensions
             configuration.GetSection("Notifications:Email"));
 
         services.AddScoped<NotificationsUnitOfWork>();
+
         services.AddScoped<INotificationsUnitOfWork>(
             sp => sp.GetRequiredService<NotificationsUnitOfWork>());
 

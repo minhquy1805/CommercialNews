@@ -10,11 +10,7 @@ public sealed class EmailDeliveryListItemResponse
 
     public string? MaskedToEmail { get; init; }
 
-    public string? ToEmailHash { get; init; }
-
     public string TemplateKey { get; init; } = string.Empty;
-
-    public int? TemplateVersion { get; init; }
 
     public string Provider { get; init; } = string.Empty;
 
@@ -27,14 +23,6 @@ public sealed class EmailDeliveryListItemResponse
     public DateTime? NextRetryAt { get; init; }
 
     public DateTime? SentAt { get; init; }
-
-    public DateTime? FailedAt { get; init; }
-
-    public DateTime? DeadAt { get; init; }
-
-    public DateTime? SuppressedAt { get; init; }
-
-    public DateTime? AmbiguousAt { get; init; }
 
     public string? LastErrorCode { get; init; }
 

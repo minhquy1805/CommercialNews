@@ -182,4 +182,27 @@ public static class NotificationsErrors
                 code: "NOTIFICATIONS.INVALID_REQUEST",
                 message: "The template contains unsafe or unsupported variables.");
     }
+
+    public static class Outbox
+    {
+        public static readonly Error NotFound =
+            Error.NotFound(
+                code: "NOTIFICATIONS.OUTBOX_NOT_FOUND",
+                message: "The outbox message was not found.");
+
+        public static readonly Error InvalidState =
+            Error.Validation(
+                code: "NOTIFICATIONS.OUTBOX_INVALID_STATE",
+                message: "The outbox message is not in a processable state.");
+
+        public static readonly Error UnsupportedEventType =
+            Error.Validation(
+                code: "NOTIFICATIONS.OUTBOX_UNSUPPORTED_EVENT_TYPE",
+                message: "The outbox message event type is not supported by Notifications.");
+
+        public static readonly Error PayloadInvalid =
+            Error.Validation(
+                code: "NOTIFICATIONS.OUTBOX_PAYLOAD_INVALID",
+                message: "The outbox message payload is invalid.");
+    }
 }
