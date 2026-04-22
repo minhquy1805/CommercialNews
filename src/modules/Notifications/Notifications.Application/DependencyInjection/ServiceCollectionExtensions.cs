@@ -6,6 +6,11 @@ using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryByMessa
 using Notifications.Application.UseCases.EmailDeliveries.ProcessEmailDelivery;
 using Notifications.Application.UseCases.EmailDeliveries.ProcessPendingEmailDeliveries;
 using Notifications.Application.UseCases.EmailDeliveries.RetryEmailDelivery;
+using Notifications.Application.UseCases.Outbox.GetOutboxMessageById;
+using Notifications.Application.UseCases.Outbox.GetOutboxMessageByMessageId;
+using Notifications.Application.UseCases.Outbox.MarkOutboxDead;
+using Notifications.Application.UseCases.Outbox.MarkOutboxFailed;
+using Notifications.Application.UseCases.Outbox.MarkOutboxPublished;
 using Notifications.Application.UseCases.Outbox.ProcessOutboxMessage;
 using Notifications.Application.UseCases.Outbox.ProcessPendingOutboxMessages;
 
@@ -23,18 +28,21 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGetEmailDeliveryByMessageIdUseCase, GetEmailDeliveryByMessageIdUseCase>();
         services.AddScoped<IGetEmailDeliveryAttemptsUseCase, GetEmailDeliveryAttemptsUseCase>();
         services.AddScoped<IRetryEmailDeliveryUseCase, RetryEmailDeliveryUseCase>();
+
+        // Email delivery runtime use cases
         services.AddScoped<IProcessEmailDeliveryUseCase, ProcessEmailDeliveryUseCase>();
         services.AddScoped<IProcessPendingEmailDeliveriesUseCase, ProcessPendingEmailDeliveriesUseCase>();
+
+        // Outbox runtime use cases
         services.AddScoped<IProcessPendingOutboxMessagesUseCase, ProcessPendingOutboxMessagesUseCase>();
         services.AddScoped<IProcessOutboxMessageUseCase, ProcessOutboxMessageUseCase>();
 
-        // Deferred for later phase:
-        // - ProcessEmailDeliveryUseCase
-        // - Outbox use cases
-        // These will be revisited after:
-        // 1. service contract models are stabilized
-        // 2. runtime/internal processing flow is finalized
-        // 3. shared outbox ownership is extracted from Notifications
+        // Outbox admin / operational use cases
+        services.AddScoped<IGetOutboxMessageByIdUseCase, GetOutboxMessageByIdUseCase>();
+        services.AddScoped<IGetOutboxMessageByMessageIdUseCase, GetOutboxMessageByMessageIdUseCase>();
+        services.AddScoped<IMarkOutboxPublishedUseCase, MarkOutboxPublishedUseCase>();
+        services.AddScoped<IMarkOutboxFailedUseCase, MarkOutboxFailedUseCase>();
+        services.AddScoped<IMarkOutboxDeadUseCase, MarkOutboxDeadUseCase>();
 
         return services;
     }

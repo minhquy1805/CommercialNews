@@ -5,10 +5,8 @@ using Notifications.Application.Contracts.Outbox.Responses;
 namespace Notifications.Application.UseCases.Outbox.GetOutboxMessageByMessageId;
 
 /// <summary>
-/// TODO (deferred):
-/// This outbox use case is intentionally postponed.
-/// Outbox is being moved toward a shared/building-blocks ownership model.
-/// Do not treat this interface/implementation as finalized inside Notifications.
+/// Returns a single outbox message by technical message id for admin troubleshooting.
+/// This is a read-only use case and does not open a transaction.
 /// </summary>
 public interface IGetOutboxMessageByMessageIdUseCase
 {
