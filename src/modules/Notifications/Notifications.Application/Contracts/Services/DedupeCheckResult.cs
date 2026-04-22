@@ -8,5 +8,11 @@ public sealed class DedupeCheckResult
 
     public bool ShouldSuppress { get; init; }
 
+    public long? ExistingEmailDeliveryId { get; init; }
+
+    public string? ExistingStatus { get; init; }
+
     public string? Reason { get; init; }
+
+    public bool HasDuplicate => IsDuplicateMessage || IsDuplicateBusinessIntent;
 }
