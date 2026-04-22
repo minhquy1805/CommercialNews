@@ -133,26 +133,6 @@ BEGIN
 END
 GO
 
--- Fast active-token lookup after hashing input token
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_EmailVerificationToken_ActiveLookup'
-      AND [object_id] = OBJECT_ID(N'[identity].[EmailVerificationToken]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_EmailVerificationToken_ActiveLookup]
-    ON [identity].[EmailVerificationToken] ([TokenHash] ASC, [UsedAt] ASC, [ExpiresAt] ASC)
-    INCLUDE ([UserId], [CreatedAt]);
-    PRINT N'Created index: [identity].[EmailVerificationToken].[IX_EmailVerificationToken_ActiveLookup]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [identity].[EmailVerificationToken].[IX_EmailVerificationToken_ActiveLookup]';
-END
-GO
-
 /* =========================================================
    3) PasswordResetToken indexes
    ========================================================= */
@@ -192,26 +172,6 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [identity].[PasswordResetToken].[IX_PasswordResetToken_ExpiresAt]';
-END
-GO
-
--- Fast active-token lookup after hashing input token
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_PasswordResetToken_ActiveLookup'
-      AND [object_id] = OBJECT_ID(N'[identity].[PasswordResetToken]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_PasswordResetToken_ActiveLookup]
-    ON [identity].[PasswordResetToken] ([TokenHash] ASC, [UsedAt] ASC, [RevokedAt] ASC, [ExpiresAt] ASC)
-    INCLUDE ([UserId], [CreatedAt]);
-    PRINT N'Created index: [identity].[PasswordResetToken].[IX_PasswordResetToken_ActiveLookup]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [identity].[PasswordResetToken].[IX_PasswordResetToken_ActiveLookup]';
 END
 GO
 
@@ -273,26 +233,6 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [identity].[RefreshToken].[IX_RefreshToken_ReplacedByTokenHash]';
-END
-GO
-
--- Fast active refresh-token validation after hashing input token
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_RefreshToken_ActiveLookup'
-      AND [object_id] = OBJECT_ID(N'[identity].[RefreshToken]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_RefreshToken_ActiveLookup]
-    ON [identity].[RefreshToken] ([TokenHash] ASC, [RevokedAt] ASC, [ExpiresAt] ASC)
-    INCLUDE ([UserId], [CreatedAt], [ReplacedByTokenHash], [RevokedReason]);
-    PRINT N'Created index: [identity].[RefreshToken].[IX_RefreshToken_ActiveLookup]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [identity].[RefreshToken].[IX_RefreshToken_ActiveLookup]';
 END
 GO
 

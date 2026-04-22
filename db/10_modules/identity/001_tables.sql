@@ -62,7 +62,7 @@ BEGIN
         [EmailVerifiedAt]     DATETIME2(3)         NULL,
 
         [Status]              VARCHAR(20)          NOT NULL
-            CONSTRAINT [DF_UserAccount_Status] DEFAULT ('Active'),
+            CONSTRAINT [DF_UserAccount_Status] DEFAULT ('Unverified'),
         [LockedUntil]         DATETIME2(3)         NULL,
 
         [CreatedAt]           DATETIME2(3)         NOT NULL
@@ -83,7 +83,7 @@ BEGIN
             UNIQUE ([EmailNormalized]),
 
         CONSTRAINT [CK_UserAccount_Status]
-            CHECK ([Status] IN ('Active', 'Inactive', 'Locked')),
+            CHECK ([Status] IN ('Unverified', 'Active', 'Locked', 'Disabled')),
 
         CONSTRAINT [CK_UserAccount_Version]
             CHECK ([Version] >= 1),

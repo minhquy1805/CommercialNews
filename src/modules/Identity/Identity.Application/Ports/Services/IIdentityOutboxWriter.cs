@@ -1,6 +1,6 @@
 namespace Identity.Application.Ports.Services;
 
-public interface IIdentityNotificationOutboxWriter
+public interface IIdentityOutboxWriter
 {
     Task EnqueueVerificationEmailAsync(
         long userId,
@@ -11,7 +11,7 @@ public interface IIdentityNotificationOutboxWriter
         DateTime occurredAtUtc,
         CancellationToken cancellationToken = default);
 
-     Task EnqueuePasswordChangedEmailAsync(
+    Task EnqueuePasswordChangedEmailAsync(
         long userId,
         string userPublicId,
         string email,

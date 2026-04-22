@@ -19,7 +19,7 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
     private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IIdentityUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
-    private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
+    private readonly IIdentityOutboxWriter _outboxWriter;
 
     public ChangePasswordUseCase(
         IRequestContext requestContext,
@@ -28,7 +28,7 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
         IRefreshTokenRepository refreshTokenRepository,
         IIdentityUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
-        IIdentityNotificationOutboxWriter notificationOutboxWriter)
+        IIdentityOutboxWriter outboxWriter)
     {
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
         _userAccountRepository = userAccountRepository ?? throw new ArgumentNullException(nameof(userAccountRepository));
@@ -36,7 +36,7 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
         _refreshTokenRepository = refreshTokenRepository ?? throw new ArgumentNullException(nameof(refreshTokenRepository));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
-        _notificationOutboxWriter = notificationOutboxWriter ?? throw new ArgumentNullException(nameof(notificationOutboxWriter));
+        _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
     }
 
     public async Task<Result<ChangePasswordResponseDto>> ExecuteAsync(
@@ -111,7 +111,7 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
                     "PasswordChanged",
                     cancellationToken);
 
-                await _notificationOutboxWriter.EnqueuePasswordChangedEmailAsync(
+                await _outboxWriter.EnqueuePasswordChangedEmailAsync(
                     userId: user.UserId,
                     userPublicId: user.PublicId,
                     email: user.Email,
