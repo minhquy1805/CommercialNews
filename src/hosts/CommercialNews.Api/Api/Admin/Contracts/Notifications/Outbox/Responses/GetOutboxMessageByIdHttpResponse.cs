@@ -1,6 +1,6 @@
-namespace Notifications.Application.Contracts.Outbox.Responses;
+namespace CommercialNews.Api.Api.Admin.Contracts.Notifications.Outbox.Responses;
 
-public sealed class GetOutboxMessageByIdResponse
+public sealed class GetOutboxMessageByIdHttpResponse
 {
     public long OutboxMessageId { get; init; }
 
