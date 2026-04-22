@@ -6,11 +6,11 @@ public sealed class ProcessOutboxMessageResponse
 
     public string MessageId { get; init; } = string.Empty;
 
+    public string EventType { get; init; } = string.Empty;
+
+    public bool CreatedEmailDelivery { get; init; }
+
     public long? EmailDeliveryId { get; init; }
 
-    public string OutboxStatus { get; init; } = string.Empty;
-
-    public string? EmailDeliveryStatus { get; init; }
-
-    public bool Processed { get; init; }
+    public string Status { get; init; } = string.Empty;
 }

@@ -17,6 +17,8 @@ public sealed class EmailDelivery
 
     public string TemplateKey { get; private set; } = null!;
 
+    public string VariablesJson { get; private set; } = null!;
+
     public string Provider { get; private set; } = null!;
 
     public byte Priority { get; private set; }
@@ -50,6 +52,7 @@ public sealed class EmailDelivery
         string businessDedupeKey,
         string toEmail,
         string templateKey,
+        string variablesJson,
         string provider,
         byte priority,
         DateTime nowUtc,
@@ -61,6 +64,7 @@ public sealed class EmailDelivery
         ValidateRecipientUserId(recipientUserId);
         ValidateToEmail(toEmail);
         ValidateTemplateKey(templateKey);
+        ValidateVariablesJson(variablesJson);
         ValidateProvider(provider);
         ValidatePriority(priority);
         ValidateCorrelationId(correlationId);
@@ -73,6 +77,7 @@ public sealed class EmailDelivery
             RecipientUserId = recipientUserId,
             ToEmail = NormalizeRequired(toEmail),
             TemplateKey = NormalizeRequired(templateKey),
+            VariablesJson = NormalizeRequired(variablesJson),
             Provider = NormalizeRequired(provider),
             Priority = priority,
             Status = EmailDeliveryStatus.Queued,
@@ -90,6 +95,7 @@ public sealed class EmailDelivery
         long? recipientUserId,
         string toEmail,
         string templateKey,
+        string variablesJson,
         string provider,
         byte priority,
         string status,
@@ -115,6 +121,7 @@ public sealed class EmailDelivery
         ValidateRecipientUserId(recipientUserId);
         ValidateToEmail(toEmail);
         ValidateTemplateKey(templateKey);
+        ValidateVariablesJson(variablesJson);
         ValidateProvider(provider);
         ValidatePriority(priority);
         ValidateStatus(status);
@@ -136,6 +143,7 @@ public sealed class EmailDelivery
             RecipientUserId = recipientUserId,
             ToEmail = NormalizeRequired(toEmail),
             TemplateKey = NormalizeRequired(templateKey),
+            VariablesJson = NormalizeRequired(variablesJson),
             Provider = NormalizeRequired(provider),
             Priority = priority,
             Status = NormalizeRequired(status),
@@ -422,6 +430,16 @@ public sealed class EmailDelivery
             throw new NotificationsDomainException(
                 "NOTIFICATIONS.EMAIL_DELIVERY_TEMPLATE_KEY_INVALID",
                 "Template key is invalid.");
+        }
+    }
+
+    private static void ValidateVariablesJson(string? variablesJson)
+    {
+        if (string.IsNullOrWhiteSpace(variablesJson))
+        {
+            throw new NotificationsDomainException(
+                "NOTIFICATIONS.EMAIL_DELIVERY_VARIABLES_JSON_REQUIRED",
+                "VariablesJson is required.");
         }
     }
 
