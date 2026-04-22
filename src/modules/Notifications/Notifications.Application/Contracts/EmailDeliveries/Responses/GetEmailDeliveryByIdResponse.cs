@@ -12,17 +12,9 @@ public sealed class GetEmailDeliveryByIdResponse
 
     public string ToEmail { get; init; } = string.Empty;
 
-    public string? ToEmailHash { get; init; }
-
     public string TemplateKey { get; init; } = string.Empty;
 
-    public int? TemplateVersion { get; init; }
-
-    public string? Subject { get; init; }
-
     public string Provider { get; init; } = string.Empty;
-
-    public string? ProviderMessageId { get; init; }
 
     public string Status { get; init; } = string.Empty;
 
@@ -33,16 +25,6 @@ public sealed class GetEmailDeliveryByIdResponse
     public DateTime? NextRetryAt { get; init; }
 
     public DateTime? SentAt { get; init; }
-
-    public DateTime? FailedAt { get; init; }
-
-    public DateTime? DeadAt { get; init; }
-
-    public DateTime? SuppressedAt { get; init; }
-
-    public DateTime? AmbiguousAt { get; init; }
-
-    public string? LastError { get; init; }
 
     public string? LastErrorCode { get; init; }
 

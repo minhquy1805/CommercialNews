@@ -3,7 +3,11 @@ using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveries;
 using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryAttempts;
 using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryById;
 using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryByMessageId;
+using Notifications.Application.UseCases.EmailDeliveries.ProcessEmailDelivery;
+using Notifications.Application.UseCases.EmailDeliveries.ProcessPendingEmailDeliveries;
 using Notifications.Application.UseCases.EmailDeliveries.RetryEmailDelivery;
+using Notifications.Application.UseCases.Outbox.ProcessOutboxMessage;
+using Notifications.Application.UseCases.Outbox.ProcessPendingOutboxMessages;
 
 namespace Notifications.Application.DependencyInjection;
 
@@ -19,6 +23,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGetEmailDeliveryByMessageIdUseCase, GetEmailDeliveryByMessageIdUseCase>();
         services.AddScoped<IGetEmailDeliveryAttemptsUseCase, GetEmailDeliveryAttemptsUseCase>();
         services.AddScoped<IRetryEmailDeliveryUseCase, RetryEmailDeliveryUseCase>();
+        services.AddScoped<IProcessEmailDeliveryUseCase, ProcessEmailDeliveryUseCase>();
+        services.AddScoped<IProcessPendingEmailDeliveriesUseCase, ProcessPendingEmailDeliveriesUseCase>();
+        services.AddScoped<IProcessPendingOutboxMessagesUseCase, ProcessPendingOutboxMessagesUseCase>();
+        services.AddScoped<IProcessOutboxMessageUseCase, ProcessOutboxMessageUseCase>();
 
         // Deferred for later phase:
         // - ProcessEmailDeliveryUseCase

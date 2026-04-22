@@ -2,9 +2,9 @@ using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
 using Notifications.Application.Ports.Persistence;
+using Notifications.Application.Ports.Transactions;
 using Notifications.Domain.Entities;
 using Notifications.Infrastructure.Persistence.Exceptions;
-using Notifications.Infrastructure.Persistence.Sql;
 
 namespace Notifications.Infrastructure.Persistence.Repositories;
 
@@ -43,12 +43,12 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
     private const string EmailDeliveryResetToQueuedProc =
         "[notifications].[EmailDelivery_ResetToQueued]";
 
-    private readonly NotificationsUnitOfWork _unitOfWork;
+    private readonly INotificationsUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
     private readonly NotificationsSqlExceptionTranslator _sqlExceptionTranslator;
 
     public EmailDeliveryRepository(
-        NotificationsUnitOfWork unitOfWork,
+        INotificationsUnitOfWork unitOfWork,
         ISqlConnectionFactory sqlConnectionFactory,
         NotificationsSqlExceptionTranslator sqlExceptionTranslator)
     {
@@ -79,6 +79,7 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
                 new SqlParameter("@RecipientUserId", SqlDbType.BigInt) { Value = ToDbValue(emailDelivery.RecipientUserId) },
                 new SqlParameter("@ToEmail", SqlDbType.NVarChar, 320) { Value = emailDelivery.ToEmail },
                 new SqlParameter("@TemplateKey", SqlDbType.NVarChar, 100) { Value = emailDelivery.TemplateKey },
+                new SqlParameter("@VariablesJson", SqlDbType.NVarChar) { Value = emailDelivery.VariablesJson },
                 new SqlParameter("@Provider", SqlDbType.VarChar, 30) { Value = emailDelivery.Provider },
                 new SqlParameter("@Priority", SqlDbType.TinyInt) { Value = emailDelivery.Priority },
                 new SqlParameter("@CorrelationId", SqlDbType.NVarChar, 100) { Value = ToDbValue(emailDelivery.CorrelationId) },
@@ -475,6 +476,12 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
 
     private SqlCommand CreateTransactionalCommand(string storedProcedureName)
     {
+        if (!_unitOfWork.HasActiveConnection || !_unitOfWork.HasActiveTransaction)
+        {
+            throw new InvalidOperationException(
+                "EmailDeliveryRepository requires an active SQL transaction before executing transactional commands.");
+        }
+
         SqlCommand command = _unitOfWork.Connection.CreateCommand();
         command.Transaction = _unitOfWork.Transaction;
         command.CommandText = storedProcedureName;
@@ -517,6 +524,7 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
             recipientUserId: GetNullableInt64(reader, "RecipientUserId"),
             toEmail: reader.GetString(reader.GetOrdinal("ToEmail")),
             templateKey: reader.GetString(reader.GetOrdinal("TemplateKey")),
+            variablesJson: reader.GetString(reader.GetOrdinal("VariablesJson")),
             provider: reader.GetString(reader.GetOrdinal("Provider")),
             priority: reader.GetByte(reader.GetOrdinal("Priority")),
             status: reader.GetString(reader.GetOrdinal("Status")),

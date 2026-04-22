@@ -12,8 +12,6 @@ public sealed class GetEmailDeliveriesRequest
 
     public long? RecipientUserId { get; init; }
 
-    public string? ToEmailHash { get; init; }
-
     public string? TemplateKey { get; init; }
 
     public string? Status { get; init; }

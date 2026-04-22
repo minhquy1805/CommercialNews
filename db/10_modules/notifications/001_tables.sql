@@ -3,24 +3,17 @@
   Module: Notifications
   Purpose:
   - Create Notifications tables for CommercialNews V1.
-  - Includes:
-      * [notifications].[OutboxMessage]         -> durable async intent / shared outbox artifact
-      * [notifications].[EmailDelivery]         -> canonical delivery-state truth
+  - Refactored toward the current domain shape:
+      * [notifications].[OutboxMessage]         -> shared async intent / publication artifact
+      * [notifications].[EmailDelivery]         -> canonical delivery workflow truth (new shape)
       * [notifications].[EmailDeliveryAttempt]  -> attempt-level operational history
       * [notifications].[EmailRateLimitLog]     -> optional investigation log
 
   Design principles:
-  - Core flows write truth + outbox only; delivery is async.
-  - Two-layer idempotency:
-      1) message-level dedupe
-      2) business-intent dedupe
-  - Never store raw secrets/tokens in payloads or errors.
-  - Provider timeout may be ambiguous; do not assume "not sent".
-  - Notifications owns delivery workflow truth, not upstream business truth.
-
-  Notes:
-  - [notifications].[OutboxMessage] is physically placed in the [notifications] schema in V1,
-    but semantically serves as a shared system outbox artifact.
+  - Upstream modules write truth + outbox only; delivery is async.
+  - Outbox is shared, but delivery truth belongs to Notifications.
+  - Domain shape is the source of truth; tables should follow current domain contracts.
+  - Do not store raw secrets/tokens in errors or logs.
 */
 
 SET NOCOUNT ON;
@@ -70,7 +63,7 @@ BEGIN
         [AggregatePublicId] CHAR(26)             NULL,
         [AggregateVersion]  INT                  NULL,
 
-        [Payload]           NVARCHAR(MAX)        NOT NULL, -- minimal + redacted
+        [Payload]           NVARCHAR(MAX)        NOT NULL,
         [Headers]           NVARCHAR(MAX)        NULL,
 
         [CorrelationId]     NVARCHAR(100)        NULL,
@@ -134,58 +127,47 @@ GO
 
 /* =========================================================
    2) [notifications].[EmailDelivery]
-   Canonical delivery workflow truth
+   Canonical delivery workflow truth (new shape)
    ========================================================= */
 IF OBJECT_ID(N'[notifications].[EmailDelivery]', N'U') IS NULL
 BEGIN
     CREATE TABLE [notifications].[EmailDelivery]
     (
-        [EmailDeliveryId]      BIGINT IDENTITY(1,1) NOT NULL,
-        [MessageId]            CHAR(26)             NOT NULL, -- links to OutboxMessage.MessageId
+        [EmailDeliveryId]   BIGINT IDENTITY(1,1) NOT NULL,
+        [MessageId]         CHAR(26)             NOT NULL, -- links to OutboxMessage.MessageId
 
-        -- Business-intent dedupe (harmful duplicate protection)
-        [BusinessDedupeKey]    NVARCHAR(300)        NOT NULL,
+        [BusinessDedupeKey] NVARCHAR(300)        NOT NULL,
 
-        [RecipientUserId]      BIGINT               NULL,
-        [ToEmail]              NVARCHAR(320)        NOT NULL,
-        [ToEmailHash]          VARCHAR(64)          NULL,
+        [RecipientUserId]   BIGINT               NULL,
+        [ToEmail]           NVARCHAR(320)        NOT NULL,
 
-        [TemplateKey]          NVARCHAR(100)        NOT NULL,
-        [TemplateVersion]      INT                  NULL,
-        [Subject]              NVARCHAR(300)        NULL,
+        [TemplateKey]       NVARCHAR(100)        NOT NULL,
+        [VariablesJson]     NVARCHAR(MAX)        NOT NULL,
 
-        [Provider]             VARCHAR(30)          NOT NULL
+        [Provider]          VARCHAR(30)          NOT NULL
             CONSTRAINT [DF_EmailDelivery_Provider] DEFAULT ('smtp'),
 
-        [Priority]             TINYINT              NOT NULL
+        [Priority]          TINYINT              NOT NULL
             CONSTRAINT [DF_EmailDelivery_Priority] DEFAULT (5),
 
-        [ProviderMessageId]    NVARCHAR(200)        NULL,
-
-        [Status]               VARCHAR(20)          NOT NULL
+        [Status]            VARCHAR(20)          NOT NULL
             CONSTRAINT [DF_EmailDelivery_Status] DEFAULT ('Queued'),
 
-        [AttemptCount]         INT                  NOT NULL
+        [AttemptCount]      INT                  NOT NULL
             CONSTRAINT [DF_EmailDelivery_AttemptCount] DEFAULT (0),
 
-        [LastAttemptAt]        DATETIME2(3)         NULL,
-        [NextRetryAt]          DATETIME2(3)         NULL,
+        [LastAttemptAt]     DATETIME2(3)         NULL,
+        [NextRetryAt]       DATETIME2(3)         NULL,
+        [SentAt]            DATETIME2(3)         NULL,
 
-        [SentAt]               DATETIME2(3)         NULL,
-        [FailedAt]             DATETIME2(3)         NULL,
-        [DeadAt]               DATETIME2(3)         NULL,
-        [SuppressedAt]         DATETIME2(3)         NULL,
-        [AmbiguousAt]          DATETIME2(3)         NULL,
+        [LastErrorCode]     NVARCHAR(100)        NULL,
+        [LastErrorClass]    VARCHAR(30)          NULL,
 
-        [LastError]            NVARCHAR(2000)       NULL,
-        [LastErrorCode]        NVARCHAR(100)        NULL,
-        [LastErrorClass]       VARCHAR(30)          NULL,
+        [CorrelationId]     NVARCHAR(100)        NULL,
 
-        [CorrelationId]        NVARCHAR(100)        NULL,
-
-        [CreatedAt]            DATETIME2(3)         NOT NULL
+        [CreatedAt]         DATETIME2(3)         NOT NULL
             CONSTRAINT [DF_EmailDelivery_CreatedAt] DEFAULT (SYSUTCDATETIME()),
-        [UpdatedAt]            DATETIME2(3)         NOT NULL
+        [UpdatedAt]         DATETIME2(3)         NOT NULL
             CONSTRAINT [DF_EmailDelivery_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
 
         CONSTRAINT [PK_EmailDelivery]
@@ -214,26 +196,14 @@ BEGIN
         CONSTRAINT [CK_EmailDelivery_AttemptCount]
             CHECK ([AttemptCount] >= 0),
 
-        CONSTRAINT [CK_EmailDelivery_TemplateVersion]
-            CHECK ([TemplateVersion] IS NULL OR [TemplateVersion] >= 1),
-
         CONSTRAINT [CK_EmailDelivery_LastErrorClass]
             CHECK ([LastErrorClass] IS NULL OR [LastErrorClass] IN ('Transient', 'Permanent', 'Ambiguous', 'Policy', 'Template', 'Provider', 'Validation')),
 
+        CONSTRAINT [CK_EmailDelivery_VariablesJson_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([VariablesJson]))) > 0),
+
         CONSTRAINT [CK_EmailDelivery_SentAt]
             CHECK ([SentAt] IS NULL OR [SentAt] >= [CreatedAt]),
-
-        CONSTRAINT [CK_EmailDelivery_FailedAt]
-            CHECK ([FailedAt] IS NULL OR [FailedAt] >= [CreatedAt]),
-
-        CONSTRAINT [CK_EmailDelivery_DeadAt]
-            CHECK ([DeadAt] IS NULL OR [DeadAt] >= [CreatedAt]),
-
-        CONSTRAINT [CK_EmailDelivery_SuppressedAt]
-            CHECK ([SuppressedAt] IS NULL OR [SuppressedAt] >= [CreatedAt]),
-
-        CONSTRAINT [CK_EmailDelivery_AmbiguousAt]
-            CHECK ([AmbiguousAt] IS NULL OR [AmbiguousAt] >= [CreatedAt]),
 
         CONSTRAINT [CK_EmailDelivery_LastAttemptAt]
             CHECK ([LastAttemptAt] IS NULL OR [LastAttemptAt] >= [CreatedAt]),
@@ -319,7 +289,8 @@ END
 GO
 
 /* =========================================================
-   4) [notifications].[EmailRateLimitLog] (optional but useful)
+   4) [notifications].[EmailRateLimitLog]
+   Optional investigation log
    ========================================================= */
 IF OBJECT_ID(N'[notifications].[EmailRateLimitLog]', N'U') IS NULL
 BEGIN
@@ -328,7 +299,7 @@ BEGIN
         [EmailRateLimitLogId] BIGINT IDENTITY(1,1) NOT NULL,
         [RecipientUserId]     BIGINT               NULL,
 
-        [Endpoint]            NVARCHAR(60)         NOT NULL, -- register/forgot/resend
+        [Endpoint]            NVARCHAR(60)         NOT NULL,
         [ToEmail]             NVARCHAR(320)        NULL,
         [ToEmailHash]         VARCHAR(64)          NULL,
         [IpAddress]           NVARCHAR(45)         NULL,

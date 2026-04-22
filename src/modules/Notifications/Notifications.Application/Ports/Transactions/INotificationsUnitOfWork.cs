@@ -1,10 +1,7 @@
+using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
+
 namespace Notifications.Application.Ports.Transactions;
 
-public interface INotificationsUnitOfWork
+public interface INotificationsUnitOfWork : ISqlUnitOfWork
 {
-    Task BeginTransactionAsync(CancellationToken cancellationToken = default);
-
-    Task CommitAsync(CancellationToken cancellationToken = default);
-
-    Task RollbackAsync(CancellationToken cancellationToken = default);
 }
