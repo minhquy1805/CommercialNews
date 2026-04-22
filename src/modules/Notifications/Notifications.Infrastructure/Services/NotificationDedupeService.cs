@@ -48,6 +48,8 @@ public sealed class NotificationDedupeService : INotificationDedupeService
                 IsDuplicateMessage = true,
                 IsDuplicateBusinessIntent = false,
                 ShouldSuppress = true,
+                ExistingEmailDeliveryId = existingByMessageId.EmailDeliveryId,
+                ExistingStatus = existingByMessageId.Status,
                 Reason = "A delivery already exists for the same message id."
             };
         }
@@ -63,6 +65,8 @@ public sealed class NotificationDedupeService : INotificationDedupeService
                 IsDuplicateMessage = false,
                 IsDuplicateBusinessIntent = false,
                 ShouldSuppress = false,
+                ExistingEmailDeliveryId = null,
+                ExistingStatus = null,
                 Reason = null
             };
         }
@@ -72,6 +76,8 @@ public sealed class NotificationDedupeService : INotificationDedupeService
             IsDuplicateMessage = false,
             IsDuplicateBusinessIntent = true,
             ShouldSuppress = true,
+            ExistingEmailDeliveryId = existingByBusinessKey.EmailDeliveryId,
+            ExistingStatus = existingByBusinessKey.Status,
             Reason = BuildBusinessIntentReason(existingByBusinessKey.Status)
         };
     }

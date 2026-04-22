@@ -4,8 +4,8 @@ using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Microsoft.Data.SqlClient;
 using Notifications.Application.Models.QueryModels;
 using Notifications.Application.Ports.Persistence;
+using Notifications.Application.Ports.Transactions;
 using Notifications.Infrastructure.Persistence.Exceptions;
-using Notifications.Infrastructure.Persistence.Sql;
 
 namespace Notifications.Infrastructure.Persistence.Repositories;
 
@@ -23,12 +23,12 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
     private const string EmailDeliveryAttemptSelectByEmailDeliveryIdProc =
         "[notifications].[EmailDeliveryAttempt_SelectByEmailDeliveryId]";
 
-    private readonly NotificationsUnitOfWork _unitOfWork;
+    private readonly INotificationsUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
     private readonly NotificationsSqlExceptionTranslator _sqlExceptionTranslator;
 
     public EmailDeliveryQueryRepository(
-        NotificationsUnitOfWork unitOfWork,
+        INotificationsUnitOfWork unitOfWork,
         ISqlConnectionFactory sqlConnectionFactory,
         NotificationsSqlExceptionTranslator sqlExceptionTranslator)
     {
@@ -65,9 +65,7 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
                 EmailDeliveryDetailResult detail = MapEmailDeliveryDetail(reader);
 
                 IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
-                    await GetAttemptsInternalAsync(
-                        detail.EmailDeliveryId,
-                        cancellationToken);
+                    await GetAttemptsInternalAsync(detail.EmailDeliveryId, cancellationToken);
 
                 return new EmailDeliveryDetailResult
                 {
@@ -76,22 +74,13 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
                     BusinessDedupeKey = detail.BusinessDedupeKey,
                     RecipientUserId = detail.RecipientUserId,
                     ToEmail = detail.ToEmail,
-                    ToEmailHash = detail.ToEmailHash,
                     TemplateKey = detail.TemplateKey,
-                    TemplateVersion = detail.TemplateVersion,
-                    Subject = detail.Subject,
                     Provider = detail.Provider,
-                    ProviderMessageId = detail.ProviderMessageId,
                     Status = detail.Status,
                     AttemptCount = detail.AttemptCount,
                     LastAttemptAt = detail.LastAttemptAt,
                     NextRetryAt = detail.NextRetryAt,
                     SentAt = detail.SentAt,
-                    FailedAt = detail.FailedAt,
-                    DeadAt = detail.DeadAt,
-                    SuppressedAt = detail.SuppressedAt,
-                    AmbiguousAt = detail.AmbiguousAt,
-                    LastError = detail.LastError,
                     LastErrorCode = detail.LastErrorCode,
                     LastErrorClass = detail.LastErrorClass,
                     CorrelationId = detail.CorrelationId,
@@ -142,9 +131,7 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
                 EmailDeliveryDetailResult detail = MapEmailDeliveryDetail(reader);
 
                 IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
-                    await GetAttemptsInternalAsync(
-                        detail.EmailDeliveryId,
-                        cancellationToken);
+                    await GetAttemptsInternalAsync(detail.EmailDeliveryId, cancellationToken);
 
                 return new EmailDeliveryDetailResult
                 {
@@ -153,22 +140,13 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
                     BusinessDedupeKey = detail.BusinessDedupeKey,
                     RecipientUserId = detail.RecipientUserId,
                     ToEmail = detail.ToEmail,
-                    ToEmailHash = detail.ToEmailHash,
                     TemplateKey = detail.TemplateKey,
-                    TemplateVersion = detail.TemplateVersion,
-                    Subject = detail.Subject,
                     Provider = detail.Provider,
-                    ProviderMessageId = detail.ProviderMessageId,
                     Status = detail.Status,
                     AttemptCount = detail.AttemptCount,
                     LastAttemptAt = detail.LastAttemptAt,
                     NextRetryAt = detail.NextRetryAt,
                     SentAt = detail.SentAt,
-                    FailedAt = detail.FailedAt,
-                    DeadAt = detail.DeadAt,
-                    SuppressedAt = detail.SuppressedAt,
-                    AmbiguousAt = detail.AmbiguousAt,
-                    LastError = detail.LastError,
                     LastErrorCode = detail.LastErrorCode,
                     LastErrorClass = detail.LastErrorClass,
                     CorrelationId = detail.CorrelationId,
@@ -218,7 +196,6 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
                     new SqlParameter("@FromCreatedAt", SqlDbType.DateTime2) { Value = ToDbValue(query.FromCreatedAt) },
                     new SqlParameter("@ToCreatedAt", SqlDbType.DateTime2) { Value = ToDbValue(query.ToCreatedAt) },
                     new SqlParameter("@RecipientUserId", SqlDbType.BigInt) { Value = ToDbValue(query.RecipientUserId) },
-                    new SqlParameter("@ToEmailHash", SqlDbType.VarChar, 64) { Value = ToDbValue(query.ToEmailHash) },
                     new SqlParameter("@TemplateKey", SqlDbType.NVarChar, 100) { Value = ToDbValue(query.TemplateKey) },
                     new SqlParameter("@Status", SqlDbType.VarChar, 20) { Value = ToDbValue(query.Status) },
                     new SqlParameter("@CorrelationId", SqlDbType.NVarChar, 100) { Value = ToDbValue(query.CorrelationId) },
@@ -348,19 +325,13 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
             MessageId = reader.GetString(reader.GetOrdinal("MessageId")),
             RecipientUserId = GetNullableInt64(reader, "RecipientUserId"),
             MaskedToEmail = MaskEmail(toEmail),
-            ToEmailHash = GetNullableString(reader, "ToEmailHash"),
             TemplateKey = reader.GetString(reader.GetOrdinal("TemplateKey")),
-            TemplateVersion = GetNullableInt32(reader, "TemplateVersion"),
             Provider = reader.GetString(reader.GetOrdinal("Provider")),
             Status = reader.GetString(reader.GetOrdinal("Status")),
             AttemptCount = reader.GetInt32(reader.GetOrdinal("AttemptCount")),
             LastAttemptAt = GetNullableDateTime(reader, "LastAttemptAt"),
             NextRetryAt = GetNullableDateTime(reader, "NextRetryAt"),
             SentAt = GetNullableDateTime(reader, "SentAt"),
-            FailedAt = GetNullableDateTime(reader, "FailedAt"),
-            DeadAt = GetNullableDateTime(reader, "DeadAt"),
-            SuppressedAt = GetNullableDateTime(reader, "SuppressedAt"),
-            AmbiguousAt = GetNullableDateTime(reader, "AmbiguousAt"),
             LastErrorCode = GetNullableString(reader, "LastErrorCode"),
             LastErrorClass = GetNullableString(reader, "LastErrorClass"),
             CorrelationId = GetNullableString(reader, "CorrelationId"),
@@ -378,22 +349,13 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
             BusinessDedupeKey = reader.GetString(reader.GetOrdinal("BusinessDedupeKey")),
             RecipientUserId = GetNullableInt64(reader, "RecipientUserId"),
             ToEmail = reader.GetString(reader.GetOrdinal("ToEmail")),
-            ToEmailHash = GetNullableString(reader, "ToEmailHash"),
             TemplateKey = reader.GetString(reader.GetOrdinal("TemplateKey")),
-            TemplateVersion = GetNullableInt32(reader, "TemplateVersion"),
-            Subject = GetNullableString(reader, "Subject"),
             Provider = reader.GetString(reader.GetOrdinal("Provider")),
-            ProviderMessageId = GetNullableString(reader, "ProviderMessageId"),
             Status = reader.GetString(reader.GetOrdinal("Status")),
             AttemptCount = reader.GetInt32(reader.GetOrdinal("AttemptCount")),
             LastAttemptAt = GetNullableDateTime(reader, "LastAttemptAt"),
             NextRetryAt = GetNullableDateTime(reader, "NextRetryAt"),
             SentAt = GetNullableDateTime(reader, "SentAt"),
-            FailedAt = GetNullableDateTime(reader, "FailedAt"),
-            DeadAt = GetNullableDateTime(reader, "DeadAt"),
-            SuppressedAt = GetNullableDateTime(reader, "SuppressedAt"),
-            AmbiguousAt = GetNullableDateTime(reader, "AmbiguousAt"),
-            LastError = GetNullableString(reader, "LastError"),
             LastErrorCode = GetNullableString(reader, "LastErrorCode"),
             LastErrorClass = GetNullableString(reader, "LastErrorClass"),
             CorrelationId = GetNullableString(reader, "CorrelationId"),
@@ -460,12 +422,6 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
     {
         int ordinal = reader.GetOrdinal(columnName);
         return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
-    }
-
-    private static int? GetNullableInt32(SqlDataReader reader, string columnName)
-    {
-        int ordinal = reader.GetOrdinal(columnName);
-        return reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
     }
 
     private static DateTime? GetNullableDateTime(SqlDataReader reader, string columnName)

@@ -1,4 +1,4 @@
-namespace Notifications.Application.Contracts.Processing.Responses;
+namespace Notifications.Application.Contracts.EmailDeliveries.Responses;
 
 public sealed class ProcessEmailDeliveryResponse
 {

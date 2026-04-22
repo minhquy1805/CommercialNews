@@ -3,11 +3,7 @@
   Module: Notifications
   Purpose:
   - Create non-PK/non-constraint indexes for Notifications tables in CommercialNews V1.
-  - Includes:
-      * [notifications].[OutboxMessage]
-      * [notifications].[EmailDelivery]
-      * [notifications].[EmailDeliveryAttempt]
-      * [notifications].[EmailRateLimitLog]
+  - Refactored to match the current EmailDelivery table/domain shape.
 
   Notes:
   - Idempotent: safe to re-run.
@@ -17,8 +13,7 @@
       * replay / remediation / cleanup
       * admin ops inspection
       * correlation-based troubleshooting
-      * privacy-safer recipient lookups
-      * auth-critical priority-aware delivery
+      * recipient/user lookup
 */
 
 SET NOCOUNT ON;
@@ -68,8 +63,6 @@ GO
    1) [notifications].[OutboxMessage]
    ========================================================= */
 
--- Main outbox publisher pull path:
--- Pending / Failed candidates ordered by priority, retry schedule, and stable time/identity.
 IF NOT EXISTS
 (
     SELECT 1
@@ -107,7 +100,6 @@ BEGIN
 END
 GO
 
--- Per-aggregate troubleshooting / ordering investigation.
 IF NOT EXISTS
 (
     SELECT 1
@@ -141,7 +133,6 @@ BEGIN
 END
 GO
 
--- Time-range replay / rebuild / audit support.
 IF NOT EXISTS
 (
     SELECT 1
@@ -171,7 +162,6 @@ BEGIN
 END
 GO
 
--- Cleanup / retention / publication investigation.
 IF NOT EXISTS
 (
     SELECT 1
@@ -199,7 +189,6 @@ BEGIN
 END
 GO
 
--- Poison-message / repeated failure investigation.
 IF NOT EXISTS
 (
     SELECT 1
@@ -235,7 +224,6 @@ BEGIN
 END
 GO
 
--- Correlation-based end-to-end tracing.
 IF NOT EXISTS
 (
     SELECT 1
@@ -270,10 +258,9 @@ END
 GO
 
 /* =========================================================
-   2) [notifications].[EmailDelivery]
+   2) [notifications].[EmailDelivery] - new shape
    ========================================================= */
 
--- Main delivery queue / retry worker path with priority awareness.
 IF NOT EXISTS
 (
     SELECT 1
@@ -295,7 +282,7 @@ BEGIN
         [EmailDeliveryId],
         [MessageId],
         [RecipientUserId],
-        [ToEmailHash],
+        [ToEmail],
         [TemplateKey],
         [AttemptCount],
         [CorrelationId],
@@ -311,7 +298,6 @@ BEGIN
 END
 GO
 
--- Per-recipient-user ops review.
 IF NOT EXISTS
 (
     SELECT 1
@@ -329,6 +315,7 @@ BEGIN
     INCLUDE
     (
         [MessageId],
+        [ToEmail],
         [TemplateKey],
         [Status],
         [AttemptCount],
@@ -344,40 +331,6 @@ BEGIN
 END
 GO
 
--- Privacy-safer recipient lookup.
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_EmailDelivery_ToEmailHash_CreatedAt'
-      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_ToEmailHash_CreatedAt]
-    ON [notifications].[EmailDelivery]
-    (
-        [ToEmailHash] ASC,
-        [CreatedAt] ASC
-    )
-    INCLUDE
-    (
-        [MessageId],
-        [TemplateKey],
-        [Status],
-        [AttemptCount],
-        [SentAt],
-        [CorrelationId]
-    );
-
-    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_ToEmailHash_CreatedAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_ToEmailHash_CreatedAt]';
-END
-GO
-
--- Template-based reporting / dashboard queries.
 IF NOT EXISTS
 (
     SELECT 1
@@ -395,6 +348,7 @@ BEGIN
     INCLUDE
     (
         [MessageId],
+        [ToEmail],
         [Status],
         [AttemptCount],
         [SentAt],
@@ -411,7 +365,6 @@ BEGIN
 END
 GO
 
--- Correlation-based troubleshooting.
 IF NOT EXISTS
 (
     SELECT 1
@@ -433,7 +386,7 @@ BEGIN
         [Status],
         [AttemptCount],
         [RecipientUserId],
-        [ToEmailHash],
+        [ToEmail],
         [Priority]
     );
 
@@ -445,7 +398,6 @@ BEGIN
 END
 GO
 
--- Delivery cleanup / retention / sent-mail reporting.
 IF NOT EXISTS
 (
     SELECT 1
@@ -462,7 +414,7 @@ BEGIN
         [TemplateKey],
         [Status],
         [RecipientUserId],
-        [ToEmailHash],
+        [ToEmail],
         [Priority]
     );
 
@@ -474,7 +426,6 @@ BEGIN
 END
 GO
 
--- Failed / ambiguous / dead investigation.
 IF NOT EXISTS
 (
     SELECT 1
@@ -492,6 +443,7 @@ BEGIN
     INCLUDE
     (
         [MessageId],
+        [ToEmail],
         [TemplateKey],
         [AttemptCount],
         [LastErrorCode],
@@ -508,11 +460,41 @@ BEGIN
 END
 GO
 
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_EmailDelivery_ToEmail_CreatedAt'
+      AND [object_id] = OBJECT_ID(N'[notifications].[EmailDelivery]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_EmailDelivery_ToEmail_CreatedAt]
+    ON [notifications].[EmailDelivery]
+    (
+        [ToEmail] ASC,
+        [CreatedAt] ASC
+    )
+    INCLUDE
+    (
+        [MessageId],
+        [TemplateKey],
+        [Status],
+        [AttemptCount],
+        [CorrelationId]
+    );
+
+    PRINT N'Created index: [notifications].[EmailDelivery].[IX_EmailDelivery_ToEmail_CreatedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [notifications].[EmailDelivery].[IX_EmailDelivery_ToEmail_CreatedAt]';
+END
+GO
+
 /* =========================================================
    3) [notifications].[EmailDeliveryAttempt]
    ========================================================= */
 
--- Detail history lookup for a delivery.
 IF NOT EXISTS
 (
     SELECT 1
@@ -547,7 +529,6 @@ BEGIN
 END
 GO
 
--- Direct message-level investigation support.
 IF NOT EXISTS
 (
     SELECT 1
@@ -583,7 +564,6 @@ BEGIN
 END
 GO
 
--- Outcome-based ops investigation.
 IF NOT EXISTS
 (
     SELECT 1
@@ -616,7 +596,6 @@ BEGIN
 END
 GO
 
--- Ambiguity / timeout investigation.
 IF NOT EXISTS
 (
     SELECT 1
