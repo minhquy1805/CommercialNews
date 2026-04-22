@@ -6,20 +6,20 @@ using Notifications.Application.Contracts.Outbox.Requests;
 using Notifications.Application.Contracts.Outbox.Responses;
 using Notifications.Application.Errors;
 using Notifications.Application.Ports.Transactions;
-using Notifications.Application.Validation.Outbox.MarkOutboxFailed;
+using Notifications.Application.Validation.Outbox.MarkOutboxDead;
 
-namespace Notifications.Application.UseCases.Outbox.MarkOutboxFailed;
+namespace Notifications.Application.UseCases.Outbox.MarkOutboxDead;
 
 /// <summary>
-/// Marks a single outbox message as failed and optionally schedules a retry.
+/// Marks a single outbox message as dead when it should no longer be retried.
 /// This is a write use case and opens a transaction.
 /// </summary>
-public sealed class MarkOutboxFailedUseCase : IMarkOutboxFailedUseCase
+public sealed class MarkOutboxDeadUseCase : IMarkOutboxDeadUseCase
 {
     private readonly IOutboxMessageRepository _outboxMessageRepository;
     private readonly INotificationsUnitOfWork _unitOfWork;
 
-    public MarkOutboxFailedUseCase(
+    public MarkOutboxDeadUseCase(
         IOutboxMessageRepository outboxMessageRepository,
         INotificationsUnitOfWork unitOfWork)
     {
@@ -29,14 +29,14 @@ public sealed class MarkOutboxFailedUseCase : IMarkOutboxFailedUseCase
             ?? throw new ArgumentNullException(nameof(unitOfWork));
     }
 
-    public async Task<Result<MarkOutboxFailedResponse>> ExecuteAsync(
-        MarkOutboxFailedRequest request,
+    public async Task<Result<MarkOutboxDeadResponse>> ExecuteAsync(
+        MarkOutboxDeadRequest request,
         CancellationToken cancellationToken = default)
     {
-        Error? validationError = MarkOutboxFailedValidator.Validate(request);
+        Error? validationError = MarkOutboxDeadValidator.Validate(request);
         if (validationError is not null)
         {
-            return Result<MarkOutboxFailedResponse>.Failure(validationError);
+            return Result<MarkOutboxDeadResponse>.Failure(validationError);
         }
 
         try
@@ -47,25 +47,34 @@ public sealed class MarkOutboxFailedUseCase : IMarkOutboxFailedUseCase
 
             if (outboxMessage is null)
             {
-                return Result<MarkOutboxFailedResponse>.Failure(
+                return Result<MarkOutboxDeadResponse>.Failure(
                     NotificationsErrors.Outbox.NotFound);
             }
 
-            if (string.Equals(outboxMessage.Status, OutboxMessageStatus.Published, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(outboxMessage.Status, OutboxMessageStatus.Dead, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(outboxMessage.Status, OutboxMessageStatus.Published, StringComparison.OrdinalIgnoreCase))
             {
-                return Result<MarkOutboxFailedResponse>.Failure(
+                return Result<MarkOutboxDeadResponse>.Failure(
                     NotificationsErrors.Outbox.InvalidState);
+            }
+
+            if (string.Equals(outboxMessage.Status, OutboxMessageStatus.Dead, StringComparison.OrdinalIgnoreCase))
+            {
+                return Result<MarkOutboxDeadResponse>.Success(
+                    new MarkOutboxDeadResponse
+                    {
+                        OutboxMessageId = outboxMessage.OutboxMessageId,
+                        MessageId = outboxMessage.MessageId,
+                        Status = outboxMessage.Status
+                    });
             }
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                int affectedRows = await _outboxMessageRepository.MarkFailedAsync(
+                int affectedRows = await _outboxMessageRepository.MarkDeadAsync(
                     _unitOfWork,
                     outboxMessage.OutboxMessageId,
-                    request.NextRetryAt,
                     NormalizeOptional(request.LastError),
                     NormalizeOptional(request.LastErrorCode),
                     NormalizeOptional(request.LastErrorClass),
@@ -75,19 +84,18 @@ public sealed class MarkOutboxFailedUseCase : IMarkOutboxFailedUseCase
                 {
                     await _unitOfWork.RollbackAsync(cancellationToken);
 
-                    return Result<MarkOutboxFailedResponse>.Failure(
+                    return Result<MarkOutboxDeadResponse>.Failure(
                         NotificationsErrors.Outbox.StaleWriteConflict);
                 }
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                return Result<MarkOutboxFailedResponse>.Success(
-                    new MarkOutboxFailedResponse
+                return Result<MarkOutboxDeadResponse>.Success(
+                    new MarkOutboxDeadResponse
                     {
                         OutboxMessageId = outboxMessage.OutboxMessageId,
                         MessageId = outboxMessage.MessageId,
-                        Status = OutboxMessageStatus.Failed,
-                        NextRetryAt = request.NextRetryAt
+                        Status = OutboxMessageStatus.Dead
                     });
             }
             catch
@@ -98,7 +106,7 @@ public sealed class MarkOutboxFailedUseCase : IMarkOutboxFailedUseCase
         }
         catch (PersistenceException exception)
         {
-            return Result<MarkOutboxFailedResponse>.Failure(
+            return Result<MarkOutboxDeadResponse>.Failure(
                 MapPersistenceException(exception));
         }
     }
