@@ -1,6 +1,4 @@
-using CommercialNews.Worker.Messaging.Outbox.Notifications;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
+using CommercialNews.Worker.Notifications;
 using Notifications.Application.DependencyInjection;
 using Notifications.Infrastructure.DependencyInjection;
 
@@ -21,7 +19,8 @@ public static class WorkerModuleRegistration
         services.Configure<NotificationWorkerOptions>(
             configuration.GetSection("Workers:Notifications"));
 
-        // services.AddHostedService<NotificationOutboxPollingService>();
+        services.AddHostedService<NotificationPollingService>();
+        services.AddHostedService<OutboxPollingService>();
 
         return services;
     }

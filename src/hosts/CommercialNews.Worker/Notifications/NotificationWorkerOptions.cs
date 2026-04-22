@@ -1,4 +1,4 @@
-namespace CommercialNews.Worker.Messaging.Outbox.Notifications;
+namespace CommercialNews.Worker.Notifications;
 
 public sealed class NotificationWorkerOptions
 {

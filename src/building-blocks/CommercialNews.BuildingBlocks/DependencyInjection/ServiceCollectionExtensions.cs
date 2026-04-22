@@ -1,4 +1,6 @@
-using CommercialNews.BuildingBlocks.Persistence.Sql;
+using CommercialNews.BuildingBlocks.Outbox.Exceptions;
+using CommercialNews.BuildingBlocks.Outbox.Persistence;
+using CommercialNews.BuildingBlocks.Outbox.Ports;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Options;
 using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
@@ -18,10 +20,14 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configuration);
 
         services.Configure<SqlOptions>(configuration.GetSection("Sql"));
+
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
 
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         services.AddSingleton<IPublicIdGenerator, UlidPublicIdGenerator>();
+
+        services.AddSingleton<OutboxSqlExceptionTranslator>();
+        services.AddScoped<IOutboxMessageRepository, OutboxMessageRepository>();
 
         return services;
     }
