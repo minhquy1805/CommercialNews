@@ -204,5 +204,10 @@ public static class NotificationsErrors
             Error.Validation(
                 code: "NOTIFICATIONS.OUTBOX_PAYLOAD_INVALID",
                 message: "The outbox message payload is invalid.");
+
+        public static readonly Error StaleWriteConflict =
+            Error.Conflict(
+                code: "NOTIFICATIONS.OUTBOX_STALE_WRITE_CONFLICT",
+                message: "The outbox message was changed by another process. Please reload and try again.");
     }
 }

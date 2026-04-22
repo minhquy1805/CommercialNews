@@ -1,6 +1,6 @@
 namespace Notifications.Application.Contracts.Outbox.Responses;
 
-public sealed class MarkOutboxDeadLetterResponse
+public sealed class MarkOutboxDeadResponse
 {
     public long OutboxMessageId { get; init; }
 

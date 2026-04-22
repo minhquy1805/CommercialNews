@@ -16,6 +16,10 @@ public sealed class GetOutboxMessageByIdResponse
 
     public int? AggregateVersion { get; init; }
 
+    public string Payload { get; init; } = string.Empty;
+
+    public string? Headers { get; init; }
+
     public string? CorrelationId { get; init; }
 
     public long? InitiatorUserId { get; init; }
@@ -31,6 +35,8 @@ public sealed class GetOutboxMessageByIdResponse
     public DateTime? LastAttemptAt { get; init; }
 
     public DateTime? PublishedAt { get; init; }
+
+    public string? LastError { get; init; }
 
     public string? LastErrorCode { get; init; }
 

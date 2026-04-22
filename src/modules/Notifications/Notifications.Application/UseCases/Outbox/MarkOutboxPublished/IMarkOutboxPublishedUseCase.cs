@@ -5,10 +5,7 @@ using Notifications.Application.Contracts.Outbox.Responses;
 namespace Notifications.Application.UseCases.Outbox.MarkOutboxPublished;
 
 /// <summary>
-/// TODO (deferred):
-/// This outbox use case is intentionally postponed.
-/// Outbox is being moved toward a shared/building-blocks ownership model.
-/// Do not treat this interface/implementation as finalized inside Notifications.
+/// Marks a single outbox message as published after successful downstream consumption.
 /// </summary>
 public interface IMarkOutboxPublishedUseCase
 {
