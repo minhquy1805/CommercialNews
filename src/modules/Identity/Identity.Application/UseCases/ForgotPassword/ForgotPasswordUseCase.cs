@@ -21,7 +21,7 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
     private readonly ITokenHashProvider _tokenHashProvider;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IIdentityUnitOfWork _unitOfWork;
-    private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
+    private readonly IIdentityOutboxWriter _outboxWriter;
     private readonly IdentityTokenOptions _tokenOptions;
 
     public ForgotPasswordUseCase(
@@ -31,7 +31,7 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
         ITokenHashProvider tokenHashProvider,
         IDateTimeProvider dateTimeProvider,
         IIdentityUnitOfWork unitOfWork,
-        IIdentityNotificationOutboxWriter notificationOutboxWriter,
+        IIdentityOutboxWriter outboxWriter,
         IOptions<IdentityTokenOptions> tokenOptions)
     {
         _userAccountRepository = userAccountRepository ?? throw new ArgumentNullException(nameof(userAccountRepository));
@@ -40,7 +40,7 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
         _tokenHashProvider = tokenHashProvider ?? throw new ArgumentNullException(nameof(tokenHashProvider));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _notificationOutboxWriter = notificationOutboxWriter ?? throw new ArgumentNullException(nameof(notificationOutboxWriter));
+        _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
         _tokenOptions = tokenOptions?.Value ?? throw new ArgumentNullException(nameof(tokenOptions));
     }
 
@@ -92,7 +92,7 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
                     resetToken,
                     cancellationToken);
 
-                await _notificationOutboxWriter.EnqueuePasswordResetEmailAsync(
+                await _outboxWriter.EnqueuePasswordResetEmailAsync(
                     userId: user.UserId,
                     userPublicId: user.PublicId,
                     email: user.Email,

@@ -24,7 +24,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
     private readonly IRawTokenGenerator _rawTokenGenerator;
     private readonly ITokenHashProvider _tokenHashProvider;
     private readonly IDateTimeProvider _dateTimeProvider;
-    private readonly IIdentityNotificationOutboxWriter _notificationOutboxWriter;
+    private readonly IIdentityOutboxWriter _outboxWriter;
     private readonly IdentityTokenOptions _tokenOptions;
 
     public RegisterUserUseCase(
@@ -36,7 +36,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
         IRawTokenGenerator rawTokenGenerator,
         ITokenHashProvider tokenHashProvider,
         IDateTimeProvider dateTimeProvider,
-        IIdentityNotificationOutboxWriter notificationOutboxWriter,
+        IIdentityOutboxWriter outboxWriter,
         IOptions<IdentityTokenOptions> tokenOptions)
     {
         _userAccountRepository = userAccountRepository ?? throw new ArgumentNullException(nameof(userAccountRepository));
@@ -47,7 +47,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
         _rawTokenGenerator = rawTokenGenerator ?? throw new ArgumentNullException(nameof(rawTokenGenerator));
         _tokenHashProvider = tokenHashProvider ?? throw new ArgumentNullException(nameof(tokenHashProvider));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
-        _notificationOutboxWriter = notificationOutboxWriter ?? throw new ArgumentNullException(nameof(notificationOutboxWriter));
+        _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
         _tokenOptions = tokenOptions?.Value ?? throw new ArgumentNullException(nameof(tokenOptions));
     }
 
@@ -115,7 +115,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
                     verificationToken,
                     cancellationToken);
 
-                await _notificationOutboxWriter.EnqueueVerificationEmailAsync(
+                await _outboxWriter.EnqueueVerificationEmailAsync(
                     userId: userId,
                     userPublicId: user.PublicId,
                     email: user.Email,
@@ -125,8 +125,6 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
                     cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
-
-                Console.WriteLine($"[DEV][VERIFY] Email={user.Email}; PublicId={user.PublicId}; Token={rawVerificationToken}");
 
                 return Result<RegisterUserResponseDto>.Success(new RegisterUserResponseDto
                 {

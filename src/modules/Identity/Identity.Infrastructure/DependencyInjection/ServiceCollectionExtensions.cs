@@ -23,7 +23,9 @@ public static class ServiceCollectionExtensions
             configuration.GetSection(JwtSettings.SectionName));
 
         services.AddScoped<IdentityUnitOfWork>();
-        services.AddScoped<IIdentityUnitOfWork>(sp => sp.GetRequiredService<IdentityUnitOfWork>());
+
+        services.AddScoped<IIdentityUnitOfWork>(
+            sp => sp.GetRequiredService<IdentityUnitOfWork>());
 
         services.AddSingleton<IdentitySqlExceptionTranslator>();
 
@@ -38,7 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITokenHashProvider, TokenHashProvider>();
         services.AddSingleton<IAccessTokenGenerator, JwtAccessTokenGenerator>();
 
-        services.AddScoped<IIdentityNotificationOutboxWriter, IdentityNotificationOutboxWriter>();
+        services.AddScoped<IIdentityOutboxWriter, IdentityOutboxWriter>();
 
         return services;
     }
