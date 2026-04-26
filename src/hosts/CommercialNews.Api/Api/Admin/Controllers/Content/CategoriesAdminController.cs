@@ -3,6 +3,7 @@ using CommercialNews.Api.Api.Admin.Contracts.Content.Categories.Responses;
 using CommercialNews.Api.Api.Common.Contracts;
 using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
@@ -15,11 +16,13 @@ using Content.Application.UseCases.Categories.GetCategories;
 using Content.Application.UseCases.Categories.GetCategoryById;
 using Content.Application.UseCases.Categories.RestoreCategory;
 using Content.Application.UseCases.Categories.UpdateCategory;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
 {
+    [Authorize]
     [ApiController]
     [Route("api/v1/admin/content/categories")]
     public sealed class CategoriesAdminController : ControllerBase
@@ -52,6 +55,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             _requestContext = requestContext;
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentCategoriesCreate)]
         [HttpPost]
         [ProducesResponseType(typeof(CreateCategoryResponse), StatusCodes.Status201Created)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -99,6 +103,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 response);
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentCategoriesRead)]
         [HttpGet("{categoryId:long}", Name = GetCategoryByIdRouteName)]
         [ProducesResponseType(typeof(GetCategoryByIdResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -140,6 +145,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<GetCategoryByIdResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentCategoriesRead)]
         [HttpGet]
         [ProducesResponseType(typeof(PagedResponse<CategoryListItemResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -205,6 +211,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<PagedResponse<CategoryListItemResponse>>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentCategoriesUpdate)]
         [HttpPut("{categoryId:long}")]
         [ProducesResponseType(typeof(UpdateCategoryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -251,6 +258,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<UpdateCategoryResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentCategoriesDelete)]
         [HttpDelete("{categoryId:long}")]
         [ProducesResponseType(typeof(DeleteCategoryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -287,6 +295,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<DeleteCategoryResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentCategoriesRestore)]
         [HttpPost("{categoryId:long}:restore")]
         [ProducesResponseType(typeof(RestoreCategoryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]

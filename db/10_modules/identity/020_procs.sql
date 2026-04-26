@@ -80,6 +80,48 @@ BEGIN
 END;
 GO
 
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_InsertBootstrapAdmin]
+    @PublicId            CHAR(26),
+    @Email               NVARCHAR(320),
+    @EmailNormalized     NVARCHAR(320),
+    @PasswordHash        NVARCHAR(500),
+    @FullName            NVARCHAR(200) = NULL,
+    @AvatarUrl           NVARCHAR(800) = NULL,
+    @UserId              BIGINT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    INSERT INTO [identity].[UserAccount]
+    (
+        [PublicId],
+        [Email],
+        [EmailNormalized],
+        [PasswordHash],
+        [FullName],
+        [AvatarUrl],
+        [IsEmailVerified],
+        [EmailVerifiedAt],
+        [Status]
+    )
+    VALUES
+    (
+        @PublicId,
+        @Email,
+        @EmailNormalized,
+        @PasswordHash,
+        @FullName,
+        @AvatarUrl,
+        1,
+        SYSUTCDATETIME(),
+        'Active'
+    );
+
+    SET @UserId = SCOPE_IDENTITY();
+END;
+GO
+
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_SelectById]
     @UserId BIGINT
 AS

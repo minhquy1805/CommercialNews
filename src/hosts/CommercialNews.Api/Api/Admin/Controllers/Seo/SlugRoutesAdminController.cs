@@ -2,8 +2,10 @@ using CommercialNews.Api.Api.Admin.Contracts.Seo.SlugRoutes.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Seo.SlugRoutes.Responses;
 using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Seo.Application.Contracts.SlugRegistry.Requests;
 using Seo.Application.Contracts.SlugRegistry.Responses;
@@ -18,6 +20,7 @@ using Seo.Application.UseCases.SlugRoutes.UpdateSlugRegistry;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Seo;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/admin/seo/slug-routes")]
 public sealed class SlugRoutesAdminController : ControllerBase
@@ -53,6 +56,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
         _generateSlugUseCase = generateSlugUseCase;
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesCreate)]
     [HttpPost]
     [ProducesResponseType(typeof(CreateSlugRouteHttpResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -101,6 +105,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
             response);
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesRead)]
     [HttpGet("{slugId:long}", Name = GetSlugRouteByIdRouteName)]
     [ProducesResponseType(typeof(GetSlugRouteByIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -141,6 +146,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
         return this.ToActionResult(Result<GetSlugRouteByIdHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesRead)]
     [HttpGet("by-article/{articleId:long}")]
     [ProducesResponseType(typeof(GetSlugRoutesByArticleIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -187,6 +193,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
         return this.ToActionResult(Result<GetSlugRoutesByArticleIdHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesRead)]
     [HttpGet]
     [ProducesResponseType(typeof(GetSlugRouteListHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -248,6 +255,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
         return this.ToActionResult(Result<GetSlugRouteListHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesUpdate)]
     [HttpPut("{slugId:long}")]
     [ProducesResponseType(typeof(UpdateSlugRouteHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -294,6 +302,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
         return this.ToActionResult(Result<UpdateSlugRouteHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesActivate)]
     [HttpPost("{slugId:long}:activate")]
     [ProducesResponseType(typeof(ActivateSlugRouteHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -334,6 +343,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
         return this.ToActionResult(Result<ActivateSlugRouteHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesDeactivate)]
     [HttpPost("{slugId:long}:deactivate")]
     [ProducesResponseType(typeof(DeactivateSlugRouteHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -374,6 +384,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
         return this.ToActionResult(Result<DeactivateSlugRouteHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesGenerate)]
     [HttpPost("generate")]
     [ProducesResponseType(typeof(GenerateSlugHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]

@@ -1,9 +1,13 @@
+using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.RolePermissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
 using Authorization.Application.Validation.RolePermissions;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
 
 namespace Authorization.Application.UseCases.RolePermissions.RevokePermissionFromRole;
 
@@ -13,17 +17,26 @@ public sealed class RevokePermissionFromRoleUseCase : IRevokePermissionFromRoleU
     private readonly IPermissionRepository _permissionRepository;
     private readonly IRolePermissionRepository _rolePermissionRepository;
     private readonly IAuthorizationUnitOfWork _unitOfWork;
+    private readonly IAuthorizationOutboxWriter _authorizationOutboxWriter;
+    private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IRequestContext _requestContext;
 
     public RevokePermissionFromRoleUseCase(
         IRoleRepository roleRepository,
         IPermissionRepository permissionRepository,
         IRolePermissionRepository rolePermissionRepository,
-        IAuthorizationUnitOfWork unitOfWork)
+        IAuthorizationUnitOfWork unitOfWork,
+        IAuthorizationOutboxWriter authorizationOutboxWriter,
+        IDateTimeProvider dateTimeProvider,
+        IRequestContext requestContext)
     {
         _roleRepository = roleRepository;
         _permissionRepository = permissionRepository;
         _rolePermissionRepository = rolePermissionRepository;
         _unitOfWork = unitOfWork;
+        _authorizationOutboxWriter = authorizationOutboxWriter;
+        _dateTimeProvider = dateTimeProvider;
+        _requestContext = requestContext;
     }
 
     public async Task<Result<RevokePermissionFromRoleResponseDto>> ExecuteAsync(
@@ -75,6 +88,10 @@ public sealed class RevokePermissionFromRoleUseCase : IRevokePermissionFromRoleU
                     });
             }
 
+            var nowUtc = _dateTimeProvider.UtcNow;
+            var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
+
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
@@ -97,6 +114,19 @@ public sealed class RevokePermissionFromRoleUseCase : IRevokePermissionFromRoleU
                             WasAlreadyRevoked = true
                         });
                 }
+
+                await _authorizationOutboxWriter.EnqueueRolePermissionRevokedAsync(
+                    new RolePermissionRevokedOutboxPayload(
+                        RoleId: request.RoleId,
+                        RolePublicId: role.PublicId,
+                        RoleName: role.Name,
+                        PermissionId: request.PermissionId,
+                        PermissionPublicId: permission.PublicId,
+                        PermissionKey: permission.Key,
+                        ActorUserId: actorUserId,
+                        CorrelationId: correlationId,
+                        OccurredAtUtc: nowUtc),
+                    cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 

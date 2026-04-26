@@ -19,6 +19,7 @@ public sealed class UserAccountRepository : IUserAccountRepository
     private const string UserAccountUpdateLastLoginProc = "[identity].[UserAccount_UpdateLastLogin]";
     private const string UserAccountMarkEmailVerifiedProc = "[identity].[UserAccount_SetEmailVerified]";
     private const string UserAccountUpdateStatusProc = "[identity].[UserAccount_UpdateStatus]";
+    private const string UserAccountInsertBootstrapAdminProc = "[identity].[UserAccount_InsertBootstrapAdmin]";
 
     private readonly IdentityUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
@@ -211,6 +212,71 @@ public sealed class UserAccountRepository : IUserAccountRepository
                     new SqlParameter("@Status", SqlDbType.VarChar, 20)
                     {
                         Value = userAccount.Status
+                    });
+
+                SqlParameter userIdParameter = new("@UserId", SqlDbType.BigInt)
+                {
+                    Direction = ParameterDirection.Output
+                };
+                command.Parameters.Add(userIdParameter);
+
+                await command.ExecuteNonQueryAsync(cancellationToken);
+
+                return Convert.ToInt64(userIdParameter.Value);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<long> InsertBootstrapAdminAsync(
+        UserAccount userAccount,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(userAccount);
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountInsertBootstrapAdminProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@PublicId", SqlDbType.Char, 26) { Value = userAccount.PublicId });
+
+                command.Parameters.Add(
+                    new SqlParameter("@Email", SqlDbType.NVarChar, 320) { Value = userAccount.Email });
+
+                command.Parameters.Add(
+                    new SqlParameter("@EmailNormalized", SqlDbType.NVarChar, 320) { Value = userAccount.EmailNormalized });
+
+                command.Parameters.Add(
+                    new SqlParameter("@PasswordHash", SqlDbType.NVarChar, 500) { Value = userAccount.PasswordHash });
+
+                command.Parameters.Add(
+                    new SqlParameter("@FullName", SqlDbType.NVarChar, 200)
+                    {
+                        Value = ToDbValue(userAccount.FullName)
+                    });
+
+                command.Parameters.Add(
+                    new SqlParameter("@AvatarUrl", SqlDbType.NVarChar, 800)
+                    {
+                        Value = ToDbValue(userAccount.AvatarUrl)
                     });
 
                 SqlParameter userIdParameter = new("@UserId", SqlDbType.BigInt)

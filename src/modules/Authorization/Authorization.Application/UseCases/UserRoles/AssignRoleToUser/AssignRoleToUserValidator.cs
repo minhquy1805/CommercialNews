@@ -1,3 +1,4 @@
+using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.UserRoles;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -18,6 +19,7 @@ public sealed class AssignRoleToUserUseCase : IAssignRoleToUserUseCase
     private readonly IRoleRepository _roleRepository;
     private readonly IUserRoleRepository _userRoleRepository;
     private readonly IAuthorizationUnitOfWork _unitOfWork;
+    private readonly IAuthorizationOutboxWriter _authorizationOutboxWriter;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
 
@@ -26,6 +28,7 @@ public sealed class AssignRoleToUserUseCase : IAssignRoleToUserUseCase
         IRoleRepository roleRepository,
         IUserRoleRepository userRoleRepository,
         IAuthorizationUnitOfWork unitOfWork,
+        IAuthorizationOutboxWriter authorizationOutboxWriter,
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext)
     {
@@ -33,6 +36,7 @@ public sealed class AssignRoleToUserUseCase : IAssignRoleToUserUseCase
         _roleRepository = roleRepository;
         _userRoleRepository = userRoleRepository;
         _unitOfWork = unitOfWork;
+        _authorizationOutboxWriter = authorizationOutboxWriter;
         _dateTimeProvider = dateTimeProvider;
         _requestContext = requestContext;
     }
@@ -94,6 +98,7 @@ public sealed class AssignRoleToUserUseCase : IAssignRoleToUserUseCase
 
             var nowUtc = _dateTimeProvider.UtcNow;
             var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
 
             var newAssignment = UserRole.CreateNew(
                 userId: request.UserId,
@@ -107,6 +112,17 @@ public sealed class AssignRoleToUserUseCase : IAssignRoleToUserUseCase
             {
                 var createdAssignment = await _userRoleRepository.InsertAsync(
                     newAssignment,
+                    cancellationToken);
+
+                await _authorizationOutboxWriter.EnqueueUserRoleAssignedAsync(
+                    new UserRoleAssignedOutboxPayload(
+                        UserId: createdAssignment.UserId,
+                        RoleId: createdAssignment.RoleId,
+                        RolePublicId: role.PublicId,
+                        RoleName: role.Name,
+                        ActorUserId: actorUserId,
+                        CorrelationId: correlationId,
+                        OccurredAtUtc: nowUtc),
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);

@@ -2,8 +2,10 @@ using CommercialNews.Api.Api.Admin.Contracts.Seo.SeoMetadata.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Seo.SeoMetadata.Responses;
 using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Seo.Application.Contracts.SeoMetadata.Requests;
 using Seo.Application.Contracts.SeoMetadata.Responses;
@@ -17,6 +19,7 @@ using Seo.Application.UseCases.SeoSettings.UpsertArticleSeoSettings;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Seo;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/admin/seo/metadata")]
 public sealed class SeoMetadataAdminController : ControllerBase
@@ -49,6 +52,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
         _upsertArticleSeoSettingsUseCase = upsertArticleSeoSettingsUseCase;
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoMetadataCreate)]
     [HttpPost]
     [ProducesResponseType(typeof(CreateSeoMetadataHttpResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -103,6 +107,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
             response);
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
     [HttpGet("{seoId:long}", Name = GetSeoMetadataByIdRouteName)]
     [ProducesResponseType(typeof(GetSeoMetadataByIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -145,6 +150,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
         return this.ToActionResult(Result<GetSeoMetadataByIdHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
     [HttpGet("by-article/{articleId:long}")]
     [ProducesResponseType(typeof(GetSeoMetadataByArticleIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -183,6 +189,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
         return this.ToActionResult(Result<GetSeoMetadataByArticleIdHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
     [HttpGet]
     [ProducesResponseType(typeof(GetSeoMetadataListHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -242,6 +249,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
         return this.ToActionResult(Result<GetSeoMetadataListHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoMetadataUpdate)]
     [HttpPut("{seoId:long}")]
     [ProducesResponseType(typeof(UpdateSeoMetadataHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -296,6 +304,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
         return this.ToActionResult(Result<UpdateSeoMetadataHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
     [HttpGet("articles/{articleId:long}/settings")]
     [ProducesResponseType(typeof(GetArticleSeoSettingsHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -339,6 +348,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
         return this.ToActionResult(Result<GetArticleSeoSettingsHttpResponse>.Success(response));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.SeoMetadataUpdate)]
     [HttpPut("articles/{articleId:long}/settings")]
     [ProducesResponseType(typeof(UpsertArticleSeoSettingsHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]

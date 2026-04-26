@@ -3,6 +3,7 @@ using CommercialNews.Api.Api.Admin.Contracts.Content.Tags.Responses;
 using CommercialNews.Api.Api.Common.Contracts;
 using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
@@ -15,10 +16,12 @@ using Content.Application.UseCases.Tags.GetTagById;
 using Content.Application.UseCases.Tags.GetTags;
 using Content.Application.UseCases.Tags.RestoreTag;
 using Content.Application.UseCases.Tags.UpdateTag;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Content
 {
+    [Authorize]
     [ApiController]
     [Route("api/v1/admin/content/tags")]
     public sealed class TagsAdminController : ControllerBase
@@ -51,6 +54,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             _requestContext = requestContext;
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentTagsCreate)]
         [HttpPost]
         [ProducesResponseType(typeof(CreateTagResponse), StatusCodes.Status201Created)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -93,6 +97,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 response);
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentTagsRead)]
         [HttpGet("{tagId:long}", Name = GetTagByIdRouteName)]
         [ProducesResponseType(typeof(GetTagByIdResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -132,6 +137,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<GetTagByIdResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentTagsRead)]
         [HttpGet]
         [ProducesResponseType(typeof(PagedResponse<TagListItemResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -193,6 +199,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<PagedResponse<TagListItemResponse>>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentTagsUpdate)]
         [HttpPut("{tagId:long}")]
         [ProducesResponseType(typeof(UpdateTagResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -235,6 +242,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<UpdateTagResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentTagsDelete)]
         [HttpDelete("{tagId:long}")]
         [ProducesResponseType(typeof(DeleteTagResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -271,6 +279,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<DeleteTagResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentTagsRestore)]
         [HttpPost("{tagId:long}:restore")]
         [ProducesResponseType(typeof(RestoreTagResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
