@@ -46,4 +46,8 @@ public interface IUserAccountRepository
         string status,
         DateTime? lockedUntil,
         CancellationToken cancellationToken = default);
+
+    Task<long> InsertBootstrapAdminAsync(
+        UserAccount userAccount,
+        CancellationToken cancellationToken = default);
 }

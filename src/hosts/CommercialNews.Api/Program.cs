@@ -15,6 +15,8 @@ app.UseHostOpenApi();
 
 app.UseHttpsRedirection();
 
+await app.Services.InitializeApplicationDataAsync();
+
 app.UseHostPipeline();
 
-app.Run();
+await app.RunAsync();

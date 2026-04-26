@@ -1,7 +1,9 @@
 using Authorization.Application.Common;
+using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Permissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
 using Authorization.Application.Validation.Permissions;
 using Authorization.Domain.Entities;
 using Authorization.Domain.Exceptions;
@@ -20,19 +22,28 @@ public sealed class CreatePermissionUseCase : ICreatePermissionUseCase
     private readonly IPublicIdGenerator _publicIdGenerator;
     private readonly IAuthorizationUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IAuthorizationOutboxWriter _authorizationOutboxWriter;
 
     public CreatePermissionUseCase(
         IPermissionRepository permissionRepository,
         IRequestContext requestContext,
         IPublicIdGenerator publicIdGenerator,
         IAuthorizationUnitOfWork unitOfWork,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IAuthorizationOutboxWriter authorizationOutboxWriter)
     {
-        _permissionRepository = permissionRepository;
-        _requestContext = requestContext;
-        _publicIdGenerator = publicIdGenerator;
-        _unitOfWork = unitOfWork;
-        _dateTimeProvider = dateTimeProvider;
+        _permissionRepository = permissionRepository
+            ?? throw new ArgumentNullException(nameof(permissionRepository));
+        _requestContext = requestContext
+            ?? throw new ArgumentNullException(nameof(requestContext));
+        _publicIdGenerator = publicIdGenerator
+            ?? throw new ArgumentNullException(nameof(publicIdGenerator));
+        _unitOfWork = unitOfWork
+            ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider
+            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _authorizationOutboxWriter = authorizationOutboxWriter
+            ?? throw new ArgumentNullException(nameof(authorizationOutboxWriter));
     }
 
     public async Task<Result<CreatePermissionResponseDto>> ExecuteAsync(
@@ -79,6 +90,24 @@ public sealed class CreatePermissionUseCase : ICreatePermissionUseCase
             {
                 var createdPermission = await _permissionRepository.InsertAsync(
                     permission,
+                    cancellationToken);
+
+                await _authorizationOutboxWriter.EnqueuePermissionCreatedAsync(
+                    new PermissionCreatedOutboxPayload
+                    {
+                        PermissionId = createdPermission.PermissionId,
+                        PermissionPublicId = createdPermission.PublicId,
+                        PermissionKey = createdPermission.Key,
+                        PermissionKeyNormalized = createdPermission.KeyNormalized,
+                        Module = createdPermission.Module,
+                        Action = createdPermission.Action,
+                        Description = createdPermission.Description,
+                        IsSystem = createdPermission.IsSystem,
+                        IsActive = createdPermission.IsActive,
+                        OccurredAtUtc = nowUtc,
+                        ActorUserId = actorUserId,
+                        CorrelationId = _requestContext.CorrelationId
+                    },
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);

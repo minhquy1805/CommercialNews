@@ -1,9 +1,11 @@
 ﻿using Identity.Application.Ports.Persistence;
 using Identity.Application.Ports.Services;
+using Identity.Infrastructure.Configuration;
 using Identity.Infrastructure.Persistence.Exceptions;
 using Identity.Infrastructure.Persistence.Repositories;
 using Identity.Infrastructure.Persistence.Sql;
 using Identity.Infrastructure.Security;
+using Identity.Infrastructure.Seeding;
 using Identity.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +23,9 @@ public static class ServiceCollectionExtensions
 
         services.Configure<JwtSettings>(
             configuration.GetSection(JwtSettings.SectionName));
+
+        services.Configure<DefaultAdminSettings>(
+            configuration.GetSection(DefaultAdminSettings.SectionName));
 
         services.AddScoped<IdentityUnitOfWork>();
 
@@ -41,6 +46,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAccessTokenGenerator, JwtAccessTokenGenerator>();
 
         services.AddScoped<IIdentityOutboxWriter, IdentityOutboxWriter>();
+        services.AddScoped<IIdentityDataInitializer, DefaultAdminInitializer>();
 
         return services;
     }

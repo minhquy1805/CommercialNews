@@ -7,11 +7,14 @@ using Authorization.Application.UseCases.UserRoles.RevokeRoleFromUser;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.UserRoles.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.UserRoles.Responses;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Authorization;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/admin/authz/users/{userId:long}/roles")]
 public sealed class UserRolesAdminController : ControllerBase
@@ -33,6 +36,7 @@ public sealed class UserRolesAdminController : ControllerBase
         _getUserEffectivePermissionsUseCase = getUserEffectivePermissionsUseCase;
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzUserRolesAssign)]
     [HttpPost]
     public async Task<IActionResult> AssignRoleToUser(
         [FromRoute] long userId,
@@ -56,6 +60,7 @@ public sealed class UserRolesAdminController : ControllerBase
         return Ok(MapAssignRoleToUserResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzUserRolesRevoke)]
     [HttpDelete("{roleId:long}")]
     public async Task<IActionResult> RevokeRoleFromUser(
         [FromRoute] long userId,
@@ -79,6 +84,7 @@ public sealed class UserRolesAdminController : ControllerBase
         return Ok(MapRevokeRoleFromUserResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzUserRolesRead)]
     [HttpGet]
     public async Task<IActionResult> GetUserRoles(
         [FromRoute] long userId,
@@ -100,6 +106,7 @@ public sealed class UserRolesAdminController : ControllerBase
         return Ok(MapGetUserRolesResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzUserPermissionsReadEffective)]
     [HttpGet("~/api/v1/admin/authz/users/{userId:long}/effective-permissions")]
     public async Task<IActionResult> GetUserEffectivePermissions(
         [FromRoute] long userId,

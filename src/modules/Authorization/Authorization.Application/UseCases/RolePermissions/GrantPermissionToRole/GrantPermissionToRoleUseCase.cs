@@ -1,6 +1,8 @@
+using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.RolePermissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
 using Authorization.Application.Validation.RolePermissions;
 using Authorization.Domain.Entities;
 using Authorization.Domain.Exceptions;
@@ -17,6 +19,7 @@ public sealed class GrantPermissionToRoleUseCase : IGrantPermissionToRoleUseCase
     private readonly IPermissionRepository _permissionRepository;
     private readonly IRolePermissionRepository _rolePermissionRepository;
     private readonly IAuthorizationUnitOfWork _unitOfWork;
+    private readonly IAuthorizationOutboxWriter _authorizationOutboxWriter;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
 
@@ -25,6 +28,7 @@ public sealed class GrantPermissionToRoleUseCase : IGrantPermissionToRoleUseCase
         IPermissionRepository permissionRepository,
         IRolePermissionRepository rolePermissionRepository,
         IAuthorizationUnitOfWork unitOfWork,
+        IAuthorizationOutboxWriter authorizationOutboxWriter,
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext)
     {
@@ -32,6 +36,7 @@ public sealed class GrantPermissionToRoleUseCase : IGrantPermissionToRoleUseCase
         _permissionRepository = permissionRepository;
         _rolePermissionRepository = rolePermissionRepository;
         _unitOfWork = unitOfWork;
+        _authorizationOutboxWriter = authorizationOutboxWriter;
         _dateTimeProvider = dateTimeProvider;
         _requestContext = requestContext;
     }
@@ -99,6 +104,7 @@ public sealed class GrantPermissionToRoleUseCase : IGrantPermissionToRoleUseCase
 
             var nowUtc = _dateTimeProvider.UtcNow;
             var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
 
             var newGrant = RolePermission.CreateNew(
                 roleId: request.RoleId,
@@ -112,6 +118,19 @@ public sealed class GrantPermissionToRoleUseCase : IGrantPermissionToRoleUseCase
             {
                 var createdGrant = await _rolePermissionRepository.InsertAsync(
                     newGrant,
+                    cancellationToken);
+
+                await _authorizationOutboxWriter.EnqueueRolePermissionGrantedAsync(
+                    new RolePermissionGrantedOutboxPayload(
+                        RoleId: createdGrant.RoleId,
+                        RolePublicId: role.PublicId,
+                        RoleName: role.Name,
+                        PermissionId: createdGrant.PermissionId,
+                        PermissionPublicId: permission.PublicId,
+                        PermissionKey: permission.Key,
+                        ActorUserId: actorUserId,
+                        CorrelationId: correlationId,
+                        OccurredAtUtc: nowUtc),
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);

@@ -1,8 +1,8 @@
+using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
+
 namespace Authorization.Application.Ports.Persistence;
 
-public interface IAuthorizationUnitOfWork
+public interface IAuthorizationUnitOfWork : ISqlUnitOfWork
 {
-    Task BeginTransactionAsync(CancellationToken cancellationToken = default);
-    Task CommitAsync(CancellationToken cancellationToken = default);
-    Task RollbackAsync(CancellationToken cancellationToken = default);
+   
 }

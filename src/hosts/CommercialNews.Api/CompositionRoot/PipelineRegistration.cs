@@ -15,10 +15,7 @@ namespace CommercialNews.Api.CompositionRoot
 
             app.UseRouting();
 
-            // TODO:
-            // Enable authentication here after JWT setup is completed.
-            // app.UseAuthentication();
-
+            app.UseAuthentication();
             app.UseAuthorization();
 
             app.MapControllers();

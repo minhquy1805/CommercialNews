@@ -1,7 +1,9 @@
 using Authorization.Application.Common;
+using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Roles;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
 using Authorization.Application.Validation.Roles;
 using Authorization.Domain.Exceptions;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
@@ -17,17 +19,25 @@ public sealed class UpdateRoleUseCase : IUpdateRoleUseCase
     private readonly IRequestContext _requestContext;
     private readonly IAuthorizationUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IAuthorizationOutboxWriter _authorizationOutboxWriter;
 
     public UpdateRoleUseCase(
         IRoleRepository roleRepository,
         IRequestContext requestContext,
         IAuthorizationUnitOfWork unitOfWork,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IAuthorizationOutboxWriter authorizationOutboxWriter)
     {
-        _roleRepository = roleRepository;
-        _requestContext = requestContext;
-        _unitOfWork = unitOfWork;
-        _dateTimeProvider = dateTimeProvider;
+        _roleRepository = roleRepository
+            ?? throw new ArgumentNullException(nameof(roleRepository));
+        _requestContext = requestContext
+            ?? throw new ArgumentNullException(nameof(requestContext));
+        _unitOfWork = unitOfWork
+            ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider
+            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _authorizationOutboxWriter = authorizationOutboxWriter
+            ?? throw new ArgumentNullException(nameof(authorizationOutboxWriter));
     }
 
     public async Task<Result<UpdateRoleResponseDto>> ExecuteAsync(
@@ -82,6 +92,23 @@ public sealed class UpdateRoleUseCase : IUpdateRoleUseCase
             {
                 var updatedRole = await _roleRepository.UpdateAsync(
                     role,
+                    cancellationToken);
+
+                await _authorizationOutboxWriter.EnqueueRoleUpdatedAsync(
+                    new RoleUpdatedOutboxPayload
+                    {
+                        RoleId = updatedRole.RoleId,
+                        RolePublicId = updatedRole.PublicId,
+                        RoleName = updatedRole.Name,
+                        RoleNameNormalized = updatedRole.NameNormalized,
+                        DisplayName = updatedRole.DisplayName,
+                        Description = updatedRole.Description,
+                        IsSystem = updatedRole.IsSystem,
+                        IsActive = updatedRole.IsActive,
+                        OccurredAtUtc = nowUtc,
+                        ActorUserId = actorUserId,
+                        CorrelationId = _requestContext.CorrelationId
+                    },
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);

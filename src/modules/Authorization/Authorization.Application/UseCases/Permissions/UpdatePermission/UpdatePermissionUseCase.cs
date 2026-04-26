@@ -1,7 +1,9 @@
 using Authorization.Application.Common;
+using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Permissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
 using Authorization.Application.Validation.Permissions;
 using Authorization.Domain.Exceptions;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
@@ -17,17 +19,25 @@ public sealed class UpdatePermissionUseCase : IUpdatePermissionUseCase
     private readonly IRequestContext _requestContext;
     private readonly IAuthorizationUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IAuthorizationOutboxWriter _authorizationOutboxWriter;
 
     public UpdatePermissionUseCase(
         IPermissionRepository permissionRepository,
         IRequestContext requestContext,
         IAuthorizationUnitOfWork unitOfWork,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IAuthorizationOutboxWriter authorizationOutboxWriter)
     {
-        _permissionRepository = permissionRepository;
-        _requestContext = requestContext;
-        _unitOfWork = unitOfWork;
-        _dateTimeProvider = dateTimeProvider;
+        _permissionRepository = permissionRepository
+            ?? throw new ArgumentNullException(nameof(permissionRepository));
+        _requestContext = requestContext
+            ?? throw new ArgumentNullException(nameof(requestContext));
+        _unitOfWork = unitOfWork
+            ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider
+            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _authorizationOutboxWriter = authorizationOutboxWriter
+            ?? throw new ArgumentNullException(nameof(authorizationOutboxWriter));
     }
 
     public async Task<Result<UpdatePermissionResponseDto>> ExecuteAsync(
@@ -83,6 +93,24 @@ public sealed class UpdatePermissionUseCase : IUpdatePermissionUseCase
             {
                 var updatedPermission = await _permissionRepository.UpdateAsync(
                     permission,
+                    cancellationToken);
+
+                await _authorizationOutboxWriter.EnqueuePermissionUpdatedAsync(
+                    new PermissionUpdatedOutboxPayload
+                    {
+                        PermissionId = updatedPermission.PermissionId,
+                        PermissionPublicId = updatedPermission.PublicId,
+                        PermissionKey = updatedPermission.Key,
+                        PermissionKeyNormalized = updatedPermission.KeyNormalized,
+                        Module = updatedPermission.Module,
+                        Action = updatedPermission.Action,
+                        Description = updatedPermission.Description,
+                        IsSystem = updatedPermission.IsSystem,
+                        IsActive = updatedPermission.IsActive,
+                        OccurredAtUtc = nowUtc,
+                        ActorUserId = actorUserId,
+                        CorrelationId = _requestContext.CorrelationId
+                    },
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
