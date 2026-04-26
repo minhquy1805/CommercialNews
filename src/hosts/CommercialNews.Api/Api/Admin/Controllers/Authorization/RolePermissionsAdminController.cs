@@ -6,11 +6,14 @@ using Authorization.Application.UseCases.RolePermissions.RevokePermissionFromRol
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.RolePermissions.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.RolePermissions.Responses;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Authorization;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/admin/authz/roles/{roleId:long}/permissions")]
 public sealed class RolePermissionsAdminController : ControllerBase
@@ -22,16 +25,17 @@ public sealed class RolePermissionsAdminController : ControllerBase
 
     public RolePermissionsAdminController(
         IGrantPermissionToRoleUseCase grantPermissionToRoleUseCase,
-        IRevokePermissionFromRoleUseCase revokePermissionFromRoleUseCase,
+        IRevokePermissionFromRoleUseCase revokePermissionToRoleUseCase,
         IGetRolePermissionsUseCase getRolePermissionsUseCase,
         IGetPermissionRolesUseCase getPermissionRolesUseCase)
     {
         _grantPermissionToRoleUseCase = grantPermissionToRoleUseCase;
-        _revokePermissionFromRoleUseCase = revokePermissionFromRoleUseCase;
+        _revokePermissionFromRoleUseCase = revokePermissionToRoleUseCase;
         _getRolePermissionsUseCase = getRolePermissionsUseCase;
         _getPermissionRolesUseCase = getPermissionRolesUseCase;
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolePermissionsGrant)]
     [HttpPost]
     public async Task<IActionResult> GrantPermissionToRole(
         [FromRoute] long roleId,
@@ -55,6 +59,7 @@ public sealed class RolePermissionsAdminController : ControllerBase
         return Ok(MapGrantPermissionToRoleResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolePermissionsRevoke)]
     [HttpDelete("{permissionId:long}")]
     public async Task<IActionResult> RevokePermissionFromRole(
         [FromRoute] long roleId,
@@ -78,6 +83,7 @@ public sealed class RolePermissionsAdminController : ControllerBase
         return Ok(MapRevokePermissionFromRoleResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolePermissionsRead)]
     [HttpGet]
     public async Task<IActionResult> GetRolePermissions(
         [FromRoute] long roleId,
@@ -99,6 +105,7 @@ public sealed class RolePermissionsAdminController : ControllerBase
         return Ok(MapGetRolePermissionsResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolePermissionsRead)]
     [HttpGet("~/api/v1/admin/authz/permissions/{permissionId:long}/roles")]
     public async Task<IActionResult> GetPermissionRoles(
         [FromRoute] long permissionId,

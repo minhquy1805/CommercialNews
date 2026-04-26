@@ -35,7 +35,7 @@ public static class ModuleRegistration
         services.AddIdentityInfrastructure(configuration);
 
         services.AddAuthorizationApplication();
-        services.AddAuthorizationInfrastructure();
+        services.AddAuthorizationInfrastructure(configuration);
 
         services.AddMediaApplication();
         services.AddMediaInfrastructure();
