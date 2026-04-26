@@ -3,6 +3,7 @@ using CommercialNews.Api.Api.Admin.Contracts.Content.Articles.Responses;
 using CommercialNews.Api.Api.Common.Contracts;
 using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Contracts.Requests;
@@ -18,10 +19,12 @@ using Content.Application.UseCases.Articles.PublishArticle;
 using Content.Application.UseCases.Articles.RestoreArticle;
 using Content.Application.UseCases.Articles.UnpublishArticle;
 using Content.Application.UseCases.Articles.UpdateArticle;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Content
 {
+    [Authorize]
     [ApiController]
     [Route("api/v1/admin/content/articles")]
     public sealed class ArticlesAdminController : ControllerBase
@@ -66,6 +69,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             _deleteArticleUseCase = deleteArticleUseCase;
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesCreate)]
         [HttpPost]
         [ProducesResponseType(typeof(CreateArticleResponse), StatusCodes.Status201Created)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -108,6 +112,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 response);
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesRead)]
         [HttpGet("{articleId:long}", Name = GetArticleByIdRouteName)]
         [ProducesResponseType(typeof(GetArticleByIdResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -156,6 +161,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<GetArticleByIdResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesRead)]
         [HttpGet]
         [ProducesResponseType(typeof(PagedResponse<ArticleListItemResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -221,6 +227,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 Result<PagedResponse<ArticleListItemResponse>>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesUpdate)]
         [HttpPut("{articleId:long}")]
         [ProducesResponseType(typeof(UpdateArticleResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -268,6 +275,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<UpdateArticleResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesReadRevisions)]
         [HttpGet("{articleId:long}/revisions")]
         [ProducesResponseType(typeof(PagedResponse<ArticleRevisionItemResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -327,6 +335,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<PagedResponse<ArticleRevisionItemResponse>>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesReadRevisions)]
         [HttpGet("{articleId:long}/revisions/{revisionId:long}")]
         [ProducesResponseType(typeof(GetArticleRevisionByIdResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -370,6 +379,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<GetArticleRevisionByIdResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesPublish)]
         [HttpPost("{articleId:long}:publish")]
         [ProducesResponseType(typeof(PublishArticleResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -407,6 +417,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<PublishArticleResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesUnpublish)]
         [HttpPost("{articleId:long}:unpublish")]
         [ProducesResponseType(typeof(UnpublishArticleResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -445,6 +456,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<UnpublishArticleResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesArchive)]
         [HttpPost("{articleId:long}:archive")]
         [ProducesResponseType(typeof(ArchiveArticleResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -482,6 +494,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<ArchiveArticleResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesRestore)]
         [HttpPost("{articleId:long}:restore")]
         [ProducesResponseType(typeof(RestoreArticleResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -518,6 +531,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             return this.ToActionResult(Result<RestoreArticleResponse>.Success(response));
         }
 
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesDelete)]
         [HttpDelete("{articleId:long}")]
         [ProducesResponseType(typeof(DeleteArticleResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]

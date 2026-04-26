@@ -8,12 +8,15 @@ using Authorization.Application.UseCases.Roles.UpdateRole;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.Roles.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.Roles.Responses;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Authorization;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/admin/authz/roles")]
 public sealed class RolesAdminController : ControllerBase
@@ -38,6 +41,7 @@ public sealed class RolesAdminController : ControllerBase
         _getRolesUseCase = getRolesUseCase;
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolesRead)]
     [HttpGet]
     public async Task<IActionResult> GetRoles(
         [FromQuery] GetRolesHttpRequest request,
@@ -62,6 +66,7 @@ public sealed class RolesAdminController : ControllerBase
         return Ok(MapGetRolesResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolesCreate)]
     [HttpPost]
     public async Task<IActionResult> CreateRole(
         [FromBody] CreateRoleHttpRequest request,
@@ -87,6 +92,7 @@ public sealed class RolesAdminController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, response);
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolesUpdate)]
     [HttpPut("{roleId:long}")]
     public async Task<IActionResult> UpdateRole(
         [FromRoute] long roleId,
@@ -112,6 +118,7 @@ public sealed class RolesAdminController : ControllerBase
         return Ok(MapUpdateRoleResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolesActivate)]
     [HttpPost("{roleId:long}:activate")]
     public async Task<IActionResult> ActivateRole(
         [FromRoute] long roleId,
@@ -133,6 +140,7 @@ public sealed class RolesAdminController : ControllerBase
         return Ok(MapActivateRoleResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzRolesDeactivate)]
     [HttpPost("{roleId:long}:deactivate")]
     public async Task<IActionResult> DeactivateRole(
         [FromRoute] long roleId,

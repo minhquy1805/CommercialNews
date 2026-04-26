@@ -1,3 +1,4 @@
+using Authorization.Application.Outbox.Runtime;
 using Authorization.Application.UseCases.Permissions.ActivatePermission;
 using Authorization.Application.UseCases.Permissions.CreatePermission;
 using Authorization.Application.UseCases.Permissions.DeactivatePermission;
@@ -16,6 +17,7 @@ using Authorization.Application.UseCases.Roles.UpdateRole;
 using Authorization.Application.UseCases.UserRoles.AssignRoleToUser;
 using Authorization.Application.UseCases.UserRoles.GetUserRoles;
 using Authorization.Application.UseCases.UserRoles.RevokeRoleFromUser;
+using CommercialNews.BuildingBlocks.Outbox.Runtime;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Authorization.Application.DependencyInjection;
@@ -48,6 +50,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGetPermissionRolesUseCase, GetPermissionRolesUseCase>();
 
         services.AddScoped<IGetUserEffectivePermissionsUseCase, GetUserEffectivePermissionsUseCase>();
+
+        services.AddScoped<IOutboxBatchProcessor, AuthorizationOutboxBatchProcessor>();
+        services.AddScoped<IOutboxMessageProcessor, AuthorizationOutboxMessageProcessor>();
 
         return services;
     }

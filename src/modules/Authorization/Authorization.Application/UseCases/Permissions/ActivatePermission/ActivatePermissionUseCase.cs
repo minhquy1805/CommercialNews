@@ -1,6 +1,8 @@
+using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Permissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
 using Authorization.Application.Validation.Permissions;
 using Authorization.Domain.Exceptions;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
@@ -16,17 +18,25 @@ public sealed class ActivatePermissionUseCase : IActivatePermissionUseCase
     private readonly IAuthorizationUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
+    private readonly IAuthorizationOutboxWriter _authorizationOutboxWriter;
 
     public ActivatePermissionUseCase(
         IPermissionRepository permissionRepository,
         IAuthorizationUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
-        IRequestContext requestContext)
+        IRequestContext requestContext,
+        IAuthorizationOutboxWriter authorizationOutboxWriter)
     {
-        _permissionRepository = permissionRepository;
-        _unitOfWork = unitOfWork;
-        _dateTimeProvider = dateTimeProvider;
-        _requestContext = requestContext;
+        _permissionRepository = permissionRepository
+            ?? throw new ArgumentNullException(nameof(permissionRepository));
+        _unitOfWork = unitOfWork
+            ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider
+            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _requestContext = requestContext
+            ?? throw new ArgumentNullException(nameof(requestContext));
+        _authorizationOutboxWriter = authorizationOutboxWriter
+            ?? throw new ArgumentNullException(nameof(authorizationOutboxWriter));
     }
 
     public async Task<Result<ActivatePermissionResponseDto>> ExecuteAsync(
@@ -75,6 +85,18 @@ public sealed class ActivatePermissionUseCase : IActivatePermissionUseCase
             {
                 var updatedPermission = await _permissionRepository.UpdateAsync(
                     permission,
+                    cancellationToken);
+
+                await _authorizationOutboxWriter.EnqueuePermissionActivatedAsync(
+                    new PermissionActivatedOutboxPayload
+                    {
+                        PermissionId = updatedPermission.PermissionId,
+                        PermissionPublicId = updatedPermission.PublicId,
+                        PermissionKey = updatedPermission.Key,
+                        OccurredAtUtc = nowUtc,
+                        ActorUserId = actorUserId,
+                        CorrelationId = _requestContext.CorrelationId
+                    },
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);

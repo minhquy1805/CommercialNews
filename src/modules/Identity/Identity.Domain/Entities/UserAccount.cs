@@ -278,6 +278,40 @@ public sealed class UserAccount
         return IsLocked && LockedUntil.HasValue && LockedUntil.Value > nowUtc;
     }
 
+    public static UserAccount CreateBootstrapAdmin(
+        string publicId,
+        string email,
+        string emailNormalized,
+        string passwordHash,
+        string? fullName,
+        string? avatarUrl,
+        DateTime nowUtc)
+    {
+        ValidatePublicId(publicId);
+        ValidateRequiredString(email, nameof(email), EmailMaxLength, "IDENTITY.USER_EMAIL_INVALID");
+        ValidateRequiredString(emailNormalized, nameof(emailNormalized), EmailMaxLength, "IDENTITY.USER_EMAIL_NORMALIZED_INVALID");
+        ValidateRequiredString(passwordHash, nameof(passwordHash), PasswordHashMaxLength, "IDENTITY.USER_PASSWORD_HASH_INVALID");
+        ValidateOptionalString(fullName, nameof(fullName), FullNameMaxLength, "IDENTITY.USER_FULL_NAME_INVALID");
+        ValidateOptionalString(avatarUrl, nameof(avatarUrl), AvatarUrlMaxLength, "IDENTITY.USER_AVATAR_URL_INVALID");
+
+        return new UserAccount(
+            userId: 0,
+            publicId: publicId.Trim(),
+            email: email.Trim(),
+            emailNormalized: emailNormalized.Trim(),
+            passwordHash: passwordHash.Trim(),
+            fullName: NormalizeOptional(fullName),
+            avatarUrl: NormalizeOptional(avatarUrl),
+            isEmailVerified: true,
+            emailVerifiedAt: nowUtc,
+            status: UserAccountStatuses.Active,
+            lockedUntil: null,
+            createdAt: nowUtc,
+            updatedAt: nowUtc,
+            lastLoginAt: null,
+            version: 1);
+    }
+
     private void Touch(DateTime updatedAtUtc)
     {
         EnsureValidTimestamp(updatedAtUtc, "IDENTITY.USER_INVALID_UPDATED_AT");

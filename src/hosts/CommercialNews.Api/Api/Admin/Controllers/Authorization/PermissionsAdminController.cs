@@ -8,12 +8,15 @@ using Authorization.Application.UseCases.Permissions.UpdatePermission;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.Permissions.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Authorization.Permissions.Responses;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Authorization;
 
+[Authorize]
 [ApiController]
 [Route("api/v1/admin/authz/permissions")]
 public sealed class PermissionsAdminController : ControllerBase
@@ -38,6 +41,7 @@ public sealed class PermissionsAdminController : ControllerBase
         _getPermissionsUseCase = getPermissionsUseCase;
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzPermissionsRead)]
     [HttpGet]
     public async Task<IActionResult> GetPermissions(
         [FromQuery] GetPermissionsHttpRequest request,
@@ -64,6 +68,7 @@ public sealed class PermissionsAdminController : ControllerBase
         return Ok(MapGetPermissionsResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzPermissionsCreate)]
     [HttpPost]
     public async Task<IActionResult> CreatePermission(
         [FromBody] CreatePermissionHttpRequest request,
@@ -90,6 +95,7 @@ public sealed class PermissionsAdminController : ControllerBase
         return StatusCode(StatusCodes.Status201Created, response);
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzPermissionsUpdate)]
     [HttpPut("{permissionId:long}")]
     public async Task<IActionResult> UpdatePermission(
         [FromRoute] long permissionId,
@@ -116,6 +122,7 @@ public sealed class PermissionsAdminController : ControllerBase
         return Ok(MapUpdatePermissionResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzPermissionsActivate)]
     [HttpPost("{permissionId:long}:activate")]
     public async Task<IActionResult> ActivatePermission(
         [FromRoute] long permissionId,
@@ -137,6 +144,7 @@ public sealed class PermissionsAdminController : ControllerBase
         return Ok(MapActivatePermissionResponse(result.Value!));
     }
 
+    [Authorize(Policy = AuthorizationPolicies.AuthzPermissionsDeactivate)]
     [HttpPost("{permissionId:long}:deactivate")]
     public async Task<IActionResult> DeactivatePermission(
         [FromRoute] long permissionId,

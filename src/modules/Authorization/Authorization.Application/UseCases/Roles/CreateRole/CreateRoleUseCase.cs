@@ -1,7 +1,9 @@
 using Authorization.Application.Common;
+using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Roles;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
+using Authorization.Application.Ports.Services;
 using Authorization.Application.Validation.Roles;
 using Authorization.Domain.Entities;
 using Authorization.Domain.Exceptions;
@@ -20,19 +22,28 @@ public sealed class CreateRoleUseCase : ICreateRoleUseCase
     private readonly IPublicIdGenerator _publicIdGenerator;
     private readonly IAuthorizationUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IAuthorizationOutboxWriter _authorizationOutboxWriter;
 
     public CreateRoleUseCase(
         IRoleRepository roleRepository,
         IRequestContext requestContext,
         IPublicIdGenerator publicIdGenerator,
         IAuthorizationUnitOfWork unitOfWork,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IAuthorizationOutboxWriter authorizationOutboxWriter)
     {
-        _roleRepository = roleRepository;
-        _requestContext = requestContext;
-        _publicIdGenerator = publicIdGenerator;
-        _unitOfWork = unitOfWork;
-        _dateTimeProvider = dateTimeProvider;
+        _roleRepository = roleRepository
+            ?? throw new ArgumentNullException(nameof(roleRepository));
+        _requestContext = requestContext
+            ?? throw new ArgumentNullException(nameof(requestContext));
+        _publicIdGenerator = publicIdGenerator
+            ?? throw new ArgumentNullException(nameof(publicIdGenerator));
+        _unitOfWork = unitOfWork
+            ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider
+            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _authorizationOutboxWriter = authorizationOutboxWriter
+            ?? throw new ArgumentNullException(nameof(authorizationOutboxWriter));
     }
 
     public async Task<Result<CreateRoleResponseDto>> ExecuteAsync(
@@ -78,6 +89,23 @@ public sealed class CreateRoleUseCase : ICreateRoleUseCase
             {
                 var createdRole = await _roleRepository.InsertAsync(
                     role,
+                    cancellationToken);
+
+                await _authorizationOutboxWriter.EnqueueRoleCreatedAsync(
+                    new RoleCreatedOutboxPayload
+                    {
+                        RoleId = createdRole.RoleId,
+                        RolePublicId = createdRole.PublicId,
+                        RoleName = createdRole.Name,
+                        RoleNameNormalized = createdRole.NameNormalized,
+                        DisplayName = createdRole.DisplayName,
+                        Description = createdRole.Description,
+                        IsSystem = createdRole.IsSystem,
+                        IsActive = createdRole.IsActive,
+                        OccurredAtUtc = nowUtc,
+                        ActorUserId = actorUserId,
+                        CorrelationId = _requestContext.CorrelationId
+                    },
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
