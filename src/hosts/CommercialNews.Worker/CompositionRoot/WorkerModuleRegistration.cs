@@ -1,9 +1,8 @@
 using Authorization.Application.DependencyInjection;
 using Authorization.Infrastructure.DependencyInjection;
 using CommercialNews.BuildingBlocks.Outbox.Runtime;
-using CommercialNews.Worker.Authorization;
 using CommercialNews.Worker.Configuration;
-using CommercialNews.Worker.Notifications;
+using CommercialNews.Worker.Outbox;
 using Notifications.Application.DependencyInjection;
 using Notifications.Infrastructure.DependencyInjection;
 
@@ -24,15 +23,17 @@ public static class WorkerModuleRegistration
         services.AddAuthorizationApplication();
         services.AddAuthorizationInfrastructure(configuration);
 
-        services.AddOptions<OutboxWorkerOptions>(OutboxWorkerOptionNames.AuthorizationOutbox)
-            .Bind(configuration.GetSection("Workers:AuthorizationOutbox"));
+        services.AddOptions<OutboxWorkerOptions>()
+            .Bind(configuration.GetSection("Workers:Outbox"));
 
-        services.Configure<NotificationWorkerOptions>(
-            configuration.GetSection("Workers:Notifications"));
+        services.AddOptions<OutboxWorkerOptions>()
+            .Bind(configuration.GetSection("Workers:Outbox"));
 
-        services.AddHostedService<NotificationPollingService>();
+        services.Configure<OutboxProcessingOptions>(
+            configuration.GetSection("Workers:Outbox:Processing"));
+
         services.AddHostedService<OutboxPollingService>();
-        services.AddHostedService<AuthorizationOutboxPollingService>();
+
 
         return services;
     }
