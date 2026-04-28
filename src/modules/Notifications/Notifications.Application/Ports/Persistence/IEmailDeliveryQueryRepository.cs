@@ -1,6 +1,5 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Notifications.Application.Models.QueryModels;
-using Notifications.Domain.Entities;
 
 namespace Notifications.Application.Ports.Persistence;
 

@@ -1,4 +1,5 @@
 using CommercialNews.BuildingBlocks.Outbox.Contracts.Requests;
+using CommercialNews.BuildingBlocks.Outbox.Enums;
 using CommercialNews.BuildingBlocks.Outbox.Errors;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
@@ -9,17 +10,6 @@ public static class MarkOutboxDeadValidator
     private const int MaxLastErrorLength = 2000;
     private const int MaxLastErrorCodeLength = 100;
     private const int MaxLastErrorClassLength = 30;
-
-    private static readonly HashSet<string> AllowedErrorClasses =
-    [
-        "Transient",
-        "Permanent",
-        "Ambiguous",
-        "Policy",
-        "Template",
-        "Provider",
-        "Validation"
-    ];
 
     public static Error? Validate(MarkOutboxDeadRequest? request)
     {
@@ -54,7 +44,7 @@ public static class MarkOutboxDeadValidator
                 return OutboxErrors.InvalidRequest;
             }
 
-            if (!AllowedErrorClasses.Contains(normalized))
+            if (!OutboxFailureClass.IsValid(normalized))
             {
                 return OutboxErrors.InvalidRequest;
             }

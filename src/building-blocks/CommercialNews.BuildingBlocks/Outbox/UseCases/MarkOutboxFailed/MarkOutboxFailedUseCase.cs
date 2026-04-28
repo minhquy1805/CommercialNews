@@ -5,7 +5,6 @@ using CommercialNews.BuildingBlocks.Outbox.Errors;
 using CommercialNews.BuildingBlocks.Outbox.Ports;
 using CommercialNews.BuildingBlocks.Outbox.Validation.MarkOutboxFailed;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace CommercialNews.BuildingBlocks.Outbox.UseCases.MarkOutboxFailed;
@@ -17,11 +16,11 @@ namespace CommercialNews.BuildingBlocks.Outbox.UseCases.MarkOutboxFailed;
 public sealed class MarkOutboxFailedUseCase : IMarkOutboxFailedUseCase
 {
     private readonly IOutboxMessageRepository _outboxMessageRepository;
-    private readonly ISqlUnitOfWork _unitOfWork;
+    private readonly IOutboxUnitOfWork _unitOfWork;
 
     public MarkOutboxFailedUseCase(
         IOutboxMessageRepository outboxMessageRepository,
-        ISqlUnitOfWork unitOfWork)
+        IOutboxUnitOfWork unitOfWork)
     {
         _outboxMessageRepository = outboxMessageRepository
             ?? throw new ArgumentNullException(nameof(outboxMessageRepository));
@@ -51,8 +50,7 @@ public sealed class MarkOutboxFailedUseCase : IMarkOutboxFailedUseCase
                     OutboxErrors.Message.NotFound);
             }
 
-            if (string.Equals(outboxMessage.Status, OutboxMessageStatus.Published, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(outboxMessage.Status, OutboxMessageStatus.Dead, StringComparison.OrdinalIgnoreCase))
+            if (!CanMarkFailed(outboxMessage.Status))
             {
                 return Result<MarkOutboxFailedResponse>.Failure(
                     OutboxErrors.Message.InvalidState);
@@ -101,6 +99,12 @@ public sealed class MarkOutboxFailedUseCase : IMarkOutboxFailedUseCase
             return Result<MarkOutboxFailedResponse>.Failure(
                 OutboxErrors.DependencyUnavailable);
         }
+    }
+
+    private static bool CanMarkFailed(string status)
+    {
+        return string.Equals(status, OutboxMessageStatus.Publishing, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, OutboxMessageStatus.Failed, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeOptional(string? value)

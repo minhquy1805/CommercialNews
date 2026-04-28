@@ -86,13 +86,13 @@ END
 ELSE
     PRINT N'Schema exists: [notifications]';
 
-IF SCHEMA_ID(N'seo') IS NULL
+IF SCHEMA_ID(N'outbox') IS NULL
 BEGIN
-    EXEC(N'CREATE SCHEMA [seo]');
-    PRINT N'Created schema: [seo]';
+    EXEC(N'CREATE SCHEMA [outbox]');
+    PRINT N'Created schema: [outbox]';
 END
 ELSE
-    PRINT N'Schema exists: [seo]';
+    PRINT N'Schema exists: [outbox]';
 
 IF SCHEMA_ID(N'reading') IS NULL
 BEGIN
@@ -101,5 +101,13 @@ BEGIN
 END
 ELSE
     PRINT N'Schema exists: [reading]';
+
+IF SCHEMA_ID(N'seo') IS NULL
+BEGIN
+    EXEC(N'CREATE SCHEMA [seo]');
+    PRINT N'Created schema: [seo]';
+END
+ELSE
+    PRINT N'Schema exists: [seo]';
 
 GO

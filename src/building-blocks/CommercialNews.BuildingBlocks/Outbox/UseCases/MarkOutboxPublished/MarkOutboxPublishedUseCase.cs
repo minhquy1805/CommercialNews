@@ -5,26 +5,27 @@ using CommercialNews.BuildingBlocks.Outbox.Errors;
 using CommercialNews.BuildingBlocks.Outbox.Ports;
 using CommercialNews.BuildingBlocks.Outbox.Validation.MarkOutboxPublished;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace CommercialNews.BuildingBlocks.Outbox.UseCases.MarkOutboxPublished;
 
 /// <summary>
-/// Marks a single outbox message as published after successful downstream consumption.
+/// Marks a single outbox message as published after successful producer-side dispatch/handoff.
+/// This does not mean downstream side effects have completed.
 /// This is a write use case and opens a transaction.
 /// </summary>
 public sealed class MarkOutboxPublishedUseCase : IMarkOutboxPublishedUseCase
 {
     private readonly IOutboxMessageRepository _outboxMessageRepository;
-    private readonly ISqlUnitOfWork _unitOfWork;
+    private readonly IOutboxUnitOfWork _unitOfWork;
 
     public MarkOutboxPublishedUseCase(
         IOutboxMessageRepository outboxMessageRepository,
-        ISqlUnitOfWork unitOfWork)
+        IOutboxUnitOfWork unitOfWork)
     {
         _outboxMessageRepository = outboxMessageRepository
             ?? throw new ArgumentNullException(nameof(outboxMessageRepository));
+
         _unitOfWork = unitOfWork
             ?? throw new ArgumentNullException(nameof(unitOfWork));
     }
@@ -65,10 +66,7 @@ public sealed class MarkOutboxPublishedUseCase : IMarkOutboxPublishedUseCase
                     });
             }
 
-            if (string.Equals(
-                    outboxMessage.Status,
-                    OutboxMessageStatus.Dead,
-                    StringComparison.OrdinalIgnoreCase))
+            if (!CanMarkPublished(outboxMessage.Status))
             {
                 return Result<MarkOutboxPublishedResponse>.Failure(
                     OutboxErrors.Message.InvalidState);
@@ -112,5 +110,11 @@ public sealed class MarkOutboxPublishedUseCase : IMarkOutboxPublishedUseCase
             return Result<MarkOutboxPublishedResponse>.Failure(
                 OutboxErrors.DependencyUnavailable);
         }
+    }
+
+    private static bool CanMarkPublished(string status)
+    {
+        return string.Equals(status, OutboxMessageStatus.Publishing, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, OutboxMessageStatus.Failed, StringComparison.OrdinalIgnoreCase);
     }
 }

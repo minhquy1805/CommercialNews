@@ -49,4 +49,18 @@ public interface IOutboxMessageRepository
         ISqlUnitOfWork unitOfWork,
         long outboxMessageId,
         CancellationToken cancellationToken = default);
+
+    // TODO(outbox-ops):
+    // Add operational query/maintenance methods after the async runtime pipeline is completed:
+    // - GetByAggregateAsync(string aggregateType, string aggregateId, CancellationToken cancellationToken = default)
+    // - GetByCorrelationIdAsync(string correlationId, CancellationToken cancellationToken = default)
+    // - DeletePublishedBeforeAsync(DateTime publishedBeforeUtc, CancellationToken cancellationToken = default)
+    //
+    // The stored procedures already exist:
+    // - [outbox].[OutboxMessage_SelectByAggregate]
+    // - [outbox].[OutboxMessage_SelectByCorrelationId]
+    // - [outbox].[OutboxMessage_DeletePublishedBefore]
+    //
+    // Keep them out of the baseline port for now to avoid expanding scope before the
+    // Outbox worker/message processor/dispatcher flow is finished.
 }

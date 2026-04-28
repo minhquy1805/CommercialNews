@@ -49,15 +49,10 @@ public sealed class GetEmailDeliveryAttemptsUseCase : IGetEmailDeliveryAttemptsU
                     NotificationsErrors.Delivery.NotFound);
             }
 
-            IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
-                await _emailDeliveryQueryRepository.GetAttemptsByEmailDeliveryIdAsync(
-                    request.EmailDeliveryId,
-                    cancellationToken);
-
             GetEmailDeliveryAttemptsResponse response = new()
             {
-                EmailDeliveryId = request.EmailDeliveryId,
-                Items = attempts
+                EmailDeliveryId = delivery.EmailDeliveryId,
+                Items = delivery.Attempts
                     .Select(MapAttempt)
                     .ToArray()
             };

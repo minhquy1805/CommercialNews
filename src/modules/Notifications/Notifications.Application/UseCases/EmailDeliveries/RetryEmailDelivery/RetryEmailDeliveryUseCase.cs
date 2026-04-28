@@ -60,24 +60,25 @@ public sealed class RetryEmailDeliveryUseCase : IRetryEmailDeliveryUseCase
                     NotificationsErrors.Delivery.AlreadySent);
             }
 
-            if (string.Equals(emailDelivery.Status, EmailDeliveryStatus.Suppressed, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(emailDelivery.Status, EmailDeliveryStatus.Queued, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(emailDelivery.Status, EmailDeliveryStatus.Sending, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(emailDelivery.Status, EmailDeliveryStatus.Dead, StringComparison.OrdinalIgnoreCase))
             {
                 return Result<RetryEmailDeliveryResponse>.Failure(
                     NotificationsErrors.Delivery.RetryNotAllowed);
             }
 
-            if (string.Equals(emailDelivery.Status, EmailDeliveryStatus.Queued, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(emailDelivery.Status, EmailDeliveryStatus.Sending, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(emailDelivery.Status, EmailDeliveryStatus.Failed, StringComparison.OrdinalIgnoreCase))
             {
                 return Result<RetryEmailDeliveryResponse>.Failure(
-                    NotificationsErrors.Delivery.RetryNotAllowed);
+                    NotificationsErrors.Delivery.InvalidState);
             }
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                int affectedRows = await _emailDeliveryRepository.ResetToQueuedAsync(
+                int affectedRows = await _emailDeliveryRepository.RequeueForRetryAsync(
                     request.EmailDeliveryId,
                     cancellationToken);
 

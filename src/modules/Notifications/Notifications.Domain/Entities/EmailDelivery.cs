@@ -159,14 +159,9 @@ public sealed class EmailDelivery
         };
     }
 
-    public bool IsTerminal =>
-        Status.Equals(EmailDeliveryStatus.Sent, StringComparison.OrdinalIgnoreCase) ||
-        Status.Equals(EmailDeliveryStatus.Dead, StringComparison.OrdinalIgnoreCase) ||
-        Status.Equals(EmailDeliveryStatus.Suppressed, StringComparison.OrdinalIgnoreCase);
+    public bool IsTerminal => EmailDeliveryStatus.IsTerminal(Status);
 
-    public bool IsRetryable =>
-        Status.Equals(EmailDeliveryStatus.Failed, StringComparison.OrdinalIgnoreCase) ||
-        Status.Equals(EmailDeliveryStatus.Ambiguous, StringComparison.OrdinalIgnoreCase);
+    public bool IsRetryable => EmailDeliveryStatus.IsRetryable(Status);
 
     public bool CanBeClaimed(DateTime nowUtc)
     {
@@ -177,8 +172,7 @@ public sealed class EmailDelivery
             return NextRetryAt is null || NextRetryAt <= nowUtc;
         }
 
-        if (Status.Equals(EmailDeliveryStatus.Failed, StringComparison.OrdinalIgnoreCase) ||
-            Status.Equals(EmailDeliveryStatus.Ambiguous, StringComparison.OrdinalIgnoreCase))
+        if (Status.Equals(EmailDeliveryStatus.Failed, StringComparison.OrdinalIgnoreCase))
         {
             return NextRetryAt is not null && NextRetryAt <= nowUtc;
         }
@@ -192,11 +186,14 @@ public sealed class EmailDelivery
 
         EnsureCanTransitionFrom(
             EmailDeliveryStatus.Queued,
-            EmailDeliveryStatus.Failed,
-            EmailDeliveryStatus.Ambiguous);
+            EmailDeliveryStatus.Failed);
 
         Status = EmailDeliveryStatus.Sending;
+        AttemptCount++;
         LastAttemptAt = nowUtc;
+        NextRetryAt = null;
+        LastErrorCode = null;
+        LastErrorClass = null;
         UpdatedAt = nowUtc;
     }
 
@@ -204,15 +201,9 @@ public sealed class EmailDelivery
     {
         ValidateNowUtc(nowUtc);
 
-        EnsureCanTransitionFrom(
-            EmailDeliveryStatus.Queued,
-            EmailDeliveryStatus.Sending,
-            EmailDeliveryStatus.Failed,
-            EmailDeliveryStatus.Ambiguous);
+        EnsureCanTransitionFrom(EmailDeliveryStatus.Sending);
 
         Status = EmailDeliveryStatus.Sent;
-        AttemptCount++;
-        LastAttemptAt ??= nowUtc;
         SentAt = nowUtc;
         NextRetryAt = null;
         LastErrorCode = null;
@@ -231,15 +222,9 @@ public sealed class EmailDelivery
         ValidateLastErrorCode(lastErrorCode);
         ValidateLastErrorClass(lastErrorClass);
 
-        EnsureCanTransitionFrom(
-            EmailDeliveryStatus.Queued,
-            EmailDeliveryStatus.Sending,
-            EmailDeliveryStatus.Failed,
-            EmailDeliveryStatus.Ambiguous);
+        EnsureCanTransitionFrom(EmailDeliveryStatus.Sending);
 
         Status = EmailDeliveryStatus.Failed;
-        AttemptCount++;
-        LastAttemptAt ??= nowUtc;
         NextRetryAt = nextRetryAt;
         LastErrorCode = NormalizeOptional(lastErrorCode);
         LastErrorClass = NormalizeOptional(lastErrorClass);
@@ -256,78 +241,22 @@ public sealed class EmailDelivery
         ValidateLastErrorClass(lastErrorClass);
 
         EnsureCanTransitionFrom(
-            EmailDeliveryStatus.Queued,
             EmailDeliveryStatus.Sending,
-            EmailDeliveryStatus.Failed,
-            EmailDeliveryStatus.Ambiguous);
+            EmailDeliveryStatus.Failed);
 
         Status = EmailDeliveryStatus.Dead;
-        AttemptCount++;
-        LastAttemptAt ??= nowUtc;
         NextRetryAt = null;
         LastErrorCode = NormalizeOptional(lastErrorCode);
         LastErrorClass = NormalizeOptional(lastErrorClass);
         UpdatedAt = nowUtc;
     }
 
-    public void MarkSuppressed(
-        DateTime nowUtc,
-        string? lastErrorCode = null,
-        string? lastErrorClass = EmailErrorClass.Policy)
-    {
-        ValidateNowUtc(nowUtc);
-        ValidateLastErrorCode(lastErrorCode);
-        ValidateLastErrorClass(lastErrorClass);
 
-        EnsureCanTransitionFrom(
-            EmailDeliveryStatus.Queued,
-            EmailDeliveryStatus.Sending,
-            EmailDeliveryStatus.Failed,
-            EmailDeliveryStatus.Ambiguous);
-
-        Status = EmailDeliveryStatus.Suppressed;
-        NextRetryAt = null;
-        LastErrorCode = NormalizeOptional(lastErrorCode);
-        LastErrorClass = NormalizeOptional(lastErrorClass);
-        UpdatedAt = nowUtc;
-    }
-
-    public void MarkAmbiguous(
-        DateTime nowUtc,
-        DateTime? nextRetryAt,
-        string? lastErrorCode,
-        string? lastErrorClass = EmailErrorClass.Ambiguous)
-    {
-        ValidateNowUtc(nowUtc);
-        ValidateNextRetryAt(nowUtc, nextRetryAt);
-        ValidateLastErrorCode(lastErrorCode);
-        ValidateLastErrorClass(lastErrorClass);
-
-        EnsureCanTransitionFrom(
-            EmailDeliveryStatus.Queued,
-            EmailDeliveryStatus.Sending,
-            EmailDeliveryStatus.Failed,
-            EmailDeliveryStatus.Ambiguous);
-
-        Status = EmailDeliveryStatus.Ambiguous;
-        AttemptCount++;
-        LastAttemptAt ??= nowUtc;
-        NextRetryAt = nextRetryAt;
-        LastErrorCode = NormalizeOptional(lastErrorCode);
-        LastErrorClass = NormalizeOptional(lastErrorClass);
-        UpdatedAt = nowUtc;
-    }
-
-    public void ResetToQueued(DateTime nowUtc)
+    public void RequeueForRetry(DateTime nowUtc)
     {
         ValidateNowUtc(nowUtc);
 
-        EnsureCanTransitionFrom(
-            EmailDeliveryStatus.Failed,
-            EmailDeliveryStatus.Dead,
-            EmailDeliveryStatus.Ambiguous,
-            EmailDeliveryStatus.Suppressed,
-            EmailDeliveryStatus.Sending);
+        EnsureCanTransitionFrom(EmailDeliveryStatus.Failed);
 
         Status = EmailDeliveryStatus.Queued;
         NextRetryAt = null;
