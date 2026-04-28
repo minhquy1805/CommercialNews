@@ -13,6 +13,7 @@
       - cn_migration_ddl
       - cn_readonly
   - Reading may own stored procedures in V1 even if it does not own physical tables.
+  - Outbox is a shared producer-side publication schema used by API and Worker flows.
 */
 
 SET NOCOUNT ON;
@@ -114,19 +115,22 @@ ELSE
 -- =========================================================
 -- 3) CONNECT permissions
 -- =========================================================
+
 GRANT CONNECT TO [cn_api_rw];
 GRANT CONNECT TO [cn_worker_rw];
 GRANT CONNECT TO [cn_readonly];
 
- /* =========================================================
-    4) API role baseline grants
-    ========================================================= */
+-- =========================================================
+-- 4) API role baseline grants
+-- =========================================================
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[identity] TO [cn_api_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[authorization] TO [cn_api_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[content] TO [cn_api_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[interaction] TO [cn_api_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[media] TO [cn_api_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[notifications] TO [cn_api_rw];
+GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[outbox] TO [cn_api_rw];
 GRANT SELECT ON SCHEMA::[reading] TO [cn_api_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[seo] TO [cn_api_rw];
 
@@ -136,12 +140,14 @@ GRANT EXECUTE ON SCHEMA::[content] TO [cn_api_rw];
 GRANT EXECUTE ON SCHEMA::[interaction] TO [cn_api_rw];
 GRANT EXECUTE ON SCHEMA::[media] TO [cn_api_rw];
 GRANT EXECUTE ON SCHEMA::[notifications] TO [cn_api_rw];
+GRANT EXECUTE ON SCHEMA::[outbox] TO [cn_api_rw];
 GRANT EXECUTE ON SCHEMA::[reading] TO [cn_api_rw];
 GRANT EXECUTE ON SCHEMA::[seo] TO [cn_api_rw];
 
 -- =========================================================
 -- 5) Worker role baseline grants
 -- =========================================================
+
 GRANT SELECT ON SCHEMA::[identity] TO [cn_worker_rw];
 GRANT SELECT ON SCHEMA::[authorization] TO [cn_worker_rw];
 GRANT SELECT ON SCHEMA::[content] TO [cn_worker_rw];
@@ -151,6 +157,7 @@ GRANT SELECT ON SCHEMA::[media] TO [cn_worker_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[interaction] TO [cn_worker_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[audit] TO [cn_worker_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[notifications] TO [cn_worker_rw];
+GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[outbox] TO [cn_worker_rw];
 
 GRANT EXECUTE ON SCHEMA::[identity] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[authorization] TO [cn_worker_rw];
@@ -160,10 +167,12 @@ GRANT EXECUTE ON SCHEMA::[media] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[interaction] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[audit] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[notifications] TO [cn_worker_rw];
+GRANT EXECUTE ON SCHEMA::[outbox] TO [cn_worker_rw];
 
 -- =========================================================
 -- 6) Readonly role baseline grants
 -- =========================================================
+
 GRANT SELECT ON SCHEMA::[identity] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[authorization] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[content] TO [cn_readonly];
@@ -172,6 +181,7 @@ GRANT SELECT ON SCHEMA::[media] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[interaction] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[audit] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[notifications] TO [cn_readonly];
+GRANT SELECT ON SCHEMA::[outbox] TO [cn_readonly];
 
 PRINT N'Baseline grants applied successfully.';
 GO
