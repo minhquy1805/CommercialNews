@@ -4,14 +4,15 @@
   Purpose:
   - Create Notifications tables for CommercialNews V1.
   - Refactored toward the current domain shape:
-      * [notifications].[OutboxMessage]         -> shared async intent / publication artifact
-      * [notifications].[EmailDelivery]         -> canonical delivery workflow truth (new shape)
+      * [notifications].[EmailDelivery]         -> canonical email delivery workflow truth
       * [notifications].[EmailDeliveryAttempt]  -> attempt-level operational history
       * [notifications].[EmailRateLimitLog]     -> optional investigation log
 
   Design principles:
-  - Upstream modules write truth + outbox only; delivery is async.
-  - Outbox is shared, but delivery truth belongs to Notifications.
+  - Upstream modules write truth + shared outbox only; delivery is async.
+  - Shared producer-side outbox belongs to [outbox], not [notifications].
+  - Notifications owns email delivery truth and attempt history.
+  - MessageId is used as an idempotency/correlation key from upstream async messages.
   - Domain shape is the source of truth; tables should follow current domain contracts.
   - Do not store raw secrets/tokens in errors or logs.
 */
@@ -48,94 +49,24 @@ END
 GO
 
 /* =========================================================
-   1) [notifications].[OutboxMessage]
-   Shared async intent / publication artifact
-   ========================================================= */
-IF OBJECT_ID(N'[notifications].[OutboxMessage]', N'U') IS NULL
-BEGIN
-    CREATE TABLE [notifications].[OutboxMessage]
-    (
-        [OutboxMessageId]   BIGINT IDENTITY(1,1) NOT NULL,
-        [MessageId]         CHAR(26)             NOT NULL, -- ULID
-        [EventType]         NVARCHAR(200)        NOT NULL,
-        [AggregateType]     NVARCHAR(100)        NOT NULL,
-        [AggregateId]       NVARCHAR(100)        NOT NULL,
-        [AggregatePublicId] CHAR(26)             NULL,
-        [AggregateVersion]  INT                  NULL,
-
-        [Payload]           NVARCHAR(MAX)        NOT NULL,
-        [Headers]           NVARCHAR(MAX)        NULL,
-
-        [CorrelationId]     NVARCHAR(100)        NULL,
-        [InitiatorUserId]   BIGINT               NULL,
-
-        [Priority]          TINYINT              NOT NULL
-            CONSTRAINT [DF_OutboxMessage_Priority] DEFAULT (5),
-
-        [Status]            VARCHAR(20)          NOT NULL
-            CONSTRAINT [DF_OutboxMessage_Status] DEFAULT ('Pending'),
-
-        [AttemptCount]      INT                  NOT NULL
-            CONSTRAINT [DF_OutboxMessage_AttemptCount] DEFAULT (0),
-
-        [NextRetryAt]       DATETIME2(3)         NULL,
-        [LastAttemptAt]     DATETIME2(3)         NULL,
-        [PublishedAt]       DATETIME2(3)         NULL,
-
-        [LastError]         NVARCHAR(2000)       NULL,
-        [LastErrorCode]     NVARCHAR(100)        NULL,
-        [LastErrorClass]    VARCHAR(30)          NULL,
-
-        [OccurredAt]        DATETIME2(3)         NOT NULL,
-        [CreatedAt]         DATETIME2(3)         NOT NULL
-            CONSTRAINT [DF_OutboxMessage_CreatedAt] DEFAULT (SYSUTCDATETIME()),
-        [UpdatedAt]         DATETIME2(3)         NOT NULL
-            CONSTRAINT [DF_OutboxMessage_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
-
-        CONSTRAINT [PK_OutboxMessage]
-            PRIMARY KEY CLUSTERED ([OutboxMessageId] ASC),
-
-        CONSTRAINT [UQ_OutboxMessage_MessageId]
-            UNIQUE ([MessageId]),
-
-        CONSTRAINT [CK_OutboxMessage_Status]
-            CHECK ([Status] IN ('Pending', 'Publishing', 'Published', 'Failed', 'Dead')),
-
-        CONSTRAINT [CK_OutboxMessage_Priority]
-            CHECK ([Priority] BETWEEN 1 AND 9),
-
-        CONSTRAINT [CK_OutboxMessage_AttemptCount]
-            CHECK ([AttemptCount] >= 0),
-
-        CONSTRAINT [CK_OutboxMessage_AggregateVersion]
-            CHECK ([AggregateVersion] IS NULL OR [AggregateVersion] >= 1),
-
-        CONSTRAINT [CK_OutboxMessage_LastErrorClass]
-            CHECK ([LastErrorClass] IS NULL OR [LastErrorClass] IN ('Transient', 'Permanent', 'Ambiguous', 'Policy', 'Template', 'Provider', 'Validation')),
-
-        CONSTRAINT [CK_OutboxMessage_OccurredAt]
-            CHECK ([OccurredAt] <= DATEADD(DAY, 1, [CreatedAt]))
-    );
-
-    PRINT N'Created table: [notifications].[OutboxMessage]';
-END
-ELSE
-BEGIN
-    PRINT N'Table exists: [notifications].[OutboxMessage]';
-END
-GO
-
-/* =========================================================
-   2) [notifications].[EmailDelivery]
-   Canonical delivery workflow truth (new shape)
+   1) [notifications].[EmailDelivery]
+   Canonical email delivery workflow truth
    ========================================================= */
 IF OBJECT_ID(N'[notifications].[EmailDelivery]', N'U') IS NULL
 BEGIN
     CREATE TABLE [notifications].[EmailDelivery]
     (
         [EmailDeliveryId]   BIGINT IDENTITY(1,1) NOT NULL,
-        [MessageId]         CHAR(26)             NOT NULL, -- links to OutboxMessage.MessageId
 
+        -- Idempotency/correlation key from upstream async message.
+        -- Not FK-bound to [outbox].[OutboxMessage] to avoid coupling
+        -- consumer-side delivery state to producer-side outbox retention.
+        [MessageId]         CHAR(26)             NOT NULL,
+
+        -- Business-level idempotency key.
+        -- Example:
+        -- identity:verification-email:{userId}:{tokenId}
+        -- identity:password-reset-email:{userId}:{tokenId}
         [BusinessDedupeKey] NVARCHAR(300)        NOT NULL,
 
         [RecipientUserId]   BIGINT               NULL,
@@ -167,6 +98,7 @@ BEGIN
 
         [CreatedAt]         DATETIME2(3)         NOT NULL
             CONSTRAINT [DF_EmailDelivery_CreatedAt] DEFAULT (SYSUTCDATETIME()),
+
         [UpdatedAt]         DATETIME2(3)         NOT NULL
             CONSTRAINT [DF_EmailDelivery_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
 
@@ -179,16 +111,12 @@ BEGIN
         CONSTRAINT [UQ_EmailDelivery_BusinessDedupeKey]
             UNIQUE ([BusinessDedupeKey]),
 
-        CONSTRAINT [FK_EmailDelivery_OutboxMessage_MessageId]
-            FOREIGN KEY ([MessageId])
-            REFERENCES [notifications].[OutboxMessage]([MessageId]),
-
         CONSTRAINT [FK_EmailDelivery_UserAccount]
             FOREIGN KEY ([RecipientUserId])
             REFERENCES [identity].[UserAccount]([UserId]),
 
         CONSTRAINT [CK_EmailDelivery_Status]
-            CHECK ([Status] IN ('Queued', 'Sending', 'Sent', 'Failed', 'Dead', 'Suppressed', 'Ambiguous')),
+            CHECK ([Status] IN ('Queued', 'Sending', 'Sent', 'Failed', 'Dead')),
 
         CONSTRAINT [CK_EmailDelivery_Priority]
             CHECK ([Priority] BETWEEN 1 AND 9),
@@ -197,7 +125,17 @@ BEGIN
             CHECK ([AttemptCount] >= 0),
 
         CONSTRAINT [CK_EmailDelivery_LastErrorClass]
-            CHECK ([LastErrorClass] IS NULL OR [LastErrorClass] IN ('Transient', 'Permanent', 'Ambiguous', 'Policy', 'Template', 'Provider', 'Validation')),
+            CHECK ([LastErrorClass] IS NULL OR [LastErrorClass] IN
+            (
+                'Transient',
+                'Permanent',
+                'Ambiguous',
+                'Policy',
+                'Template',
+                'Provider',
+                'Validation',
+                'Unknown'
+            )),
 
         CONSTRAINT [CK_EmailDelivery_VariablesJson_NotBlank]
             CHECK (LEN(LTRIM(RTRIM([VariablesJson]))) > 0),
@@ -221,7 +159,7 @@ END
 GO
 
 /* =========================================================
-   3) [notifications].[EmailDeliveryAttempt]
+   2) [notifications].[EmailDeliveryAttempt]
    Attempt-level operational history
    ========================================================= */
 IF OBJECT_ID(N'[notifications].[EmailDeliveryAttempt]', N'U') IS NULL
@@ -229,7 +167,11 @@ BEGIN
     CREATE TABLE [notifications].[EmailDeliveryAttempt]
     (
         [EmailDeliveryAttemptId] BIGINT IDENTITY(1,1) NOT NULL,
+
         [EmailDeliveryId]        BIGINT               NOT NULL,
+
+        -- Copied from EmailDelivery.MessageId for fast investigation
+        -- and correlation. Not FK-bound to outbox.
         [MessageId]              CHAR(26)             NOT NULL,
 
         [AttemptNumber]          INT                  NOT NULL,
@@ -240,6 +182,7 @@ BEGIN
         [FinishedAt]             DATETIME2(3)         NULL,
 
         [Outcome]                VARCHAR(30)          NOT NULL,
+
         [IsAmbiguous]            BIT                  NOT NULL
             CONSTRAINT [DF_EmailDeliveryAttempt_IsAmbiguous] DEFAULT (0),
 
@@ -263,18 +206,24 @@ BEGIN
             FOREIGN KEY ([EmailDeliveryId])
             REFERENCES [notifications].[EmailDelivery]([EmailDeliveryId]),
 
-        CONSTRAINT [FK_EmailDeliveryAttempt_OutboxMessage_MessageId]
-            FOREIGN KEY ([MessageId])
-            REFERENCES [notifications].[OutboxMessage]([MessageId]),
-
         CONSTRAINT [CK_EmailDeliveryAttempt_AttemptNumber]
             CHECK ([AttemptNumber] >= 1),
 
         CONSTRAINT [CK_EmailDeliveryAttempt_Outcome]
-            CHECK ([Outcome] IN ('Sent', 'Failed', 'Timeout', 'Suppressed', 'Skipped', 'ProviderRejected')),
+            CHECK ([Outcome] IN ('Started', 'Succeeded', 'Failed', 'TimedOut', 'Rejected', 'Skipped')),
 
         CONSTRAINT [CK_EmailDeliveryAttempt_ErrorClass]
-            CHECK ([ErrorClass] IS NULL OR [ErrorClass] IN ('Transient', 'Permanent', 'Ambiguous', 'Policy', 'Template', 'Provider', 'Validation')),
+            CHECK ([ErrorClass] IS NULL OR [ErrorClass] IN
+            (
+                'Transient',
+                'Permanent',
+                'Ambiguous',
+                'Policy',
+                'Template',
+                'Provider',
+                'Validation',
+                'Unknown'
+            )),
 
         CONSTRAINT [CK_EmailDeliveryAttempt_FinishedAt]
             CHECK ([FinishedAt] IS NULL OR [FinishedAt] >= [StartedAt])
@@ -289,7 +238,7 @@ END
 GO
 
 /* =========================================================
-   4) [notifications].[EmailRateLimitLog]
+   3) [notifications].[EmailRateLimitLog]
    Optional investigation log
    ========================================================= */
 IF OBJECT_ID(N'[notifications].[EmailRateLimitLog]', N'U') IS NULL
@@ -297,6 +246,7 @@ BEGIN
     CREATE TABLE [notifications].[EmailRateLimitLog]
     (
         [EmailRateLimitLogId] BIGINT IDENTITY(1,1) NOT NULL,
+
         [RecipientUserId]     BIGINT               NULL,
 
         [Endpoint]            NVARCHAR(60)         NOT NULL,
@@ -311,6 +261,7 @@ BEGIN
         [DecisionKey]         NVARCHAR(150)        NULL,
 
         [CorrelationId]       NVARCHAR(100)        NULL,
+
         [OccurredAt]          DATETIME2(3)         NOT NULL
             CONSTRAINT [DF_EmailRateLimitLog_OccurredAt] DEFAULT (SYSUTCDATETIME()),
 
