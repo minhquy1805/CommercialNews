@@ -50,6 +50,8 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
 
             ownedConnection = connection;
 
+            EmailDeliveryDetailResult detail;
+
             using (command)
             {
                 command.Parameters.Add(
@@ -62,33 +64,33 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
                     return null;
                 }
 
-                EmailDeliveryDetailResult detail = MapEmailDeliveryDetail(reader);
-
-                IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
-                    await GetAttemptsInternalAsync(detail.EmailDeliveryId, cancellationToken);
-
-                return new EmailDeliveryDetailResult
-                {
-                    EmailDeliveryId = detail.EmailDeliveryId,
-                    MessageId = detail.MessageId,
-                    BusinessDedupeKey = detail.BusinessDedupeKey,
-                    RecipientUserId = detail.RecipientUserId,
-                    ToEmail = detail.ToEmail,
-                    TemplateKey = detail.TemplateKey,
-                    Provider = detail.Provider,
-                    Status = detail.Status,
-                    AttemptCount = detail.AttemptCount,
-                    LastAttemptAt = detail.LastAttemptAt,
-                    NextRetryAt = detail.NextRetryAt,
-                    SentAt = detail.SentAt,
-                    LastErrorCode = detail.LastErrorCode,
-                    LastErrorClass = detail.LastErrorClass,
-                    CorrelationId = detail.CorrelationId,
-                    CreatedAt = detail.CreatedAt,
-                    UpdatedAt = detail.UpdatedAt,
-                    Attempts = attempts
-                };
+                detail = MapEmailDeliveryDetail(reader);
             }
+
+            IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
+                await GetAttemptsInternalAsync(detail.EmailDeliveryId, cancellationToken);
+
+            return new EmailDeliveryDetailResult
+            {
+                EmailDeliveryId = detail.EmailDeliveryId,
+                MessageId = detail.MessageId,
+                BusinessDedupeKey = detail.BusinessDedupeKey,
+                RecipientUserId = detail.RecipientUserId,
+                ToEmail = detail.ToEmail,
+                TemplateKey = detail.TemplateKey,
+                Provider = detail.Provider,
+                Status = detail.Status,
+                AttemptCount = detail.AttemptCount,
+                LastAttemptAt = detail.LastAttemptAt,
+                NextRetryAt = detail.NextRetryAt,
+                SentAt = detail.SentAt,
+                LastErrorCode = detail.LastErrorCode,
+                LastErrorClass = detail.LastErrorClass,
+                CorrelationId = detail.CorrelationId,
+                CreatedAt = detail.CreatedAt,
+                UpdatedAt = detail.UpdatedAt,
+                Attempts = attempts
+            };
         }
         catch (SqlException exception)
         {
@@ -116,6 +118,8 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
 
             ownedConnection = connection;
 
+            EmailDeliveryDetailResult detail;
+
             using (command)
             {
                 command.Parameters.Add(
@@ -128,33 +132,33 @@ public sealed class EmailDeliveryQueryRepository : IEmailDeliveryQueryRepository
                     return null;
                 }
 
-                EmailDeliveryDetailResult detail = MapEmailDeliveryDetail(reader);
-
-                IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
-                    await GetAttemptsInternalAsync(detail.EmailDeliveryId, cancellationToken);
-
-                return new EmailDeliveryDetailResult
-                {
-                    EmailDeliveryId = detail.EmailDeliveryId,
-                    MessageId = detail.MessageId,
-                    BusinessDedupeKey = detail.BusinessDedupeKey,
-                    RecipientUserId = detail.RecipientUserId,
-                    ToEmail = detail.ToEmail,
-                    TemplateKey = detail.TemplateKey,
-                    Provider = detail.Provider,
-                    Status = detail.Status,
-                    AttemptCount = detail.AttemptCount,
-                    LastAttemptAt = detail.LastAttemptAt,
-                    NextRetryAt = detail.NextRetryAt,
-                    SentAt = detail.SentAt,
-                    LastErrorCode = detail.LastErrorCode,
-                    LastErrorClass = detail.LastErrorClass,
-                    CorrelationId = detail.CorrelationId,
-                    CreatedAt = detail.CreatedAt,
-                    UpdatedAt = detail.UpdatedAt,
-                    Attempts = attempts
-                };
+                detail = MapEmailDeliveryDetail(reader);
             }
+
+            IReadOnlyList<EmailDeliveryAttemptResultItem> attempts =
+                await GetAttemptsInternalAsync(detail.EmailDeliveryId, cancellationToken);
+
+            return new EmailDeliveryDetailResult
+            {
+                EmailDeliveryId = detail.EmailDeliveryId,
+                MessageId = detail.MessageId,
+                BusinessDedupeKey = detail.BusinessDedupeKey,
+                RecipientUserId = detail.RecipientUserId,
+                ToEmail = detail.ToEmail,
+                TemplateKey = detail.TemplateKey,
+                Provider = detail.Provider,
+                Status = detail.Status,
+                AttemptCount = detail.AttemptCount,
+                LastAttemptAt = detail.LastAttemptAt,
+                NextRetryAt = detail.NextRetryAt,
+                SentAt = detail.SentAt,
+                LastErrorCode = detail.LastErrorCode,
+                LastErrorClass = detail.LastErrorClass,
+                CorrelationId = detail.CorrelationId,
+                CreatedAt = detail.CreatedAt,
+                UpdatedAt = detail.UpdatedAt,
+                Attempts = attempts
+            };
         }
         catch (SqlException exception)
         {

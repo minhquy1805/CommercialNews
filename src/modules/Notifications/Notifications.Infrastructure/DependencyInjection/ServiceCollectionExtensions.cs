@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Notifications.Application.Ports.Persistence;
 using Notifications.Application.Ports.Services;
 using Notifications.Application.Ports.Transactions;
+using Notifications.Application.Services;
 using Notifications.Infrastructure.Persistence.Exceptions;
 using Notifications.Infrastructure.Persistence.Repositories;
 using Notifications.Infrastructure.Persistence.Sql;
@@ -27,17 +28,20 @@ public static class ServiceCollectionExtensions
         services.AddScoped<INotificationsUnitOfWork>(
             sp => sp.GetRequiredService<NotificationsUnitOfWork>());
 
+        services.Configure<EmailTemplateOptions>(
+            configuration.GetSection("Notifications:EmailTemplates"));
+
         services.AddSingleton<NotificationsSqlExceptionTranslator>();
 
         services.AddScoped<IEmailDeliveryRepository, EmailDeliveryRepository>();
         services.AddScoped<IEmailDeliveryAttemptRepository, EmailDeliveryAttemptRepository>();
         services.AddScoped<IEmailDeliveryQueryRepository, EmailDeliveryQueryRepository>();
 
-        services.AddScoped<INotificationRetryPolicy, NotificationRetryPolicy>();
+        services.AddScoped<IEmailDeliveryRetryPolicy, EmailDeliveryRetryPolicy>();
         services.AddScoped<IProviderResultClassifier, ProviderResultClassifier>();
-        services.AddScoped<INotificationTemplateRenderer, NotificationTemplateRenderer>();
+        services.AddScoped<IEmailTemplateRenderer, EmailTemplateRenderer>();
         services.AddScoped<IEmailSender, EmailSender>();
-        services.AddScoped<INotificationDedupeService, NotificationDedupeService>();
+        services.AddScoped<IEmailDeliveryDedupeService, EmailDeliveryDedupeService>();
 
         return services;
     }
