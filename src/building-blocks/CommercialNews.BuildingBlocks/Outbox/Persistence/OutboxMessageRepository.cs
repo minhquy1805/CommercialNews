@@ -11,28 +11,28 @@ namespace CommercialNews.BuildingBlocks.Outbox.Persistence;
 public sealed class OutboxMessageRepository : IOutboxMessageRepository
 {
     private const string OutboxMessageInsertProc =
-        "[notifications].[OutboxMessage_Insert]";
+        "[outbox].[OutboxMessage_Insert]";
 
     private const string OutboxMessageSelectByIdProc =
-        "[notifications].[OutboxMessage_SelectById]";
+        "[outbox].[OutboxMessage_SelectById]";
 
     private const string OutboxMessageSelectByMessageIdProc =
-        "[notifications].[OutboxMessage_SelectByMessageId]";
+        "[outbox].[OutboxMessage_SelectByMessageId]";
 
     private const string OutboxMessageClaimPendingProc =
-        "[notifications].[OutboxMessage_ClaimPending]";
+        "[outbox].[OutboxMessage_ClaimPending]";
 
     private const string OutboxMessageMarkPublishedProc =
-        "[notifications].[OutboxMessage_MarkPublished]";
+        "[outbox].[OutboxMessage_MarkPublished]";
 
     private const string OutboxMessageMarkFailedProc =
-        "[notifications].[OutboxMessage_MarkFailed]";
+        "[outbox].[OutboxMessage_MarkFailed]";
 
     private const string OutboxMessageMarkDeadProc =
-        "[notifications].[OutboxMessage_MarkDead]";
+        "[outbox].[OutboxMessage_MarkDead]";
 
     private const string OutboxMessageResetToPendingProc =
-        "[notifications].[OutboxMessage_ResetToPending]";
+        "[outbox].[OutboxMessage_ResetToPending]";
 
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
     private readonly OutboxSqlExceptionTranslator _sqlExceptionTranslator;

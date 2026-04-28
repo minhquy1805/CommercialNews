@@ -10,4 +10,6 @@ public sealed class GetEmailDeliveriesResponse
     public int PageSize { get; init; }
 
     public int TotalItems { get; init; }
+
+    public int TotalPages { get; init; }
 }

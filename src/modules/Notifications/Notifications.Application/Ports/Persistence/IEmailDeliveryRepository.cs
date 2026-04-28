@@ -42,20 +42,7 @@ public interface IEmailDeliveryRepository
         string? lastErrorClass,
         CancellationToken cancellationToken = default);
 
-    Task<int> MarkSuppressedAsync(
-        long emailDeliveryId,
-        string? lastErrorCode,
-        string? lastErrorClass,
-        CancellationToken cancellationToken = default);
-
-    Task<int> MarkAmbiguousAsync(
-        long emailDeliveryId,
-        DateTime? nextRetryAt,
-        string? lastErrorCode,
-        string? lastErrorClass,
-        CancellationToken cancellationToken = default);
-
-    Task<int> ResetToQueuedAsync(
+    Task<int> RequeueForRetryAsync(
         long emailDeliveryId,
         CancellationToken cancellationToken = default);
 }

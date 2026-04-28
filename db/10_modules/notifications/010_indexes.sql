@@ -3,17 +3,22 @@
   Module: Notifications
   Purpose:
   - Create non-PK/non-constraint indexes for Notifications tables in CommercialNews V1.
-  - Refactored to match the current EmailDelivery table/domain shape.
+  - Match the current Notifications domain shape:
+      * [notifications].[EmailDelivery]
+      * [notifications].[EmailDeliveryAttempt]
+      * [notifications].[EmailRateLimitLog]
 
   Notes:
   - Idempotent: safe to re-run.
   - PK / UQ / FK / CHECK constraints are defined in 001_tables.sql.
+  - Shared producer-side outbox indexes belong to:
+      db/10_modules/outbox/010_indexes.sql
   - Index design focuses on:
-      * worker polling / retry scheduling
-      * replay / remediation / cleanup
+      * email delivery worker polling / retry scheduling
       * admin ops inspection
       * correlation-based troubleshooting
       * recipient/user lookup
+      * rate-limit investigation
 */
 
 SET NOCOUNT ON;
@@ -32,12 +37,6 @@ GO
 IF SCHEMA_ID(N'notifications') IS NULL
 BEGIN
     THROW 52102, 'Schema [notifications] does not exist. Run 010_create_schemas.sql first.', 1;
-END
-GO
-
-IF OBJECT_ID(N'[notifications].[OutboxMessage]', N'U') IS NULL
-BEGIN
-    THROW 52103, 'Table [notifications].[OutboxMessage] does not exist. Run notifications 001_tables.sql first.', 1;
 END
 GO
 
@@ -60,205 +59,8 @@ END
 GO
 
 /* =========================================================
-   1) [notifications].[OutboxMessage]
-   ========================================================= */
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_OutboxMessage_Status_Priority_NextRetryAt_OccurredAt'
-      AND [object_id] = OBJECT_ID(N'[notifications].[OutboxMessage]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_OutboxMessage_Status_Priority_NextRetryAt_OccurredAt]
-    ON [notifications].[OutboxMessage]
-    (
-        [Status] ASC,
-        [Priority] ASC,
-        [NextRetryAt] ASC,
-        [OccurredAt] ASC
-    )
-    INCLUDE
-    (
-        [OutboxMessageId],
-        [MessageId],
-        [EventType],
-        [AggregateType],
-        [AggregateId],
-        [AggregateVersion],
-        [CorrelationId],
-        [AttemptCount],
-        [PublishedAt]
-    );
-
-    PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_Priority_NextRetryAt_OccurredAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_Priority_NextRetryAt_OccurredAt]';
-END
-GO
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_OutboxMessage_AggregateType_AggregateId_AggregateVersion'
-      AND [object_id] = OBJECT_ID(N'[notifications].[OutboxMessage]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_OutboxMessage_AggregateType_AggregateId_AggregateVersion]
-    ON [notifications].[OutboxMessage]
-    (
-        [AggregateType] ASC,
-        [AggregateId] ASC,
-        [AggregateVersion] ASC
-    )
-    INCLUDE
-    (
-        [MessageId],
-        [EventType],
-        [Status],
-        [OccurredAt],
-        [PublishedAt],
-        [CorrelationId]
-    );
-
-    PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_AggregateType_AggregateId_AggregateVersion]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [notifications].[OutboxMessage].[IX_OutboxMessage_AggregateType_AggregateId_AggregateVersion]';
-END
-GO
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_OutboxMessage_OccurredAt'
-      AND [object_id] = OBJECT_ID(N'[notifications].[OutboxMessage]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_OutboxMessage_OccurredAt]
-    ON [notifications].[OutboxMessage] ([OccurredAt] ASC)
-    INCLUDE
-    (
-        [OutboxMessageId],
-        [MessageId],
-        [EventType],
-        [AggregateType],
-        [AggregateId],
-        [Status],
-        [Priority]
-    );
-
-    PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_OccurredAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [notifications].[OutboxMessage].[IX_OutboxMessage_OccurredAt]';
-END
-GO
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_OutboxMessage_PublishedAt'
-      AND [object_id] = OBJECT_ID(N'[notifications].[OutboxMessage]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_OutboxMessage_PublishedAt]
-    ON [notifications].[OutboxMessage] ([PublishedAt] ASC)
-    INCLUDE
-    (
-        [MessageId],
-        [Status],
-        [OccurredAt],
-        [EventType],
-        [AttemptCount]
-    );
-
-    PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_PublishedAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [notifications].[OutboxMessage].[IX_OutboxMessage_PublishedAt]';
-END
-GO
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_OutboxMessage_Status_AttemptCount_OccurredAt'
-      AND [object_id] = OBJECT_ID(N'[notifications].[OutboxMessage]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_OutboxMessage_Status_AttemptCount_OccurredAt]
-    ON [notifications].[OutboxMessage]
-    (
-        [Status] ASC,
-        [AttemptCount] DESC,
-        [OccurredAt] ASC
-    )
-    INCLUDE
-    (
-        [MessageId],
-        [EventType],
-        [AggregateType],
-        [AggregateId],
-        [LastAttemptAt],
-        [LastError],
-        [LastErrorCode],
-        [LastErrorClass]
-    );
-
-    PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_AttemptCount_OccurredAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [notifications].[OutboxMessage].[IX_OutboxMessage_Status_AttemptCount_OccurredAt]';
-END
-GO
-
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_OutboxMessage_CorrelationId_OccurredAt'
-      AND [object_id] = OBJECT_ID(N'[notifications].[OutboxMessage]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_OutboxMessage_CorrelationId_OccurredAt]
-    ON [notifications].[OutboxMessage]
-    (
-        [CorrelationId] ASC,
-        [OccurredAt] ASC
-    )
-    INCLUDE
-    (
-        [OutboxMessageId],
-        [MessageId],
-        [EventType],
-        [AggregateType],
-        [AggregateId],
-        [Status],
-        [Priority]
-    );
-
-    PRINT N'Created index: [notifications].[OutboxMessage].[IX_OutboxMessage_CorrelationId_OccurredAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [notifications].[OutboxMessage].[IX_OutboxMessage_CorrelationId_OccurredAt]';
-END
-GO
-
-/* =========================================================
-   2) [notifications].[EmailDelivery] - new shape
+   1) [notifications].[EmailDelivery]
+   Worker polling / retry scheduling
    ========================================================= */
 
 IF NOT EXISTS
@@ -492,7 +294,8 @@ END
 GO
 
 /* =========================================================
-   3) [notifications].[EmailDeliveryAttempt]
+   2) [notifications].[EmailDeliveryAttempt]
+   Attempt history / troubleshooting
    ========================================================= */
 
 IF NOT EXISTS
@@ -629,7 +432,8 @@ END
 GO
 
 /* =========================================================
-   4) [notifications].[EmailRateLimitLog]
+   3) [notifications].[EmailRateLimitLog]
+   Rate-limit / abuse investigation
    ========================================================= */
 
 IF NOT EXISTS

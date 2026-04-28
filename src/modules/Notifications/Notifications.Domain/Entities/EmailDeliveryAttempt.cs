@@ -56,7 +56,7 @@ public sealed class EmailDeliveryAttempt
             MessageId = NormalizeRequired(messageId),
             AttemptNumber = attemptNumber,
             StartedAt = startedAt,
-            Outcome = EmailAttemptOutcome.Skipped,
+            Outcome = EmailAttemptOutcome.Started,
             IsAmbiguous = false,
             CorrelationId = NormalizeOptional(correlationId),
             CreatedAt = startedAt
@@ -120,7 +120,7 @@ public sealed class EmailDeliveryAttempt
 
     public bool IsCompleted => FinishedAt is not null;
 
-    public void CompleteAsSent(
+    public void CompleteAsSucceeded(
         DateTime finishedAt,
         string? providerMessageId = null)
     {
@@ -128,7 +128,7 @@ public sealed class EmailDeliveryAttempt
         ValidateFinishedAt(StartedAt, finishedAt);
         ValidateProviderMessageId(providerMessageId);
 
-        Outcome = EmailAttemptOutcome.Sent;
+        Outcome = EmailAttemptOutcome.Succeeded;
         IsAmbiguous = false;
         FinishedAt = finishedAt;
         ProviderMessageId = NormalizeOptional(providerMessageId);
@@ -157,7 +157,7 @@ public sealed class EmailDeliveryAttempt
         ErrorDetail = NormalizeOptional(errorDetail);
     }
 
-    public void CompleteAsTimeout(
+    public void CompleteAsTimedOut(
         DateTime finishedAt,
         string? providerErrorCode = null,
         string? errorDetail = null,
@@ -168,31 +168,13 @@ public sealed class EmailDeliveryAttempt
         ValidateProviderErrorCode(providerErrorCode);
         ValidateErrorDetail(errorDetail);
 
-        Outcome = EmailAttemptOutcome.Timeout;
+        Outcome = EmailAttemptOutcome.TimedOut;
         IsAmbiguous = isAmbiguous;
         FinishedAt = finishedAt;
         ProviderErrorCode = NormalizeOptional(providerErrorCode);
         ErrorClass = isAmbiguous
             ? EmailErrorClass.Ambiguous
             : EmailErrorClass.Transient;
-        ErrorDetail = NormalizeOptional(errorDetail);
-    }
-
-    public void CompleteAsSuppressed(
-        DateTime finishedAt,
-        string? providerErrorCode = null,
-        string? errorDetail = null)
-    {
-        EnsureNotCompleted();
-        ValidateFinishedAt(StartedAt, finishedAt);
-        ValidateProviderErrorCode(providerErrorCode);
-        ValidateErrorDetail(errorDetail);
-
-        Outcome = EmailAttemptOutcome.Suppressed;
-        IsAmbiguous = false;
-        FinishedAt = finishedAt;
-        ProviderErrorCode = NormalizeOptional(providerErrorCode);
-        ErrorClass = EmailErrorClass.Policy;
         ErrorDetail = NormalizeOptional(errorDetail);
     }
 
@@ -208,11 +190,11 @@ public sealed class EmailDeliveryAttempt
         IsAmbiguous = false;
         FinishedAt = finishedAt;
         ProviderErrorCode = null;
-        ErrorClass = null;
+        ErrorClass = EmailErrorClass.Policy;
         ErrorDetail = NormalizeOptional(errorDetail);
     }
 
-    public void CompleteAsProviderRejected(
+    public void CompleteAsRejected(
         DateTime finishedAt,
         string? providerMessageId = null,
         string? providerErrorCode = null,
@@ -224,7 +206,7 @@ public sealed class EmailDeliveryAttempt
         ValidateProviderErrorCode(providerErrorCode);
         ValidateErrorDetail(errorDetail);
 
-        Outcome = EmailAttemptOutcome.ProviderRejected;
+        Outcome = EmailAttemptOutcome.Rejected;
         IsAmbiguous = false;
         FinishedAt = finishedAt;
         ProviderMessageId = NormalizeOptional(providerMessageId);

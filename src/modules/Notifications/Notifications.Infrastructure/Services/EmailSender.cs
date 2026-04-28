@@ -1,7 +1,6 @@
-using System.Net.Sockets;
 using MailKit.Net.Smtp;
-using MailKit;
 using MailKit.Security;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using Notifications.Application.Contracts.Services;
@@ -12,11 +11,14 @@ namespace Notifications.Infrastructure.Services;
 public sealed class EmailSender : IEmailSender
 {
     private readonly NotificationEmailOptions _options;
+    private readonly ILogger<EmailSender> _logger;
 
-    public EmailSender(IOptions<NotificationEmailOptions> options)
+    public EmailSender(
+        IOptions<NotificationEmailOptions> options,
+        ILogger<EmailSender> logger)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        _options = options.Value ?? throw new ArgumentNullException(nameof(options));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async Task<EmailSendResult> SendAsync(
@@ -24,46 +26,28 @@ public sealed class EmailSender : IEmailSender
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ValidateRequest(request);
 
-        if (string.IsNullOrWhiteSpace(request.ToEmail))
+        using IDisposable? scope = _logger.BeginScope(new Dictionary<string, object?>
         {
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.ProviderRejected,
-                ProviderErrorMessage = "Recipient email is required."
-            };
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Body))
-        {
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.ProviderRejected,
-                ProviderErrorMessage = "Email body is required."
-            };
-        }
-
-        MimeMessage message = BuildMimeMessage(request);
+            ["MessageId"] = request.MessageId,
+            ["TemplateKey"] = request.TemplateKey,
+            ["CorrelationId"] = request.CorrelationId
+        });
 
         try
         {
-            using SmtpClient client = new();
+            MimeMessage message = BuildMessage(request);
 
-            // Important:
-            // Timeout is set explicitly so that transport issues surface as
-            // structured failures instead of hanging indefinitely.
-            client.Timeout = _options.TimeoutMilliseconds;
-
-            SecureSocketOptions socketOptions = ResolveSocketOptions();
+            using SmtpClient client = new()
+            {
+                Timeout = _options.TimeoutMilliseconds
+            };
 
             await client.ConnectAsync(
                 _options.Host,
                 _options.Port,
-                socketOptions,
+                GetSecureSocketOptions(_options),
                 cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(_options.UserName))
@@ -74,177 +58,154 @@ public sealed class EmailSender : IEmailSender
                     cancellationToken);
             }
 
-            string? providerMessageId = await client.SendAsync(message, cancellationToken);
+            string providerMessageId = await client.SendAsync(message, cancellationToken);
 
-            await client.DisconnectAsync(true, cancellationToken);
+            await client.DisconnectAsync(quit: true, cancellationToken);
+
+            _logger.LogInformation(
+                "Email sent successfully. MessageId={MessageId}, TemplateKey={TemplateKey}, ProviderMessageId={ProviderMessageId}",
+                request.MessageId,
+                request.TemplateKey,
+                providerMessageId);
 
             return new EmailSendResult
             {
                 IsSuccess = true,
                 IsAmbiguous = false,
-                ProviderMessageId = providerMessageId,
-                ProviderErrorCode = null,
-                ProviderErrorMessage = null
+                ProviderMessageId = providerMessageId
             };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (TimeoutException exception)
         {
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.NetworkTimeout,
-                ProviderErrorMessage = exception.Message
-            };
+            return Failure(
+                isAmbiguous: true,
+                providerErrorCode: "SMTP_TIMEOUT",
+                providerErrorMessage: exception.Message);
         }
-        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        catch (MailKit.CommandException exception)
         {
-            // Important:
-            // A timeout-like cancellation without an external caller cancellation
-            // may mean we lost certainty during send. We treat it as ambiguous.
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = true,
-                ProviderErrorCode = NotificationServiceErrorCodes.AmbiguousTimeout,
-                ProviderErrorMessage = exception.Message
-            };
+            return Failure(
+                isAmbiguous: false,
+                providerErrorCode: $"SMTP_COMMAND_{exception.Message}",
+                providerErrorMessage: exception.Message);
         }
-        catch (SocketException exception)
+        catch (MailKit.ProtocolException exception)
         {
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.NetworkTimeout,
-                ProviderErrorMessage = exception.Message
-            };
-        }
-        catch (ServiceNotConnectedException exception)
-        {
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.ProviderTemporaryUnavailable,
-                ProviderErrorMessage = exception.Message
-            };
-        }
-        catch (ServiceNotAuthenticatedException exception)
-        {
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.ProviderRejected,
-                ProviderErrorMessage = exception.Message
-            };
-        }
-        catch (SmtpCommandException exception)
-        {
-            return MapSmtpCommandException(exception);
-        }
-        catch (SmtpProtocolException exception)
-        {
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.ProviderTemporaryUnavailable,
-                ProviderErrorMessage = exception.Message
-            };
+            return Failure(
+                isAmbiguous: true,
+                providerErrorCode: "SMTP_PROTOCOL",
+                providerErrorMessage: exception.Message);
         }
         catch (Exception exception)
         {
-            // Important:
-            // Unknown transport/provider failures are normalized here so the
-            // classifier and retry policy receive a stable shape.
-            return new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.ProviderRejected,
-                ProviderErrorMessage = exception.Message
-            };
+            _logger.LogError(
+                exception,
+                "Unexpected email send failure. MessageId={MessageId}, TemplateKey={TemplateKey}",
+                request.MessageId,
+                request.TemplateKey);
+
+            return Failure(
+                isAmbiguous: false,
+                providerErrorCode: "SMTP_UNKNOWN",
+                providerErrorMessage: exception.Message);
         }
     }
 
-    private MimeMessage BuildMimeMessage(EmailSendRequest request)
+    private MimeMessage BuildMessage(EmailSendRequest request)
     {
-        if (string.IsNullOrWhiteSpace(_options.FromEmail))
-        {
-            throw new InvalidOperationException("NotificationEmailOptions.FromEmail is required.");
-        }
-
         MimeMessage message = new();
-        message.From.Add(new MailboxAddress(_options.FromName, _options.FromEmail));
-        message.To.Add(MailboxAddress.Parse(request.ToEmail));
-        message.Subject = request.Subject ?? string.Empty;
 
-        // Important:
-        // Phase 1 keeps the renderer output simple and sends it as plain text.
-        // You can switch this to HTML later if your renderer starts producing HTML.
-        message.Body = new TextPart("plain")
-        {
-            Text = request.Body
-        };
+        message.From.Add(new MailboxAddress(
+            _options.FromName,
+            _options.FromEmail));
+
+        message.To.Add(MailboxAddress.Parse(request.ToEmail));
+
+        message.Subject = request.Subject;
+
+        message.Headers.Add("X-CommercialNews-MessageId", request.MessageId);
+        message.Headers.Add("X-CommercialNews-TemplateKey", request.TemplateKey);
 
         if (!string.IsNullOrWhiteSpace(request.CorrelationId))
         {
             message.Headers.Add("X-Correlation-Id", request.CorrelationId);
         }
 
+        message.Body = new BodyBuilder
+        {
+            HtmlBody = request.Body
+        }.ToMessageBody();
+
         return message;
     }
 
-    private SecureSocketOptions ResolveSocketOptions()
+    private EmailSendResult Failure(
+        bool isAmbiguous,
+        string providerErrorCode,
+        string? providerErrorMessage)
     {
-        if (_options.UseSsl)
-        {
-            return SecureSocketOptions.SslOnConnect;
-        }
+        _logger.LogWarning(
+            "Email send failed. ProviderErrorCode={ProviderErrorCode}, IsAmbiguous={IsAmbiguous}",
+            providerErrorCode,
+            isAmbiguous);
 
-        // Important:
-        // StartTlsWhenAvailable is a practical phase-1 default when SSL-on-connect
-        // is not explicitly required.
-        return SecureSocketOptions.StartTlsWhenAvailable;
+        return new EmailSendResult
+        {
+            IsSuccess = false,
+            IsAmbiguous = isAmbiguous,
+            ProviderErrorCode = providerErrorCode,
+            ProviderErrorMessage = SanitizeErrorMessage(providerErrorMessage)
+        };
     }
 
-    private static EmailSendResult MapSmtpCommandException(SmtpCommandException exception)
+    private static void ValidateRequest(EmailSendRequest request)
     {
-        return exception.StatusCode switch
+        if (string.IsNullOrWhiteSpace(request.MessageId))
         {
-            SmtpStatusCode.MailboxUnavailable => new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.Smtp550,
-                ProviderErrorMessage = exception.Message
-            },
+            throw new ArgumentException("Message id is required.", nameof(request));
+        }
 
-            SmtpStatusCode.TransactionFailed => new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.Smtp451,
-                ProviderErrorMessage = exception.Message
-            },
+        if (string.IsNullOrWhiteSpace(request.ToEmail))
+        {
+            throw new ArgumentException("Recipient email is required.", nameof(request));
+        }
 
-            SmtpStatusCode.ServiceNotAvailable => new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.Smtp421,
-                ProviderErrorMessage = exception.Message
-            },
+        if (string.IsNullOrWhiteSpace(request.TemplateKey))
+        {
+            throw new ArgumentException("Template key is required.", nameof(request));
+        }
 
-            _ => new EmailSendResult
-            {
-                IsSuccess = false,
-                IsAmbiguous = false,
-                ProviderErrorCode = NotificationServiceErrorCodes.ProviderRejected,
-                ProviderErrorMessage = exception.Message
-            }
-        };
+        if (string.IsNullOrWhiteSpace(request.Subject))
+        {
+            throw new ArgumentException("Email subject is required.", nameof(request));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Body))
+        {
+            throw new ArgumentException("Email body is required.", nameof(request));
+        }
+    }
+
+    private static SecureSocketOptions GetSecureSocketOptions(NotificationEmailOptions options)
+    {
+        return options.UseSsl
+            ? SecureSocketOptions.SslOnConnect
+            : SecureSocketOptions.StartTlsWhenAvailable;
+    }
+
+    private static string SanitizeErrorMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "Email provider error.";
+        }
+
+        return message.Length <= 500
+            ? message
+            : message[..500];
     }
 }
