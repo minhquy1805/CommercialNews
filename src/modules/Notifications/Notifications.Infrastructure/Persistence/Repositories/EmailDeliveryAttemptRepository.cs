@@ -5,7 +5,6 @@ using Notifications.Application.Ports.Persistence;
 using Notifications.Application.Ports.Transactions;
 using Notifications.Domain.Entities;
 using Notifications.Infrastructure.Persistence.Exceptions;
-using Notifications.Infrastructure.Persistence.Sql;
 
 namespace Notifications.Infrastructure.Persistence.Repositories;
 
@@ -16,6 +15,9 @@ public sealed class EmailDeliveryAttemptRepository : IEmailDeliveryAttemptReposi
 
     private const string EmailDeliveryAttemptSelectByEmailDeliveryIdProc =
         "[notifications].[EmailDeliveryAttempt_SelectByEmailDeliveryId]";
+
+    private const string EmailDeliveryAttemptUpdateOutcomeProc = 
+        "[notifications].[EmailDeliveryAttempt_UpdateOutcome]";
 
     private readonly INotificationsUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
@@ -115,6 +117,70 @@ public sealed class EmailDeliveryAttemptRepository : IEmailDeliveryAttemptReposi
             {
                 await ownedConnection.DisposeAsync();
             }
+        }
+    }
+
+    public async Task<int> UpdateOutcomeAsync(
+        EmailDeliveryAttempt emailDeliveryAttempt,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(emailDeliveryAttempt);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(EmailDeliveryAttemptUpdateOutcomeProc);
+
+            SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
+            {
+                Direction = ParameterDirection.Output
+            };
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@EmailDeliveryAttemptId", SqlDbType.BigInt)
+                {
+                    Value = emailDeliveryAttempt.EmailDeliveryAttemptId
+                },
+                new SqlParameter("@FinishedAt", SqlDbType.DateTime2)
+                {
+                    Value = ToDbValue(emailDeliveryAttempt.FinishedAt)
+                },
+                new SqlParameter("@Outcome", SqlDbType.VarChar, 30)
+                {
+                    Value = emailDeliveryAttempt.Outcome
+                },
+                new SqlParameter("@IsAmbiguous", SqlDbType.Bit)
+                {
+                    Value = emailDeliveryAttempt.IsAmbiguous
+                },
+                new SqlParameter("@ProviderMessageId", SqlDbType.NVarChar, 200)
+                {
+                    Value = ToDbValue(emailDeliveryAttempt.ProviderMessageId)
+                },
+                new SqlParameter("@ProviderErrorCode", SqlDbType.NVarChar, 100)
+                {
+                    Value = ToDbValue(emailDeliveryAttempt.ProviderErrorCode)
+                },
+                new SqlParameter("@ErrorClass", SqlDbType.VarChar, 30)
+                {
+                    Value = ToDbValue(emailDeliveryAttempt.ErrorClass)
+                },
+                new SqlParameter("@ErrorDetail", SqlDbType.NVarChar, 2000)
+                {
+                    Value = ToDbValue(emailDeliveryAttempt.ErrorDetail)
+                },
+                affectedRowsParameter
+            ]);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            return affectedRowsParameter.Value is DBNull
+                ? 0
+                : Convert.ToInt32(affectedRowsParameter.Value);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
         }
     }
 

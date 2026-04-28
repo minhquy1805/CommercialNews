@@ -34,14 +34,8 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
     private const string EmailDeliveryMarkDeadProc =
         "[notifications].[EmailDelivery_MarkDead]";
 
-    private const string EmailDeliveryMarkSuppressedProc =
-        "[notifications].[EmailDelivery_MarkSuppressed]";
-
-    private const string EmailDeliveryMarkAmbiguousProc =
-        "[notifications].[EmailDelivery_MarkAmbiguous]";
-
-    private const string EmailDeliveryResetToQueuedProc =
-        "[notifications].[EmailDelivery_ResetToQueued]";
+    private const string EmailDeliveryRequeueForRetryProc =
+        "[notifications].[EmailDelivery_RequeueForRetry]";
 
     private readonly INotificationsUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
@@ -79,7 +73,7 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
                 new SqlParameter("@RecipientUserId", SqlDbType.BigInt) { Value = ToDbValue(emailDelivery.RecipientUserId) },
                 new SqlParameter("@ToEmail", SqlDbType.NVarChar, 320) { Value = emailDelivery.ToEmail },
                 new SqlParameter("@TemplateKey", SqlDbType.NVarChar, 100) { Value = emailDelivery.TemplateKey },
-                new SqlParameter("@VariablesJson", SqlDbType.NVarChar) { Value = emailDelivery.VariablesJson },
+                new SqlParameter("@VariablesJson", SqlDbType.NVarChar, -1) { Value = emailDelivery.VariablesJson },
                 new SqlParameter("@Provider", SqlDbType.VarChar, 30) { Value = emailDelivery.Provider },
                 new SqlParameter("@Priority", SqlDbType.TinyInt) { Value = emailDelivery.Priority },
                 new SqlParameter("@CorrelationId", SqlDbType.NVarChar, 100) { Value = ToDbValue(emailDelivery.CorrelationId) },
@@ -226,45 +220,30 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
         DateTime nowUtc,
         CancellationToken cancellationToken = default)
     {
-        SqlConnection? ownedConnection = null;
-
         try
         {
-            (SqlCommand command, SqlConnection? connection) =
-                await CreateReadCommandAsync(EmailDeliveryClaimPendingProc, cancellationToken);
+            using SqlCommand command = CreateTransactionalCommand(EmailDeliveryClaimPendingProc);
 
-            ownedConnection = connection;
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@TopN", SqlDbType.Int) { Value = topN },
+                new SqlParameter("@Now", SqlDbType.DateTime2) { Value = nowUtc }
+            ]);
 
-            using (command)
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            List<EmailDelivery> items = [];
+
+            while (await reader.ReadAsync(cancellationToken))
             {
-                command.Parameters.AddRange(
-                [
-                    new SqlParameter("@TopN", SqlDbType.Int) { Value = topN },
-                    new SqlParameter("@Now", SqlDbType.DateTime2) { Value = nowUtc }
-                ]);
-
-                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-                List<EmailDelivery> items = [];
-
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    items.Add(MapEmailDelivery(reader));
-                }
-
-                return items;
+                items.Add(MapEmailDelivery(reader));
             }
+
+            return items;
         }
         catch (SqlException exception)
         {
             throw _sqlExceptionTranslator.Translate(exception);
-        }
-        finally
-        {
-            if (ownedConnection is not null)
-            {
-                await ownedConnection.DisposeAsync();
-            }
         }
     }
 
@@ -371,85 +350,13 @@ public sealed class EmailDeliveryRepository : IEmailDeliveryRepository
         }
     }
 
-    public async Task<int> MarkSuppressedAsync(
-        long emailDeliveryId,
-        string? lastErrorCode,
-        string? lastErrorClass,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            using SqlCommand command = CreateTransactionalCommand(EmailDeliveryMarkSuppressedProc);
-
-            SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
-            {
-                Direction = ParameterDirection.Output
-            };
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@EmailDeliveryId", SqlDbType.BigInt) { Value = emailDeliveryId },
-                new SqlParameter("@LastErrorCode", SqlDbType.NVarChar, 100) { Value = ToDbValue(lastErrorCode) },
-                new SqlParameter("@LastErrorClass", SqlDbType.VarChar, 30) { Value = ToDbValue(lastErrorClass) },
-                affectedRowsParameter
-            ]);
-
-            await command.ExecuteNonQueryAsync(cancellationToken);
-
-            return affectedRowsParameter.Value is DBNull
-                ? 0
-                : Convert.ToInt32(affectedRowsParameter.Value);
-        }
-        catch (SqlException exception)
-        {
-            throw _sqlExceptionTranslator.Translate(exception);
-        }
-    }
-
-    public async Task<int> MarkAmbiguousAsync(
-        long emailDeliveryId,
-        DateTime? nextRetryAt,
-        string? lastErrorCode,
-        string? lastErrorClass,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            using SqlCommand command = CreateTransactionalCommand(EmailDeliveryMarkAmbiguousProc);
-
-            SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
-            {
-                Direction = ParameterDirection.Output
-            };
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@EmailDeliveryId", SqlDbType.BigInt) { Value = emailDeliveryId },
-                new SqlParameter("@NextRetryAt", SqlDbType.DateTime2) { Value = ToDbValue(nextRetryAt) },
-                new SqlParameter("@LastErrorCode", SqlDbType.NVarChar, 100) { Value = ToDbValue(lastErrorCode) },
-                new SqlParameter("@LastErrorClass", SqlDbType.VarChar, 30) { Value = ToDbValue(lastErrorClass) },
-                affectedRowsParameter
-            ]);
-
-            await command.ExecuteNonQueryAsync(cancellationToken);
-
-            return affectedRowsParameter.Value is DBNull
-                ? 0
-                : Convert.ToInt32(affectedRowsParameter.Value);
-        }
-        catch (SqlException exception)
-        {
-            throw _sqlExceptionTranslator.Translate(exception);
-        }
-    }
-
-    public async Task<int> ResetToQueuedAsync(
+    public async Task<int> RequeueForRetryAsync(
         long emailDeliveryId,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            using SqlCommand command = CreateTransactionalCommand(EmailDeliveryResetToQueuedProc);
+            using SqlCommand command = CreateTransactionalCommand(EmailDeliveryRequeueForRetryProc);
 
             SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
             {

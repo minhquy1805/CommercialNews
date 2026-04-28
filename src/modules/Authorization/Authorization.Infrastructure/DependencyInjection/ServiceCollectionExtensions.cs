@@ -31,8 +31,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<AuthorizationUnitOfWork>();
         services.AddScoped<IAuthorizationUnitOfWork>(sp =>
             sp.GetRequiredService<AuthorizationUnitOfWork>());
-        services.AddScoped<ISqlUnitOfWork>(sp =>
-            sp.GetRequiredService<AuthorizationUnitOfWork>());
 
         services.AddScoped<IRoleRepository, RoleRepository>();
         services.AddScoped<IPermissionRepository, PermissionRepository>();
