@@ -1,6 +1,7 @@
 using CommercialNews.BuildingBlocks.Outbox.Exceptions;
 using CommercialNews.BuildingBlocks.Outbox.Persistence;
 using CommercialNews.BuildingBlocks.Outbox.Ports;
+using CommercialNews.BuildingBlocks.Outbox.Runtime;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Options;
 using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
@@ -19,7 +20,8 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.Configure<SqlOptions>(configuration.GetSection("Sql"));
+        services.Configure<SqlOptions>(
+            configuration.GetSection("Sql"));
 
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
 
@@ -27,7 +29,17 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPublicIdGenerator, UlidPublicIdGenerator>();
 
         services.AddSingleton<OutboxSqlExceptionTranslator>();
+
         services.AddScoped<IOutboxMessageRepository, OutboxMessageRepository>();
+        services.AddScoped<IOutboxWriter, OutboxWriter>();
+
+        services.AddScoped<OutboxUnitOfWork>();
+        services.AddScoped<IOutboxUnitOfWork>(sp =>
+            sp.GetRequiredService<OutboxUnitOfWork>());
+
+        services.AddScoped<IOutboxDispatcher, OutboxDispatcher>();
+        services.AddScoped<IOutboxBatchProcessor, OutboxBatchProcessor>();
+        services.AddScoped<IOutboxMessageProcessor, OutboxMessageProcessor>();
 
         return services;
     }

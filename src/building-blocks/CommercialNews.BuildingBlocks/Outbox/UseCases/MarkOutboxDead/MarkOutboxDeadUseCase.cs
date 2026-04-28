@@ -5,7 +5,6 @@ using CommercialNews.BuildingBlocks.Outbox.Errors;
 using CommercialNews.BuildingBlocks.Outbox.Ports;
 using CommercialNews.BuildingBlocks.Outbox.Validation.MarkOutboxDead;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
-using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
 namespace CommercialNews.BuildingBlocks.Outbox.UseCases.MarkOutboxDead;
@@ -17,14 +16,15 @@ namespace CommercialNews.BuildingBlocks.Outbox.UseCases.MarkOutboxDead;
 public sealed class MarkOutboxDeadUseCase : IMarkOutboxDeadUseCase
 {
     private readonly IOutboxMessageRepository _outboxMessageRepository;
-    private readonly ISqlUnitOfWork _unitOfWork;
+    private readonly IOutboxUnitOfWork _unitOfWork;
 
     public MarkOutboxDeadUseCase(
         IOutboxMessageRepository outboxMessageRepository,
-        ISqlUnitOfWork unitOfWork)
+        IOutboxUnitOfWork unitOfWork)
     {
         _outboxMessageRepository = outboxMessageRepository
             ?? throw new ArgumentNullException(nameof(outboxMessageRepository));
+
         _unitOfWork = unitOfWork
             ?? throw new ArgumentNullException(nameof(unitOfWork));
     }
@@ -53,15 +53,6 @@ public sealed class MarkOutboxDeadUseCase : IMarkOutboxDeadUseCase
 
             if (string.Equals(
                     outboxMessage.Status,
-                    OutboxMessageStatus.Published,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                return Result<MarkOutboxDeadResponse>.Failure(
-                    OutboxErrors.Message.InvalidState);
-            }
-
-            if (string.Equals(
-                    outboxMessage.Status,
                     OutboxMessageStatus.Dead,
                     StringComparison.OrdinalIgnoreCase))
             {
@@ -72,6 +63,12 @@ public sealed class MarkOutboxDeadUseCase : IMarkOutboxDeadUseCase
                         MessageId = outboxMessage.MessageId,
                         Status = outboxMessage.Status
                     });
+            }
+
+            if (!CanMarkDead(outboxMessage.Status))
+            {
+                return Result<MarkOutboxDeadResponse>.Failure(
+                    OutboxErrors.Message.InvalidState);
             }
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -115,6 +112,12 @@ public sealed class MarkOutboxDeadUseCase : IMarkOutboxDeadUseCase
             return Result<MarkOutboxDeadResponse>.Failure(
                 OutboxErrors.DependencyUnavailable);
         }
+    }
+
+    private static bool CanMarkDead(string status)
+    {
+        return string.Equals(status, OutboxMessageStatus.Publishing, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, OutboxMessageStatus.Failed, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeOptional(string? value)
