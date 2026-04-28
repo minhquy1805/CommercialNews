@@ -62,7 +62,10 @@ public sealed class GetEmailDeliveriesUseCase : IGetEmailDeliveriesUseCase
                     .ToArray(),
                 Page = pagedResult.Page,
                 PageSize = pagedResult.PageSize,
-                TotalItems = pagedResult.TotalItems
+                TotalItems = pagedResult.TotalItems,
+                TotalPages = pagedResult.PageSize <= 0
+                    ? 0
+                    : (int)Math.Ceiling((double)pagedResult.TotalItems / pagedResult.PageSize)
             };
 
             return Result<GetEmailDeliveriesResponse>.Success(response);
