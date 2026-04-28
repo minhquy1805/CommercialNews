@@ -11,4 +11,8 @@ public interface IEmailDeliveryAttemptRepository
     Task<IReadOnlyList<EmailDeliveryAttempt>> GetByEmailDeliveryIdAsync(
         long emailDeliveryId,
         CancellationToken cancellationToken = default);
+
+    Task<int> UpdateOutcomeAsync(
+        EmailDeliveryAttempt emailDeliveryAttempt,
+        CancellationToken cancellationToken = default);
 }
