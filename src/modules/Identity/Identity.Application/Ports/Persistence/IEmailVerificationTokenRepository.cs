@@ -4,7 +4,7 @@ namespace Identity.Application.Ports.Persistence;
 
 public interface IEmailVerificationTokenRepository
 {
-    Task InsertAsync(
+    Task<long> InsertAsync(
         EmailVerificationToken token,
         CancellationToken cancellationToken = default);
 

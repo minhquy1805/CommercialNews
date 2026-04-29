@@ -115,11 +115,13 @@ public sealed class ResetPasswordUseCase : IResetPasswordUseCase
                     "PasswordReset",
                     cancellationToken);
 
-                await _outboxWriter.EnqueuePasswordChangedEmailAsync(
+                await _outboxWriter.EnqueuePasswordChangedAsync(
+                    unitOfWork: _unitOfWork,
                     userId: user.UserId,
                     userPublicId: user.PublicId,
                     email: user.Email,
                     fullName: user.FullName,
+                    reason: "PasswordReset",
                     occurredAtUtc: nowUtc,
                     cancellationToken: cancellationToken);
 
