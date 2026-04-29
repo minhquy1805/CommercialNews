@@ -4,7 +4,7 @@ namespace Identity.Application.Ports.Persistence;
 
 public interface IPasswordResetTokenRepository
 {
-    Task InsertAsync(
+    Task<long> InsertAsync(
         PasswordResetToken token,
         CancellationToken cancellationToken = default);
 

@@ -2,6 +2,8 @@ using System.Text.Json;
 using CommercialNews.BuildingBlocks.Outbox.Models;
 using CommercialNews.BuildingBlocks.Outbox.Ports;
 using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
+using Identity.Application.Outbox;
+using Identity.Application.Outbox.Payloads;
 using Identity.Application.Ports.Persistence;
 using Identity.Application.Ports.Services;
 
@@ -11,199 +13,217 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
 {
     private const string AggregateTypeUserAccount = "UserAccount";
 
-    private const string VerificationEmailRequestedEventType =
-        "Identity.VerificationEmailRequested";
-
-    private const string PasswordChangedEmailRequestedEventType =
-        "Identity.PasswordChangedEmailRequested";
-
-    private const string PasswordResetRequestedEventType =
-        "Identity.PasswordResetRequested";
-
-    private const string DevVerifyEmailEndpoint =
-        "http://localhost:5226/api/v1/identity/auth/verify-email";
-
-    private const string DevResetPasswordEndpoint =
-        "http://localhost:5226/api/v1/identity/auth/reset-password";
-
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions SerializerOptions =
+        new(JsonSerializerDefaults.Web);
 
     private readonly IOutboxMessageRepository _outboxMessageRepository;
     private readonly IPublicIdGenerator _publicIdGenerator;
-    private readonly IIdentityUnitOfWork _unitOfWork;
 
     public IdentityOutboxWriter(
         IOutboxMessageRepository outboxMessageRepository,
-        IPublicIdGenerator publicIdGenerator,
-        IIdentityUnitOfWork unitOfWork)
+        IPublicIdGenerator publicIdGenerator)
     {
         _outboxMessageRepository = outboxMessageRepository
             ?? throw new ArgumentNullException(nameof(outboxMessageRepository));
+
         _publicIdGenerator = publicIdGenerator
             ?? throw new ArgumentNullException(nameof(publicIdGenerator));
-        _unitOfWork = unitOfWork
-            ?? throw new ArgumentNullException(nameof(unitOfWork));
     }
 
-    public async Task EnqueueVerificationEmailAsync(
+    public async Task<long> EnqueueVerificationEmailRequestedAsync(
+        IIdentityUnitOfWork unitOfWork,
         long userId,
         string userPublicId,
         string email,
         string? fullName,
+        long verificationTokenId,
         string rawVerificationToken,
+        DateTime expiresAtUtc,
         DateTime occurredAtUtc,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
         ValidateUserEnvelope(userId, userPublicId, email, occurredAtUtc);
+        ValidatePositiveId(verificationTokenId, nameof(verificationTokenId));
+        ValidateRequired(rawVerificationToken, nameof(rawVerificationToken));
+        ValidateRequiredDate(expiresAtUtc, nameof(expiresAtUtc));
 
-        if (string.IsNullOrWhiteSpace(rawVerificationToken))
-        {
-            throw new ArgumentException("Raw verification token is required.", nameof(rawVerificationToken));
-        }
+        string businessDedupeKey =
+            $"identity:verification-email:{userId}:{verificationTokenId}";
 
-        string verificationUrl = BuildVerificationUrl(rawVerificationToken);
+        var payload = new VerificationEmailRequestedIntegrationEventPayload(
+            UserId: userId,
+            UserPublicId: userPublicId.Trim(),
+            Email: email.Trim(),
+            FullName: NormalizeOptional(fullName),
+            VerificationTokenId: verificationTokenId,
+            RawVerificationToken: rawVerificationToken.Trim(),
+            ExpiresAtUtc: expiresAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
 
-        string payload = JsonSerializer.Serialize(
-            new
-            {
-                businessDedupeKey = $"identity:verify-email:{userId}:{rawVerificationToken}",
-                recipientUserId = userId,
-                toEmail = email.Trim(),
-                templateKey = "VerifyEmail",
-                templateVersion = 1,
-                subject = "Verify your email address",
-                provider = "smtp",
-                correlationId = userPublicId.Trim(),
-                variables = new
-                {
-                    UserName = ResolveDisplayName(fullName, email),
-                    VerificationUrl = verificationUrl
-                }
-            },
-            SerializerOptions);
-
-        OutboxMessage outboxMessage = OutboxMessage.Create(
-            messageId: _publicIdGenerator.NewId(),
-            eventType: VerificationEmailRequestedEventType,
-            aggregateType: AggregateTypeUserAccount,
-            aggregateId: userId.ToString(),
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.VerificationEmailRequested,
+            userId: userId,
+            userPublicId: userPublicId,
             payload: payload,
-            occurredAt: occurredAtUtc,
-            priority: 5,
-            aggregatePublicId: userPublicId.Trim(),
-            aggregateVersion: null,
-            headers: null,
-            correlationId: userPublicId.Trim(),
-            initiatorUserId: userId);
-
-        await _outboxMessageRepository.InsertAsync(
-            _unitOfWork,
-            outboxMessage,
-            cancellationToken);
+            occurredAtUtc: occurredAtUtc,
+            priority: 1,
+            cancellationToken: cancellationToken);
     }
 
-    public async Task EnqueuePasswordChangedEmailAsync(
+    public async Task<long> EnqueuePasswordResetRequestedAsync(
+        IIdentityUnitOfWork unitOfWork,
         long userId,
         string userPublicId,
         string email,
         string? fullName,
-        DateTime occurredAtUtc,
-        CancellationToken cancellationToken = default)
-    {
-        ValidateUserEnvelope(userId, userPublicId, email, occurredAtUtc);
-
-        string payload = JsonSerializer.Serialize(
-            new
-            {
-                businessDedupeKey = $"identity:password-changed:{userId}:{occurredAtUtc:O}",
-                recipientUserId = userId,
-                toEmail = email.Trim(),
-                templateKey = "PasswordChanged",
-                templateVersion = 1,
-                subject = "Your password was changed",
-                provider = "smtp",
-                correlationId = userPublicId.Trim(),
-                variables = new
-                {
-                    UserName = ResolveDisplayName(fullName, email),
-                    ChangedAtUtc = occurredAtUtc.ToString("O")
-                }
-            },
-            SerializerOptions);
-
-        OutboxMessage outboxMessage = OutboxMessage.Create(
-            messageId: _publicIdGenerator.NewId(),
-            eventType: PasswordChangedEmailRequestedEventType,
-            aggregateType: AggregateTypeUserAccount,
-            aggregateId: userId.ToString(),
-            payload: payload,
-            occurredAt: occurredAtUtc,
-            priority: 5,
-            aggregatePublicId: userPublicId.Trim(),
-            aggregateVersion: null,
-            headers: null,
-            correlationId: userPublicId.Trim(),
-            initiatorUserId: userId);
-
-        await _outboxMessageRepository.InsertAsync(
-            _unitOfWork,
-            outboxMessage,
-            cancellationToken);
-    }
-
-    public async Task EnqueuePasswordResetEmailAsync(
-        long userId,
-        string userPublicId,
-        string email,
-        string? fullName,
+        long resetTokenId,
         string rawResetToken,
+        DateTime expiresAtUtc,
         DateTime occurredAtUtc,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
         ValidateUserEnvelope(userId, userPublicId, email, occurredAtUtc);
+        ValidatePositiveId(resetTokenId, nameof(resetTokenId));
+        ValidateRequired(rawResetToken, nameof(rawResetToken));
+        ValidateRequiredDate(expiresAtUtc, nameof(expiresAtUtc));
 
-        if (string.IsNullOrWhiteSpace(rawResetToken))
-        {
-            throw new ArgumentException("Raw reset token is required.", nameof(rawResetToken));
-        }
+        string businessDedupeKey =
+            $"identity:password-reset-email:{userId}:{resetTokenId}";
 
-        string resetUrl = BuildResetUrl(rawResetToken);
+        var payload = new PasswordResetRequestedIntegrationEventPayload(
+            UserId: userId,
+            UserPublicId: userPublicId.Trim(),
+            Email: email.Trim(),
+            FullName: NormalizeOptional(fullName),
+            ResetTokenId: resetTokenId,
+            RawResetToken: rawResetToken.Trim(),
+            ExpiresAtUtc: expiresAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
 
-        string payload = JsonSerializer.Serialize(
-            new
-            {
-                businessDedupeKey = $"identity:password-reset:{userId}:{rawResetToken}",
-                recipientUserId = userId,
-                toEmail = email.Trim(),
-                templateKey = "ResetPassword",
-                templateVersion = 1,
-                subject = "Reset your password",
-                provider = "smtp",
-                correlationId = userPublicId.Trim(),
-                variables = new
-                {
-                    UserName = ResolveDisplayName(fullName, email),
-                    ResetUrl = resetUrl
-                }
-            },
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.PasswordResetRequested,
+            userId: userId,
+            userPublicId: userPublicId,
+            payload: payload,
+            occurredAtUtc: occurredAtUtc,
+            priority: 1,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<long> EnqueuePasswordChangedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long userId,
+        string userPublicId,
+        string email,
+        string? fullName,
+        string reason,
+        DateTime occurredAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateUserEnvelope(userId, userPublicId, email, occurredAtUtc);
+        ValidateRequired(reason, nameof(reason));
+
+        string normalizedReason = reason.Trim();
+
+        string businessDedupeKey =
+            $"identity:password-changed:{userId}:{occurredAtUtc.Ticks}:{normalizedReason}";
+
+        var payload = new PasswordChangedIntegrationEventPayload(
+            UserId: userId,
+            UserPublicId: userPublicId.Trim(),
+            Email: email.Trim(),
+            FullName: NormalizeOptional(fullName),
+            Reason: normalizedReason,
+            ChangedAtUtc: occurredAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.PasswordChanged,
+            userId: userId,
+            userPublicId: userPublicId,
+            payload: payload,
+            occurredAtUtc: occurredAtUtc,
+            priority: 3,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<long> EnqueueEmailVerifiedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long userId,
+        string userPublicId,
+        string email,
+        string? fullName,
+        long verificationTokenId,
+        DateTime verifiedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateUserEnvelope(userId, userPublicId, email, verifiedAtUtc);
+        ValidatePositiveId(verificationTokenId, nameof(verificationTokenId));
+
+        string businessDedupeKey =
+            $"identity:email-verified:{userId}:{verificationTokenId}";
+
+        var payload = new EmailVerifiedIntegrationEventPayload(
+            UserId: userId,
+            UserPublicId: userPublicId.Trim(),
+            Email: email.Trim(),
+            FullName: NormalizeOptional(fullName),
+            VerificationTokenId: verificationTokenId,
+            VerifiedAtUtc: verifiedAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.EmailVerified,
+            userId: userId,
+            userPublicId: userPublicId,
+            payload: payload,
+            occurredAtUtc: verifiedAtUtc,
+            priority: 5,
+            cancellationToken: cancellationToken);
+    }
+
+    private async Task<long> InsertOutboxMessageAsync<TPayload>(
+        IIdentityUnitOfWork unitOfWork,
+        string eventType,
+        long userId,
+        string userPublicId,
+        TPayload payload,
+        DateTime occurredAtUtc,
+        byte priority,
+        CancellationToken cancellationToken)
+    {
+        string payloadJson = JsonSerializer.Serialize(
+            payload,
             SerializerOptions);
 
         OutboxMessage outboxMessage = OutboxMessage.Create(
             messageId: _publicIdGenerator.NewId(),
-            eventType: PasswordResetRequestedEventType,
+            eventType: eventType,
             aggregateType: AggregateTypeUserAccount,
             aggregateId: userId.ToString(),
-            payload: payload,
+            payload: payloadJson,
             occurredAt: occurredAtUtc,
-            priority: 5,
+            priority: priority,
             aggregatePublicId: userPublicId.Trim(),
             aggregateVersion: null,
             headers: null,
             correlationId: userPublicId.Trim(),
             initiatorUserId: userId);
 
-        await _outboxMessageRepository.InsertAsync(
-            _unitOfWork,
+        return await _outboxMessageRepository.InsertAsync(
+            unitOfWork,
             outboxMessage,
             cancellationToken);
     }
@@ -219,36 +239,45 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
             throw new ArgumentOutOfRangeException(nameof(userId));
         }
 
-        if (string.IsNullOrWhiteSpace(userPublicId))
-        {
-            throw new ArgumentException("User public id is required.", nameof(userPublicId));
-        }
+        ValidateRequired(userPublicId, nameof(userPublicId));
+        ValidateRequired(email, nameof(email));
+        ValidateRequiredDate(occurredAtUtc, nameof(occurredAtUtc));
+    }
 
-        if (string.IsNullOrWhiteSpace(email))
+    private static void ValidatePositiveId(
+        long value,
+        string parameterName)
+    {
+        if (value <= 0)
         {
-            throw new ArgumentException("Email is required.", nameof(email));
-        }
-
-        if (occurredAtUtc == default)
-        {
-            throw new ArgumentException("OccurredAtUtc is required.", nameof(occurredAtUtc));
+            throw new ArgumentOutOfRangeException(parameterName);
         }
     }
 
-    private static string ResolveDisplayName(string? fullName, string email)
+    private static void ValidateRequired(
+        string? value,
+        string parameterName)
     {
-        return string.IsNullOrWhiteSpace(fullName)
-            ? email.Trim()
-            : fullName.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException($"{parameterName} is required.", parameterName);
+        }
     }
 
-    private static string BuildVerificationUrl(string rawVerificationToken)
+    private static void ValidateRequiredDate(
+        DateTime value,
+        string parameterName)
     {
-        return $"{DevVerifyEmailEndpoint}?token={Uri.EscapeDataString(rawVerificationToken)}";
+        if (value == default)
+        {
+            throw new ArgumentException($"{parameterName} is required.", parameterName);
+        }
     }
 
-    private static string BuildResetUrl(string rawResetToken)
+    private static string? NormalizeOptional(string? value)
     {
-        return $"{DevResetPasswordEndpoint}?token={Uri.EscapeDataString(rawResetToken)}";
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }

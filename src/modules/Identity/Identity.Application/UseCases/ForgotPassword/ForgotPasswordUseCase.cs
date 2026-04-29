@@ -71,11 +71,14 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
             string rawResetToken = _rawTokenGenerator.Generate();
             byte[] resetTokenHash = _tokenHashProvider.Hash(rawResetToken);
 
+            DateTime resetTokenExpiresAtUtc =
+                nowUtc.AddHours(_tokenOptions.PasswordResetTokenLifetimeHours);
+
             PasswordResetToken resetToken = PasswordResetToken.Create(
                 userId: user.UserId,
                 tokenHash: resetTokenHash,
                 createdAt: nowUtc,
-                expiresAt: nowUtc.AddHours(_tokenOptions.PasswordResetTokenLifetimeHours),
+                expiresAt: resetTokenExpiresAtUtc,
                 createdIp: null,
                 correlationId: null);
 
@@ -88,22 +91,23 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
                     nowUtc,
                     cancellationToken);
 
-                await _passwordResetTokenRepository.InsertAsync(
+                long resetTokenId = await _passwordResetTokenRepository.InsertAsync(
                     resetToken,
                     cancellationToken);
 
-                await _outboxWriter.EnqueuePasswordResetEmailAsync(
+                await _outboxWriter.EnqueuePasswordResetRequestedAsync(
+                    unitOfWork: _unitOfWork,
                     userId: user.UserId,
                     userPublicId: user.PublicId,
                     email: user.Email,
                     fullName: user.FullName,
+                    resetTokenId: resetTokenId,
                     rawResetToken: rawResetToken,
+                    expiresAtUtc: resetToken.ExpiresAt,
                     occurredAtUtc: nowUtc,
                     cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
-
-                Console.WriteLine($"[DEV][RESET] Email={user.Email}; PublicId={user.PublicId}; Token={rawResetToken}");
 
                 return Result<ForgotPasswordResponseDto>.Success(BuildGenericResponse());
             }

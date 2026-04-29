@@ -12,6 +12,19 @@ services:
       - cn_mssql_data:/var/opt/mssql
     restart: unless-stopped
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: cn-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_DEFAULT_PASS}"
+    volumes:
+      - cn_rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+
 volumes:
   cn_mssql_data:
-  cn_mongo_data:
+  cn_rabbitmq_data:

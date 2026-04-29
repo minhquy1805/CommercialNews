@@ -18,19 +18,22 @@ public sealed class VerifyEmailUseCase : IVerifyEmailUseCase
     private readonly IUserAccountRepository _userAccountRepository;
     private readonly IIdentityUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IIdentityOutboxWriter _outboxWriter;
 
     public VerifyEmailUseCase(
         ITokenHashProvider tokenHashProvider,
         IEmailVerificationTokenRepository emailVerificationTokenRepository,
         IUserAccountRepository userAccountRepository,
         IIdentityUnitOfWork unitOfWork,
-        IDateTimeProvider dateTimeProvider)
+        IDateTimeProvider dateTimeProvider,
+        IIdentityOutboxWriter outboxWriter)
     {
         _tokenHashProvider = tokenHashProvider ?? throw new ArgumentNullException(nameof(tokenHashProvider));
         _emailVerificationTokenRepository = emailVerificationTokenRepository ?? throw new ArgumentNullException(nameof(emailVerificationTokenRepository));
         _userAccountRepository = userAccountRepository ?? throw new ArgumentNullException(nameof(userAccountRepository));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
     }
 
     public async Task<Result<VerifyEmailResponseDto>> ExecuteAsync(
@@ -56,6 +59,16 @@ public sealed class VerifyEmailUseCase : IVerifyEmailUseCase
             {
                 return Result<VerifyEmailResponseDto>.Failure(
                     IdentityErrors.EmailVerification.TokenNotFound);
+            }
+
+            UserAccount? user = await _userAccountRepository.GetByIdAsync(
+                token.UserId,
+                cancellationToken);
+
+            if (user is null)
+            {
+                return Result<VerifyEmailResponseDto>.Failure(
+                    IdentityErrors.User.NotFound);
             }
 
             DateTime nowUtc = _dateTimeProvider.UtcNow;
@@ -89,6 +102,16 @@ public sealed class VerifyEmailUseCase : IVerifyEmailUseCase
                     return Result<VerifyEmailResponseDto>.Failure(
                         IdentityErrors.ValidationFailed);
                 }
+
+                await _outboxWriter.EnqueueEmailVerifiedAsync(
+                    unitOfWork: _unitOfWork,
+                    userId: user.UserId,
+                    userPublicId: user.PublicId,
+                    email: user.Email,
+                    fullName: user.FullName,
+                    verificationTokenId: token.VerificationTokenId,
+                    verifiedAtUtc: nowUtc,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
