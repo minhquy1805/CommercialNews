@@ -88,7 +88,7 @@ public sealed class PasswordResetTokenRepository : IPasswordResetTokenRepository
         }
     }
 
-    public async Task InsertAsync(
+    public async Task<long> InsertAsync(
         PasswordResetToken token,
         CancellationToken cancellationToken = default)
     {
@@ -139,9 +139,14 @@ public sealed class PasswordResetTokenRepository : IPasswordResetTokenRepository
                 {
                     Direction = ParameterDirection.Output
                 };
+
                 command.Parameters.Add(resetTokenIdParameter);
 
                 await command.ExecuteNonQueryAsync(cancellationToken);
+
+                return resetTokenIdParameter.Value is DBNull
+                    ? 0
+                    : Convert.ToInt64(resetTokenIdParameter.Value);
             }
         }
         catch (SqlException exception)

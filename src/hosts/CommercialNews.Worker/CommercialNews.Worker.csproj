@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="MailKit" Version="4.16.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,5 +31,11 @@
     <ProjectReference Include="..\..\modules\Authorization\Authorization.Infrastructure\Authorization.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Application\Notifications.Application.csproj" />
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Infrastructure\Notifications.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="EmailTemplates\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 </Project>

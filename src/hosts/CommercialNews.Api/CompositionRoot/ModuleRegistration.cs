@@ -49,7 +49,7 @@ public static class ModuleRegistration
         services.AddInteractionApplication();
         services.AddInteractionInfrastructure();
 
-        services.AddNotificationsApplication();
+        services.AddNotificationsApplication(configuration);
         services.AddNotificationsInfrastructure(configuration);
 
         services.AddAuditApplication();

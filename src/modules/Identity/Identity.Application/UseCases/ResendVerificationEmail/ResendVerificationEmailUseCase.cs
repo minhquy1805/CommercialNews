@@ -76,11 +76,14 @@ public sealed class ResendVerificationEmailUseCase : IResendVerificationEmailUse
             string rawVerificationToken = _rawTokenGenerator.Generate();
             byte[] verificationTokenHash = _tokenHashProvider.Hash(rawVerificationToken);
 
+            DateTime verificationTokenExpiresAtUtc =
+                nowUtc.AddHours(_tokenOptions.EmailVerificationTokenLifetimeHours);
+
             EmailVerificationToken verificationToken = EmailVerificationToken.Create(
                 userId: user.UserId,
                 tokenHash: verificationTokenHash,
                 createdAt: nowUtc,
-                expiresAt: nowUtc.AddHours(_tokenOptions.EmailVerificationTokenLifetimeHours),
+                expiresAt: verificationTokenExpiresAtUtc,
                 createdIp: null,
                 correlationId: null);
 
@@ -88,22 +91,24 @@ public sealed class ResendVerificationEmailUseCase : IResendVerificationEmailUse
 
             try
             {
-                await _emailVerificationTokenRepository.InsertAsync(
-                    verificationToken,
-                    cancellationToken);
+                long verificationTokenId =
+                    await _emailVerificationTokenRepository.InsertAsync(
+                        verificationToken,
+                        cancellationToken);
 
-                await _outboxWriter.EnqueueVerificationEmailAsync(
+                await _outboxWriter.EnqueueVerificationEmailRequestedAsync(
+                    unitOfWork: _unitOfWork,
                     userId: user.UserId,
                     userPublicId: user.PublicId,
                     email: user.Email,
                     fullName: user.FullName,
+                    verificationTokenId: verificationTokenId,
                     rawVerificationToken: rawVerificationToken,
+                    expiresAtUtc: verificationTokenExpiresAtUtc,
                     occurredAtUtc: nowUtc,
                     cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
-
-                Console.WriteLine($"[DEV][VERIFY-RESEND] Email={user.Email}; PublicId={user.PublicId}; Token={rawVerificationToken}");
 
                 return Result<ResendVerificationEmailResponseDto>.Success(BuildGenericResponse());
             }
