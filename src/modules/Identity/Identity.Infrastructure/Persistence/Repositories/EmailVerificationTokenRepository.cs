@@ -28,7 +28,7 @@ public sealed class EmailVerificationTokenRepository : IEmailVerificationTokenRe
         _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
     }
 
-    public async Task InsertAsync(
+    public async Task<long> InsertAsync(
         EmailVerificationToken token,
         CancellationToken cancellationToken = default)
     {
@@ -79,9 +79,14 @@ public sealed class EmailVerificationTokenRepository : IEmailVerificationTokenRe
                 {
                     Direction = ParameterDirection.Output
                 };
+
                 command.Parameters.Add(verificationTokenIdParameter);
 
                 await command.ExecuteNonQueryAsync(cancellationToken);
+
+                return verificationTokenIdParameter.Value is DBNull
+                    ? 0
+                    : Convert.ToInt64(verificationTokenIdParameter.Value);
             }
         }
         catch (SqlException exception)

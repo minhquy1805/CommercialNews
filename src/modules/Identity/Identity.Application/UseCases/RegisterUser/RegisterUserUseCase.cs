@@ -111,16 +111,19 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
                     createdIp: null,
                     correlationId: null);
 
-                await _emailVerificationTokenRepository.InsertAsync(
+                long verificationTokenId = await _emailVerificationTokenRepository.InsertAsync(
                     verificationToken,
                     cancellationToken);
 
-                await _outboxWriter.EnqueueVerificationEmailAsync(
+                await _outboxWriter.EnqueueVerificationEmailRequestedAsync(
+                    unitOfWork: _unitOfWork,
                     userId: userId,
                     userPublicId: user.PublicId,
                     email: user.Email,
                     fullName: user.FullName,
+                    verificationTokenId: verificationTokenId,
                     rawVerificationToken: rawVerificationToken,
+                    expiresAtUtc: verificationTokenExpiresAtUtc,
                     occurredAtUtc: nowUtc,
                     cancellationToken: cancellationToken);
 
