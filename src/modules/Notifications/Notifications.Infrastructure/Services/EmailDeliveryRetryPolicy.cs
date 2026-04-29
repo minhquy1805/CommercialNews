@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using Notifications.Application.Configuration;
 using Notifications.Application.Contracts.Services;
 using Notifications.Application.Ports.Services;
 using Notifications.Domain.Enums;
@@ -6,58 +8,55 @@ namespace Notifications.Application.Services;
 
 public sealed class EmailDeliveryRetryPolicy : IEmailDeliveryRetryPolicy
 {
-    private const int MaxAttempts = 5;
+    private readonly EmailDeliveryOptions _options;
 
-    public RetryDecision Evaluate(EmailDeliveryRetryContext context)
+    public EmailDeliveryRetryPolicy(
+        IOptions<EmailDeliveryOptions> options)
+    {
+        _options = options?.Value
+            ?? throw new ArgumentNullException(nameof(options));
+    }
+
+    public RetryDecision Evaluate(
+        EmailDeliveryRetryContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context.AttemptCount >= MaxAttempts)
+        if (context.AttemptCount >= _options.MaxAttemptCount)
         {
-            return RetryDecision.MarkDead("Maximum retry attempts exceeded.");
+            return RetryDecision.MarkDead("Max attempt count reached.");
         }
 
-        if (string.Equals(context.ErrorClass, EmailErrorClass.Permanent, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(context.ErrorClass, EmailErrorClass.Policy, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(context.ErrorClass, EmailErrorClass.Template, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(context.ErrorClass, EmailErrorClass.Validation, StringComparison.OrdinalIgnoreCase))
+        if (EmailErrorClass.IsGenerallyTerminal(context.ErrorClass))
         {
-            return RetryDecision.MarkDead("Failure is classified as terminal.");
+            return RetryDecision.MarkDead("Terminal error class.");
         }
 
-        if (string.Equals(context.ErrorClass, EmailErrorClass.Transient, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(context.ErrorClass, EmailErrorClass.Ambiguous, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(context.ErrorClass, EmailErrorClass.Provider, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(context.ErrorClass, EmailErrorClass.Unknown, StringComparison.OrdinalIgnoreCase))
+        if (!EmailErrorClass.IsGenerallyRetryable(context.ErrorClass))
         {
-            TimeSpan delay = CalculateBackoff(context.AttemptCount, context.IsAmbiguous);
-
-            return RetryDecision.RetryAt(
-                context.NowUtc.Add(delay),
-                "Failure is retryable.");
+            return RetryDecision.MarkDead("Non-retryable error class.");
         }
 
-        return RetryDecision.MarkDead("Unsupported error classification.");
+        int delaySeconds = CalculateDelaySeconds(context.AttemptCount);
+
+        DateTime nextRetryAt = context.NowUtc.AddSeconds(delaySeconds);
+
+        return RetryDecision.RetryAt(
+            nextRetryAt,
+            reason: $"Retry scheduled after {delaySeconds} seconds.");
     }
 
-    private static TimeSpan CalculateBackoff(int attemptCount, bool isAmbiguous)
+    private int CalculateDelaySeconds(int attemptCount)
     {
-        int safeAttempt = Math.Clamp(attemptCount, 1, MaxAttempts);
+        int safeAttemptCount = Math.Max(1, attemptCount);
 
-        int seconds = safeAttempt switch
-        {
-            1 => 30,
-            2 => 120,
-            3 => 300,
-            4 => 900,
-            _ => 1800
-        };
+        double exponentialDelay =
+            _options.InitialRetryDelaySeconds * Math.Pow(2, safeAttemptCount - 1);
 
-        if (isAmbiguous)
-        {
-            seconds *= 2;
-        }
+        int cappedDelay = Math.Min(
+            (int)exponentialDelay,
+            _options.MaxRetryDelaySeconds);
 
-        return TimeSpan.FromSeconds(seconds);
+        return Math.Max(1, cappedDelay);
     }
 }

@@ -42,6 +42,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEmailTemplateRenderer, EmailTemplateRenderer>();
         services.AddScoped<IEmailSender, EmailSender>();
         services.AddScoped<IEmailDeliveryDedupeService, EmailDeliveryDedupeService>();
+        services.AddScoped<INotificationsOutboxWriter, NotificationsOutboxWriter>();
+        services.AddScoped<INotificationsOutboxWriter, NotificationsOutboxWriter>();
 
         return services;
     }

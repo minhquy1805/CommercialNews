@@ -4,12 +4,16 @@ public static class NotificationTemplateKey
 {
     public const string VerifyEmail = "VerifyEmail";
     public const string ResetPassword = "ResetPassword";
+    public const string PasswordChanged = "PasswordChanged";
+    public const string EmailVerified = "EmailVerified";
     public const string NewArticle = "NewArticle";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         VerifyEmail,
         ResetPassword,
+        PasswordChanged,
+        EmailVerified,
         NewArticle
     };
 
@@ -20,6 +24,6 @@ public static class NotificationTemplateKey
             return false;
         }
 
-        return All.Contains(value);
+        return All.Contains(value.Trim());
     }
 }
