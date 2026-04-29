@@ -3,6 +3,7 @@ namespace Notifications.Domain.Events;
 public sealed record EmailDeliveryDeadDomainEvent(
     long EmailDeliveryId,
     string MessageId,
+    string BusinessDedupeKey,
     long? RecipientUserId,
     string ToEmail,
     string TemplateKey,
