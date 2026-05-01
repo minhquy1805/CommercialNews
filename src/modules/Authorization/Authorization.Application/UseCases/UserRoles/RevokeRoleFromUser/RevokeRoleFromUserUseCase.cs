@@ -1,4 +1,3 @@
-using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.UserRoles;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -116,15 +115,17 @@ public sealed class RevokeRoleFromUserUseCase : IRevokeRoleFromUserUseCase
                 }
 
                 await _authorizationOutboxWriter.EnqueueUserRoleRevokedAsync(
-                    new UserRoleRevokedOutboxPayload(
-                        UserId: request.UserId,
-                        RoleId: request.RoleId,
-                        RolePublicId: role.PublicId,
-                        RoleName: role.Name,
-                        ActorUserId: actorUserId,
-                        CorrelationId: correlationId,
-                        OccurredAtUtc: nowUtc),
-                    cancellationToken);
+                    unitOfWork: _unitOfWork,
+                    userId: request.UserId,
+                    roleId: role.RoleId,
+                    rolePublicId: role.PublicId,
+                    roleName: role.Name,
+                    roleDisplayName: role.DisplayName,
+                    roleIsSystem: role.IsSystem,
+                    revokedByUserId: actorUserId,
+                    revokedAtUtc: nowUtc,
+                    correlationId: correlationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 

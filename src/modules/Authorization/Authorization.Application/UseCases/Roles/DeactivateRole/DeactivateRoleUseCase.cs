@@ -1,4 +1,3 @@
-using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Roles;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -74,6 +73,7 @@ public sealed class DeactivateRoleUseCase : IDeactivateRoleUseCase
 
             var nowUtc = _dateTimeProvider.UtcNow;
             var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
 
             role.Deactivate(
                 nowUtc,
@@ -88,16 +88,16 @@ public sealed class DeactivateRoleUseCase : IDeactivateRoleUseCase
                     cancellationToken);
 
                 await _authorizationOutboxWriter.EnqueueRoleDeactivatedAsync(
-                    new RoleDeactivatedOutboxPayload
-                    {
-                        RoleId = updatedRole.RoleId,
-                        RolePublicId = updatedRole.PublicId,
-                        RoleName = updatedRole.Name,
-                        OccurredAtUtc = nowUtc,
-                        ActorUserId = actorUserId,
-                        CorrelationId = _requestContext.CorrelationId
-                    },
-                    cancellationToken);
+                    unitOfWork: _unitOfWork,
+                    roleId: updatedRole.RoleId,
+                    rolePublicId: updatedRole.PublicId,
+                    roleName: updatedRole.Name,
+                    roleDisplayName: updatedRole.DisplayName,
+                    roleIsSystem: updatedRole.IsSystem,
+                    deactivatedByUserId: updatedRole.UpdatedByUserId,
+                    deactivatedAtUtc: updatedRole.UpdatedAt,
+                    correlationId: correlationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 

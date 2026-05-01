@@ -1,4 +1,3 @@
-using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Permissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -74,6 +73,7 @@ public sealed class DeactivatePermissionUseCase : IDeactivatePermissionUseCase
 
             var nowUtc = _dateTimeProvider.UtcNow;
             var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
 
             permission.Deactivate(
                 nowUtc,
@@ -88,16 +88,17 @@ public sealed class DeactivatePermissionUseCase : IDeactivatePermissionUseCase
                     cancellationToken);
 
                 await _authorizationOutboxWriter.EnqueuePermissionDeactivatedAsync(
-                    new PermissionDeactivatedOutboxPayload
-                    {
-                        PermissionId = updatedPermission.PermissionId,
-                        PermissionPublicId = updatedPermission.PublicId,
-                        PermissionKey = updatedPermission.Key,
-                        OccurredAtUtc = nowUtc,
-                        ActorUserId = actorUserId,
-                        CorrelationId = _requestContext.CorrelationId
-                    },
-                    cancellationToken);
+                    unitOfWork: _unitOfWork,
+                    permissionId: updatedPermission.PermissionId,
+                    permissionPublicId: updatedPermission.PublicId,
+                    permissionKey: updatedPermission.Key,
+                    permissionModule: updatedPermission.Module,
+                    permissionAction: updatedPermission.Action,
+                    permissionIsSystem: updatedPermission.IsSystem,
+                    deactivatedByUserId: updatedPermission.UpdatedByUserId,
+                    deactivatedAtUtc: updatedPermission.UpdatedAt,
+                    correlationId: correlationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
