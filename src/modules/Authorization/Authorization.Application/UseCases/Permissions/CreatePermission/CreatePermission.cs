@@ -1,5 +1,4 @@
 using Authorization.Application.Common;
-using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Permissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -72,6 +71,7 @@ public sealed class CreatePermissionUseCase : ICreatePermissionUseCase
 
             var nowUtc = _dateTimeProvider.UtcNow;
             var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
 
             var permission = Permission.CreateNew(
                 publicId: _publicIdGenerator.NewId(),
@@ -93,22 +93,20 @@ public sealed class CreatePermissionUseCase : ICreatePermissionUseCase
                     cancellationToken);
 
                 await _authorizationOutboxWriter.EnqueuePermissionCreatedAsync(
-                    new PermissionCreatedOutboxPayload
-                    {
-                        PermissionId = createdPermission.PermissionId,
-                        PermissionPublicId = createdPermission.PublicId,
-                        PermissionKey = createdPermission.Key,
-                        PermissionKeyNormalized = createdPermission.KeyNormalized,
-                        Module = createdPermission.Module,
-                        Action = createdPermission.Action,
-                        Description = createdPermission.Description,
-                        IsSystem = createdPermission.IsSystem,
-                        IsActive = createdPermission.IsActive,
-                        OccurredAtUtc = nowUtc,
-                        ActorUserId = actorUserId,
-                        CorrelationId = _requestContext.CorrelationId
-                    },
-                    cancellationToken);
+                    unitOfWork: _unitOfWork,
+                    permissionId: createdPermission.PermissionId,
+                    permissionPublicId: createdPermission.PublicId,
+                    permissionKey: createdPermission.Key,
+                    permissionKeyNormalized: createdPermission.KeyNormalized,
+                    permissionModule: createdPermission.Module,
+                    permissionAction: createdPermission.Action,
+                    permissionDescription: createdPermission.Description,
+                    permissionIsSystem: createdPermission.IsSystem,
+                    permissionIsActive: createdPermission.IsActive,
+                    createdByUserId: createdPermission.CreatedByUserId,
+                    createdAtUtc: createdPermission.CreatedAt,
+                    correlationId: correlationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 

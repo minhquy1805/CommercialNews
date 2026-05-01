@@ -1,54 +1,180 @@
-using Authorization.Application.Contracts.Outbox.Payload;
+using Authorization.Application.Ports.Persistence;
 
 namespace Authorization.Application.Ports.Services;
 
 public interface IAuthorizationOutboxWriter
 {
-    Task EnqueueRoleCreatedAsync(
-        RoleCreatedOutboxPayload payload,
+    Task<long> EnqueueUserRoleAssignedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long userId,
+        long roleId,
+        string rolePublicId,
+        string roleName,
+        string? roleDisplayName,
+        bool roleIsSystem,
+        long? assignedByUserId,
+        DateTime assignedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueueRoleUpdatedAsync(
-        RoleUpdatedOutboxPayload payload,
+    Task<long> EnqueueUserRoleRevokedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long userId,
+        long roleId,
+        string rolePublicId,
+        string roleName,
+        string? roleDisplayName,
+        bool roleIsSystem,
+        long? revokedByUserId,
+        DateTime revokedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueueRoleActivatedAsync(
-        RoleActivatedOutboxPayload payload,
+    Task<long> EnqueueRolePermissionGrantedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long roleId,
+        string rolePublicId,
+        string roleName,
+        string? roleDisplayName,
+        bool roleIsSystem,
+        long permissionId,
+        string permissionPublicId,
+        string permissionKey,
+        string? permissionModule,
+        string? permissionAction,
+        bool permissionIsSystem,
+        long? grantedByUserId,
+        DateTime grantedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueueRoleDeactivatedAsync(
-        RoleDeactivatedOutboxPayload payload,
+    Task<long> EnqueueRolePermissionRevokedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long roleId,
+        string rolePublicId,
+        string roleName,
+        string? roleDisplayName,
+        bool roleIsSystem,
+        long permissionId,
+        string permissionPublicId,
+        string permissionKey,
+        string? permissionModule,
+        string? permissionAction,
+        bool permissionIsSystem,
+        long? revokedByUserId,
+        DateTime revokedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueuePermissionCreatedAsync(
-        PermissionCreatedOutboxPayload payload,
+    Task<long> EnqueueRoleCreatedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long roleId,
+        string rolePublicId,
+        string roleName,
+        string roleNameNormalized,
+        string? roleDisplayName,
+        string? roleDescription,
+        bool roleIsSystem,
+        bool roleIsActive,
+        long? createdByUserId,
+        DateTime createdAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueuePermissionUpdatedAsync(
-        PermissionUpdatedOutboxPayload payload,
+    Task<long> EnqueueRoleUpdatedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long roleId,
+        string rolePublicId,
+        string roleName,
+        string roleNameNormalized,
+        string? roleDisplayName,
+        string? roleDescription,
+        bool roleIsSystem,
+        bool roleIsActive,
+        long? updatedByUserId,
+        DateTime updatedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueuePermissionActivatedAsync(
-        PermissionActivatedOutboxPayload payload,
+    Task<long> EnqueueRoleActivatedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long roleId,
+        string rolePublicId,
+        string roleName,
+        string? roleDisplayName,
+        bool roleIsSystem,
+        long? activatedByUserId,
+        DateTime activatedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueuePermissionDeactivatedAsync(
-        PermissionDeactivatedOutboxPayload payload,
+    Task<long> EnqueueRoleDeactivatedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long roleId,
+        string rolePublicId,
+        string roleName,
+        string? roleDisplayName,
+        bool roleIsSystem,
+        long? deactivatedByUserId,
+        DateTime deactivatedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueueUserRoleAssignedAsync(
-        UserRoleAssignedOutboxPayload payload,
+    Task<long> EnqueuePermissionCreatedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long permissionId,
+        string permissionPublicId,
+        string permissionKey,
+        string permissionKeyNormalized,
+        string? permissionModule,
+        string? permissionAction,
+        string? permissionDescription,
+        bool permissionIsSystem,
+        bool permissionIsActive,
+        long? createdByUserId,
+        DateTime createdAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueueUserRoleRevokedAsync(
-        UserRoleRevokedOutboxPayload payload,
+    Task<long> EnqueuePermissionUpdatedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long permissionId,
+        string permissionPublicId,
+        string permissionKey,
+        string permissionKeyNormalized,
+        string? permissionModule,
+        string? permissionAction,
+        string? permissionDescription,
+        bool permissionIsSystem,
+        bool permissionIsActive,
+        long? updatedByUserId,
+        DateTime updatedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueueRolePermissionGrantedAsync(
-        RolePermissionGrantedOutboxPayload payload,
+    Task<long> EnqueuePermissionActivatedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long permissionId,
+        string permissionPublicId,
+        string permissionKey,
+        string? permissionModule,
+        string? permissionAction,
+        bool permissionIsSystem,
+        long? activatedByUserId,
+        DateTime activatedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 
-    Task EnqueueRolePermissionRevokedAsync(
-        RolePermissionRevokedOutboxPayload payload,
+    Task<long> EnqueuePermissionDeactivatedAsync(
+        IAuthorizationUnitOfWork unitOfWork,
+        long permissionId,
+        string permissionPublicId,
+        string permissionKey,
+        string? permissionModule,
+        string? permissionAction,
+        bool permissionIsSystem,
+        long? deactivatedByUserId,
+        DateTime deactivatedAtUtc,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 }
