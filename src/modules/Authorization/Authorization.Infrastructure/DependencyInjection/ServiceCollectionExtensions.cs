@@ -1,14 +1,11 @@
 using Authorization.Application.Ports.Persistence;
 using Authorization.Application.Ports.Services;
 using Authorization.Infrastructure.Configuration;
-using Authorization.Infrastructure.Outbox;
 using Authorization.Infrastructure.Persistence.Exceptions;
 using Authorization.Infrastructure.Persistence.Repositories;
 using Authorization.Infrastructure.Persistence.Sql;
 using Authorization.Infrastructure.Seeding;
 using Authorization.Infrastructure.Services;
-using CommercialNews.BuildingBlocks.Outbox.Runtime;
-using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -37,9 +34,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserRoleRepository, UserRoleRepository>();
         services.AddScoped<IRolePermissionRepository, RolePermissionRepository>();
         services.AddScoped<IAuthorizationPermissionQueryRepository, AuthorizationPermissionQueryRepository>();
-
         services.AddScoped<IAuthorizationOutboxWriter, AuthorizationOutboxWriter>();
-        services.AddScoped<IOutboxDispatcher, AuthorizationOutboxDispatcher>();
 
         services.AddScoped<IAuthorizationUserLookupService, AuthorizationUserLookupService>();
 
