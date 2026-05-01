@@ -1,4 +1,3 @@
-using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.RolePermissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -121,17 +120,22 @@ public sealed class GrantPermissionToRoleUseCase : IGrantPermissionToRoleUseCase
                     cancellationToken);
 
                 await _authorizationOutboxWriter.EnqueueRolePermissionGrantedAsync(
-                    new RolePermissionGrantedOutboxPayload(
-                        RoleId: createdGrant.RoleId,
-                        RolePublicId: role.PublicId,
-                        RoleName: role.Name,
-                        PermissionId: createdGrant.PermissionId,
-                        PermissionPublicId: permission.PublicId,
-                        PermissionKey: permission.Key,
-                        ActorUserId: actorUserId,
-                        CorrelationId: correlationId,
-                        OccurredAtUtc: nowUtc),
-                    cancellationToken);
+                    unitOfWork: _unitOfWork,
+                    roleId: role.RoleId,
+                    rolePublicId: role.PublicId,
+                    roleName: role.Name,
+                    roleDisplayName: role.DisplayName,
+                    roleIsSystem: role.IsSystem,
+                    permissionId: permission.PermissionId,
+                    permissionPublicId: permission.PublicId,
+                    permissionKey: permission.Key,
+                    permissionModule: permission.Module,
+                    permissionAction: permission.Action,
+                    permissionIsSystem: permission.IsSystem,
+                    grantedByUserId: createdGrant.GrantedByUserId,
+                    grantedAtUtc: createdGrant.GrantedAt,
+                    correlationId: correlationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 

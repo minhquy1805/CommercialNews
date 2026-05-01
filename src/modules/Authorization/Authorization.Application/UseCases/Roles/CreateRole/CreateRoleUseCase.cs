@@ -1,5 +1,4 @@
 using Authorization.Application.Common;
-using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Roles;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -72,6 +71,7 @@ public sealed class CreateRoleUseCase : ICreateRoleUseCase
 
             var nowUtc = _dateTimeProvider.UtcNow;
             var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
 
             var role = Role.CreateNew(
                 publicId: _publicIdGenerator.NewId(),
@@ -92,21 +92,19 @@ public sealed class CreateRoleUseCase : ICreateRoleUseCase
                     cancellationToken);
 
                 await _authorizationOutboxWriter.EnqueueRoleCreatedAsync(
-                    new RoleCreatedOutboxPayload
-                    {
-                        RoleId = createdRole.RoleId,
-                        RolePublicId = createdRole.PublicId,
-                        RoleName = createdRole.Name,
-                        RoleNameNormalized = createdRole.NameNormalized,
-                        DisplayName = createdRole.DisplayName,
-                        Description = createdRole.Description,
-                        IsSystem = createdRole.IsSystem,
-                        IsActive = createdRole.IsActive,
-                        OccurredAtUtc = nowUtc,
-                        ActorUserId = actorUserId,
-                        CorrelationId = _requestContext.CorrelationId
-                    },
-                    cancellationToken);
+                    unitOfWork: _unitOfWork,
+                    roleId: createdRole.RoleId,
+                    rolePublicId: createdRole.PublicId,
+                    roleName: createdRole.Name,
+                    roleNameNormalized: createdRole.NameNormalized,
+                    roleDisplayName: createdRole.DisplayName,
+                    roleDescription: createdRole.Description,
+                    roleIsSystem: createdRole.IsSystem,
+                    roleIsActive: createdRole.IsActive,
+                    createdByUserId: createdRole.CreatedByUserId,
+                    createdAtUtc: createdRole.CreatedAt,
+                    correlationId: correlationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 

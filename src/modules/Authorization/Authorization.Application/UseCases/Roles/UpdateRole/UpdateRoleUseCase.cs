@@ -1,5 +1,4 @@
 using Authorization.Application.Common;
-using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Roles;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -77,6 +76,7 @@ public sealed class UpdateRoleUseCase : IUpdateRoleUseCase
 
             var nowUtc = _dateTimeProvider.UtcNow;
             var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
 
             role.UpdateMetadata(
                 name: request.Name.Trim(),
@@ -95,21 +95,19 @@ public sealed class UpdateRoleUseCase : IUpdateRoleUseCase
                     cancellationToken);
 
                 await _authorizationOutboxWriter.EnqueueRoleUpdatedAsync(
-                    new RoleUpdatedOutboxPayload
-                    {
-                        RoleId = updatedRole.RoleId,
-                        RolePublicId = updatedRole.PublicId,
-                        RoleName = updatedRole.Name,
-                        RoleNameNormalized = updatedRole.NameNormalized,
-                        DisplayName = updatedRole.DisplayName,
-                        Description = updatedRole.Description,
-                        IsSystem = updatedRole.IsSystem,
-                        IsActive = updatedRole.IsActive,
-                        OccurredAtUtc = nowUtc,
-                        ActorUserId = actorUserId,
-                        CorrelationId = _requestContext.CorrelationId
-                    },
-                    cancellationToken);
+                    unitOfWork: _unitOfWork,
+                    roleId: updatedRole.RoleId,
+                    rolePublicId: updatedRole.PublicId,
+                    roleName: updatedRole.Name,
+                    roleNameNormalized: updatedRole.NameNormalized,
+                    roleDisplayName: updatedRole.DisplayName,
+                    roleDescription: updatedRole.Description,
+                    roleIsSystem: updatedRole.IsSystem,
+                    roleIsActive: updatedRole.IsActive,
+                    updatedByUserId: updatedRole.UpdatedByUserId,
+                    updatedAtUtc: updatedRole.UpdatedAt,
+                    correlationId: correlationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
