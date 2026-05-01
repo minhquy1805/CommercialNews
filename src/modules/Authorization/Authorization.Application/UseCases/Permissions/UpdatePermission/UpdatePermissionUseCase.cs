@@ -1,5 +1,4 @@
 using Authorization.Application.Common;
-using Authorization.Application.Contracts.Outbox.Payload;
 using Authorization.Application.Contracts.Permissions;
 using Authorization.Application.Errors;
 using Authorization.Application.Ports.Persistence;
@@ -77,6 +76,7 @@ public sealed class UpdatePermissionUseCase : IUpdatePermissionUseCase
 
             var nowUtc = _dateTimeProvider.UtcNow;
             var actorUserId = _requestContext.CurrentUserId;
+            var correlationId = _requestContext.CorrelationId;
 
             permission.UpdateMetadata(
                 key: request.Key.Trim(),
@@ -96,22 +96,20 @@ public sealed class UpdatePermissionUseCase : IUpdatePermissionUseCase
                     cancellationToken);
 
                 await _authorizationOutboxWriter.EnqueuePermissionUpdatedAsync(
-                    new PermissionUpdatedOutboxPayload
-                    {
-                        PermissionId = updatedPermission.PermissionId,
-                        PermissionPublicId = updatedPermission.PublicId,
-                        PermissionKey = updatedPermission.Key,
-                        PermissionKeyNormalized = updatedPermission.KeyNormalized,
-                        Module = updatedPermission.Module,
-                        Action = updatedPermission.Action,
-                        Description = updatedPermission.Description,
-                        IsSystem = updatedPermission.IsSystem,
-                        IsActive = updatedPermission.IsActive,
-                        OccurredAtUtc = nowUtc,
-                        ActorUserId = actorUserId,
-                        CorrelationId = _requestContext.CorrelationId
-                    },
-                    cancellationToken);
+                    unitOfWork: _unitOfWork,
+                    permissionId: updatedPermission.PermissionId,
+                    permissionPublicId: updatedPermission.PublicId,
+                    permissionKey: updatedPermission.Key,
+                    permissionKeyNormalized: updatedPermission.KeyNormalized,
+                    permissionModule: updatedPermission.Module,
+                    permissionAction: updatedPermission.Action,
+                    permissionDescription: updatedPermission.Description,
+                    permissionIsSystem: updatedPermission.IsSystem,
+                    permissionIsActive: updatedPermission.IsActive,
+                    updatedByUserId: updatedPermission.UpdatedByUserId,
+                    updatedAtUtc: updatedPermission.UpdatedAt,
+                    correlationId: correlationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
