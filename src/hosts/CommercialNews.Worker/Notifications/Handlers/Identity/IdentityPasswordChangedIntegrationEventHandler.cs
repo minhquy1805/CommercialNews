@@ -3,6 +3,7 @@ using CommercialNews.BuildingBlocks.Outbox.IntegrationEvents;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Notifications.Application.Consumers.Identity;
 using Notifications.Application.Consumers.Identity.Payloads;
+using Notifications.Application.Contracts.Ingestion;
 
 namespace CommercialNews.Worker.Notifications.Handlers.Identity;
 
@@ -15,12 +16,17 @@ public sealed class IdentityPasswordChangedIntegrationEventHandler
     private const string EventTypeValue = "identity.password_changed";
 
     private readonly IIdentityEmailEventIngestionService _ingestionService;
+    private readonly ILogger<IdentityPasswordChangedIntegrationEventHandler> _logger;
 
     public IdentityPasswordChangedIntegrationEventHandler(
-        IIdentityEmailEventIngestionService ingestionService)
+        IIdentityEmailEventIngestionService ingestionService,
+        ILogger<IdentityPasswordChangedIntegrationEventHandler> logger)
     {
         _ingestionService = ingestionService
             ?? throw new ArgumentNullException(nameof(ingestionService));
+
+        _logger = logger
+            ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public string EventType => EventTypeValue;
@@ -38,8 +44,14 @@ public sealed class IdentityPasswordChangedIntegrationEventHandler
             payload = envelope.Payload.Deserialize<IdentityPasswordChangedPayload>(
                 JsonOptions);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
+            _logger.LogWarning(
+                exception,
+                "Failed to deserialize identity password changed payload. MessageId={MessageId}, EventType={EventType}",
+                envelope.MessageId,
+                envelope.EventType);
+
             return Result.Failure(
                 Error.Validation(
                     code: "NOTIFICATIONS.IDENTITY_PASSWORD_CHANGED_PAYLOAD_INVALID",
@@ -54,7 +66,7 @@ public sealed class IdentityPasswordChangedIntegrationEventHandler
                     message: "Identity password changed payload is required."));
         }
 
-        Result<long> result =
+        Result<NotificationIngestionResult> result =
             await _ingestionService.IngestPasswordChangedAsync(
                 messageId: envelope.MessageId,
                 correlationId: envelope.CorrelationId,
@@ -65,6 +77,15 @@ public sealed class IdentityPasswordChangedIntegrationEventHandler
         {
             return Result.Failure(result.Error!);
         }
+
+        NotificationIngestionResult ingestionResult = result.Value!;
+
+        _logger.LogInformation(
+            "Identity password changed notification ingested. MessageId={MessageId}, EmailDeliveryId={EmailDeliveryId}, WasInserted={WasInserted}, WasDeduped={WasDeduped}",
+            envelope.MessageId,
+            ingestionResult.EmailDeliveryId,
+            ingestionResult.WasInserted,
+            ingestionResult.WasDeduped);
 
         return Result.Success();
     }
