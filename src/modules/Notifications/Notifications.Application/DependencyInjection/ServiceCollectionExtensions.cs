@@ -36,6 +36,8 @@ public static class ServiceCollectionExtensions
         // Email delivery processing workflow
         services.AddScoped<IEmailDeliveryProcessingService, EmailDeliveryProcessingService>();
 
+        services.AddScoped<INotificationIngestionService, NotificationIngestionService>();
+
         return services;
     }
 }
