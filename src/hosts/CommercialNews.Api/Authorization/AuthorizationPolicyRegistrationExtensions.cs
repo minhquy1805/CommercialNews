@@ -238,6 +238,32 @@ public static class AuthorizationPolicyRegistrationExtensions
                 policy => policy.Requirements.Add(
                     new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Generate)));
 
+
+            options.AddPolicy(
+                AuthorizationPolicies.SeoSlugRoutesGenerate,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Generate)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.AuditLogsRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Audit.Logs.Read)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.AuditLogsReadDetail,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Audit.Logs.ReadDetail)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.AuditLogsReadByCorrelation,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Audit.Logs.ReadByCorrelation)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.AuditLogsReadByEvent,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Audit.Logs.ReadByEvent)));
+
         });
 
         return services;

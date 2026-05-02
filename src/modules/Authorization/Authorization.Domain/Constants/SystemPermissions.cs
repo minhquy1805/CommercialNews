@@ -272,6 +272,31 @@ public static class SystemPermissions
             Key: PermissionKeys.Authz.UserPermissions.ReadEffective,
             Module: "Authz",
             Action: "ReadEffective",
-            Description: "Read effective permissions for a user")
+            Description: "Read effective permissions for a user"),
+
+        
+        new(
+            Key: PermissionKeys.Audit.Logs.Read,
+            Module: "Audit",
+            Action: "Read",
+            Description: "Read audit logs"),
+
+        new(
+            Key: PermissionKeys.Audit.Logs.ReadDetail,
+            Module: "Audit",
+            Action: "ReadDetail",
+            Description: "Read audit log details"),
+
+        new(
+            Key: PermissionKeys.Audit.Logs.ReadByCorrelation,
+            Module: "Audit",
+            Action: "ReadByCorrelation",
+            Description: "Read audit logs by correlation id"),
+
+        new(
+            Key: PermissionKeys.Audit.Logs.ReadByEvent,
+            Module: "Audit",
+            Action: "ReadByEvent",
+            Description: "Read audit logs by audit event id")
     ];
 }
