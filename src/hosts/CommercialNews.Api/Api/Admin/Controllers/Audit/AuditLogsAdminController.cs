@@ -10,6 +10,8 @@ using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Microsoft.AspNetCore.Mvc;
+using CommercialNews.Api.Authorization;
+using Microsoft.AspNetCore.Authorization;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Audit;
 
@@ -38,8 +40,11 @@ public sealed class AuditLogsAdminController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Policy = AuthorizationPolicies.AuditLogsRead)]
     [ProducesResponseType(typeof(GetAuditLogsHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetPagedAsync(
         [FromQuery] GetAuditLogsHttpRequest request,
         CancellationToken cancellationToken)
@@ -91,10 +96,13 @@ public sealed class AuditLogsAdminController : ControllerBase
         return this.ToActionResult(Result<GetAuditLogsHttpResponse>.Success(response));
     }
 
-    [HttpGet("{auditId:long}", Name = GetAuditLogByIdRouteName)]
+    [HttpGet("{auditId:long}")]
+    [Authorize(Policy = AuthorizationPolicies.AuditLogsReadDetail)]
     [ProducesResponseType(typeof(GetAuditLogByIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByIdAsync(
         [FromRoute] long auditId,
         CancellationToken cancellationToken)
@@ -136,8 +144,11 @@ public sealed class AuditLogsAdminController : ControllerBase
     }
 
     [HttpGet("by-correlation/{correlationId}")]
+    [Authorize(Policy = AuthorizationPolicies.AuditLogsReadByCorrelation)]
     [ProducesResponseType(typeof(GetAuditLogsByCorrelationIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByCorrelationIdAsync(
         [FromRoute] string correlationId,
         [FromQuery] GetAuditLogsByCorrelationIdHttpRequest request,
@@ -182,10 +193,13 @@ public sealed class AuditLogsAdminController : ControllerBase
         return this.ToActionResult(Result<GetAuditLogsByCorrelationIdHttpResponse>.Success(response));
     }
 
-    [HttpGet("by-event/{auditEventId}", Name = GetAuditLogByEventIdRouteName)]
+    [HttpGet("by-event/{auditEventId}")]
+    [Authorize(Policy = AuthorizationPolicies.AuditLogsReadByEvent)]
     [ProducesResponseType(typeof(GetAuditLogByEventIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> GetByEventIdAsync(
         [FromRoute] string auditEventId,
         CancellationToken cancellationToken)
