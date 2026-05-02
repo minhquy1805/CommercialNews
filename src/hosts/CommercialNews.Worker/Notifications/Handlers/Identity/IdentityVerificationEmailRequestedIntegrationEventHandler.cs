@@ -3,6 +3,7 @@ using CommercialNews.BuildingBlocks.Outbox.IntegrationEvents;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Notifications.Application.Consumers.Identity;
 using Notifications.Application.Consumers.Identity.Payloads;
+using Notifications.Application.Contracts.Ingestion;
 
 namespace CommercialNews.Worker.Notifications.Handlers.Identity;
 
@@ -54,7 +55,7 @@ public sealed class IdentityVerificationEmailRequestedIntegrationEventHandler
                     message: "Identity verification email requested payload is required."));
         }
 
-        Result<long> result =
+        Result<NotificationIngestionResult> result =
             await _ingestionService.IngestVerificationEmailRequestedAsync(
                 messageId: envelope.MessageId,
                 correlationId: envelope.CorrelationId,

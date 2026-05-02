@@ -1,48 +1,36 @@
 using System.Text.Json;
-using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Microsoft.Extensions.Options;
 using Notifications.Application.Configuration;
 using Notifications.Application.Consumers.Identity.Payloads;
-using Notifications.Application.Errors;
-using Notifications.Application.Ports.Persistence;
-using Notifications.Application.Ports.Transactions;
-using Notifications.Domain.Entities;
+using Notifications.Application.Contracts.Ingestion;
+using Notifications.Application.Services;
 using Notifications.Domain.Enums;
-using Notifications.Domain.Exceptions;
-using CommercialNews.BuildingBlocks.SharedKernel.Time;
 
 namespace Notifications.Application.Consumers.Identity;
 
 public sealed class IdentityEmailEventIngestionService : IIdentityEmailEventIngestionService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string SourceModule = "Identity";
 
-    private readonly IEmailDeliveryRepository _emailDeliveryRepository;
-    private readonly INotificationsUnitOfWork _unitOfWork;
+    private static readonly JsonSerializerOptions JsonOptions =
+        new(JsonSerializerDefaults.Web);
+
+    private readonly INotificationIngestionService _notificationIngestionService;
     private readonly EmailDeliveryOptions _options;
-    private readonly IDateTimeProvider _dateTimeProvider;
 
     public IdentityEmailEventIngestionService(
-        IEmailDeliveryRepository emailDeliveryRepository,
-        INotificationsUnitOfWork unitOfWork,
-        IOptions<EmailDeliveryOptions> options,
-        IDateTimeProvider dateTimeProvider)
+        INotificationIngestionService notificationIngestionService,
+        IOptions<EmailDeliveryOptions> options)
     {
-        _emailDeliveryRepository = emailDeliveryRepository
-            ?? throw new ArgumentNullException(nameof(emailDeliveryRepository));
-
-        _unitOfWork = unitOfWork
-            ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _notificationIngestionService = notificationIngestionService
+            ?? throw new ArgumentNullException(nameof(notificationIngestionService));
 
         _options = options?.Value
             ?? throw new ArgumentNullException(nameof(options));
-
-        _dateTimeProvider = dateTimeProvider
-            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
     }
 
-    public Task<Result<long>> IngestVerificationEmailRequestedAsync(
+    public Task<Result<NotificationIngestionResult>> IngestVerificationEmailRequestedAsync(
         string messageId,
         string? correlationId,
         IdentityVerificationEmailRequestedPayload payload,
@@ -64,20 +52,26 @@ public sealed class IdentityEmailEventIngestionService : IIdentityEmailEventInge
             ["verificationLink"] = verificationLink
         });
 
-        return IngestAsync(
-            messageId: messageId,
-            businessDedupeKey: payload.BusinessDedupeKey,
-            recipientUserId: payload.UserId,
-            toEmail: payload.Email,
-            templateKey: NotificationTemplateKey.VerifyEmail,
-            variablesJson: variablesJson,
-            provider: _options.Provider,
-            priority: _options.VerificationEmailPriority,
-            correlationId: correlationId,
-            cancellationToken: cancellationToken);
+        return _notificationIngestionService.IngestEmailAsync(
+            new EmailNotificationIngestionRequest
+            {
+                MessageId = messageId,
+                BusinessDedupeKey = payload.BusinessDedupeKey,
+                RecipientUserId = payload.UserId,
+                ToEmail = payload.Email,
+                TemplateKey = NotificationTemplateKey.VerifyEmail,
+                VariablesJson = variablesJson,
+                Provider = _options.Provider,
+                Priority = _options.VerificationEmailPriority,
+                CorrelationId = correlationId,
+                SourceModule = SourceModule,
+                SourceEventType = "identity.verification_email_requested",
+                OccurredAtUtc = null
+            },
+            cancellationToken);
     }
 
-    public Task<Result<long>> IngestPasswordResetRequestedAsync(
+    public Task<Result<NotificationIngestionResult>> IngestPasswordResetRequestedAsync(
         string messageId,
         string? correlationId,
         IdentityPasswordResetRequestedPayload payload,
@@ -99,20 +93,26 @@ public sealed class IdentityEmailEventIngestionService : IIdentityEmailEventInge
             ["resetPasswordLink"] = resetPasswordLink
         });
 
-        return IngestAsync(
-            messageId: messageId,
-            businessDedupeKey: payload.BusinessDedupeKey,
-            recipientUserId: payload.UserId,
-            toEmail: payload.Email,
-            templateKey: NotificationTemplateKey.ResetPassword,
-            variablesJson: variablesJson,
-            provider: _options.Provider,
-            priority: _options.PasswordResetPriority,
-            correlationId: correlationId,
-            cancellationToken: cancellationToken);
+        return _notificationIngestionService.IngestEmailAsync(
+            new EmailNotificationIngestionRequest
+            {
+                MessageId = messageId,
+                BusinessDedupeKey = payload.BusinessDedupeKey,
+                RecipientUserId = payload.UserId,
+                ToEmail = payload.Email,
+                TemplateKey = NotificationTemplateKey.ResetPassword,
+                VariablesJson = variablesJson,
+                Provider = _options.Provider,
+                Priority = _options.PasswordResetPriority,
+                CorrelationId = correlationId,
+                SourceModule = SourceModule,
+                SourceEventType = "identity.password_reset_requested",
+                OccurredAtUtc = null
+            },
+            cancellationToken);
     }
 
-    public Task<Result<long>> IngestPasswordChangedAsync(
+    public Task<Result<NotificationIngestionResult>> IngestPasswordChangedAsync(
         string messageId,
         string? correlationId,
         IdentityPasswordChangedPayload payload,
@@ -128,20 +128,26 @@ public sealed class IdentityEmailEventIngestionService : IIdentityEmailEventInge
             ["changedAtUtc"] = payload.ChangedAtUtc.ToString("O")
         });
 
-        return IngestAsync(
-            messageId: messageId,
-            businessDedupeKey: payload.BusinessDedupeKey,
-            recipientUserId: payload.UserId,
-            toEmail: payload.Email,
-            templateKey: NotificationTemplateKey.PasswordChanged,
-            variablesJson: variablesJson,
-            provider: _options.Provider,
-            priority: _options.PasswordChangedPriority,
-            correlationId: correlationId,
-            cancellationToken: cancellationToken);
+        return _notificationIngestionService.IngestEmailAsync(
+            new EmailNotificationIngestionRequest
+            {
+                MessageId = messageId,
+                BusinessDedupeKey = payload.BusinessDedupeKey,
+                RecipientUserId = payload.UserId,
+                ToEmail = payload.Email,
+                TemplateKey = NotificationTemplateKey.PasswordChanged,
+                VariablesJson = variablesJson,
+                Provider = _options.Provider,
+                Priority = _options.PasswordChangedPriority,
+                CorrelationId = correlationId,
+                SourceModule = SourceModule,
+                SourceEventType = "identity.password_changed",
+                OccurredAtUtc = payload.ChangedAtUtc
+            },
+            cancellationToken);
     }
 
-    public Task<Result<long>> IngestEmailVerifiedAsync(
+    public Task<Result<NotificationIngestionResult>> IngestEmailVerifiedAsync(
         string messageId,
         string? correlationId,
         IdentityEmailVerifiedPayload payload,
@@ -157,107 +163,23 @@ public sealed class IdentityEmailEventIngestionService : IIdentityEmailEventInge
             ["verifiedAtUtc"] = payload.VerifiedAtUtc.ToString("O")
         });
 
-        return IngestAsync(
-            messageId: messageId,
-            businessDedupeKey: payload.BusinessDedupeKey,
-            recipientUserId: payload.UserId,
-            toEmail: payload.Email,
-            templateKey: NotificationTemplateKey.EmailVerified,
-            variablesJson: variablesJson,
-            provider: _options.Provider,
-            priority: _options.EmailVerifiedPriority,
-            correlationId: correlationId,
-            cancellationToken: cancellationToken);
-    }
-
-    private async Task<Result<long>> IngestAsync(
-        string messageId,
-        string businessDedupeKey,
-        long? recipientUserId,
-        string toEmail,
-        string templateKey,
-        string variablesJson,
-        string provider,
-        byte priority,
-        string? correlationId,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(messageId))
-        {
-            return Result<long>.Failure(NotificationsErrors.ValidationFailed);
-        }
-
-        if (string.IsNullOrWhiteSpace(businessDedupeKey))
-        {
-            return Result<long>.Failure(NotificationsErrors.ValidationFailed);
-        }
-
-        try
-        {
-            string normalizedMessageId = messageId.Trim();
-            string normalizedBusinessDedupeKey = businessDedupeKey.Trim();
-            string normalizedToEmail = toEmail.Trim();
-            string? normalizedCorrelationId = NormalizeOptional(correlationId);
-            DateTime nowUtc = _dateTimeProvider.UtcNow;
-
-            EmailDelivery? existingByMessageId =
-                await _emailDeliveryRepository.GetByMessageIdAsync(
-                    normalizedMessageId,
-                    cancellationToken);
-
-            if (existingByMessageId is not null)
+        return _notificationIngestionService.IngestEmailAsync(
+            new EmailNotificationIngestionRequest
             {
-                return Result<long>.Success(existingByMessageId.EmailDeliveryId);
-            }
-
-            EmailDelivery? existingByBusinessDedupeKey =
-                await _emailDeliveryRepository.GetByBusinessDedupeKeyAsync(
-                    normalizedBusinessDedupeKey,
-                    cancellationToken);
-
-            if (existingByBusinessDedupeKey is not null)
-            {
-                return Result<long>.Success(existingByBusinessDedupeKey.EmailDeliveryId);
-            }
-
-            EmailDelivery emailDelivery = EmailDelivery.Create(
-                messageId: normalizedMessageId,
-                businessDedupeKey: normalizedBusinessDedupeKey,
-                toEmail: normalizedToEmail,
-                templateKey: templateKey,
-                variablesJson: variablesJson,
-                provider: provider,
-                priority: priority,
-                nowUtc: nowUtc,
-                recipientUserId: recipientUserId,
-                correlationId: normalizedCorrelationId);
-
-            await _unitOfWork.BeginTransactionAsync(cancellationToken);
-
-            try
-            {
-                long emailDeliveryId = await _emailDeliveryRepository.InsertAsync(
-                    emailDelivery,
-                    cancellationToken);
-
-                await _unitOfWork.CommitAsync(cancellationToken);
-
-                return Result<long>.Success(emailDeliveryId);
-            }
-            catch
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
-            }
-        }
-        catch (PersistenceException)
-        {
-            return Result<long>.Failure(NotificationsErrors.DependencyUnavailable);
-        }
-        catch (NotificationsDomainException)
-        {
-            return Result<long>.Failure(NotificationsErrors.ValidationFailed);
-        }
+                MessageId = messageId,
+                BusinessDedupeKey = payload.BusinessDedupeKey,
+                RecipientUserId = payload.UserId,
+                ToEmail = payload.Email,
+                TemplateKey = NotificationTemplateKey.EmailVerified,
+                VariablesJson = variablesJson,
+                Provider = _options.Provider,
+                Priority = _options.EmailVerifiedPriority,
+                CorrelationId = correlationId,
+                SourceModule = SourceModule,
+                SourceEventType = "identity.email_verified",
+                OccurredAtUtc = payload.VerifiedAtUtc
+            },
+            cancellationToken);
     }
 
     private static string BuildVariablesJson(
@@ -271,13 +193,6 @@ public sealed class IdentityEmailEventIngestionService : IIdentityEmailEventInge
                 StringComparer.OrdinalIgnoreCase);
 
         return JsonSerializer.Serialize(normalizedVariables, JsonOptions);
-    }
-
-    private static string? NormalizeOptional(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? null
-            : value.Trim();
     }
 
     private static string BuildUrlFromTemplate(
