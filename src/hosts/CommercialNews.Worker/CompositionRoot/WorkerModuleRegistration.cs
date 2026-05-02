@@ -1,4 +1,9 @@
+using Audit.Application.DependencyInjection;
+using Audit.Infrastructure.DependencyInjection;
 using CommercialNews.BuildingBlocks.Outbox.Runtime;
+using CommercialNews.Worker.Audit.Consumers;
+using CommercialNews.Worker.Audit.Handlers;
+using CommercialNews.Worker.Audit.Handlers.Authorization;
 using CommercialNews.Worker.Configuration;
 using CommercialNews.Worker.Notifications.Consumers;
 using CommercialNews.Worker.Notifications.Handlers;
@@ -25,6 +30,9 @@ public static class WorkerModuleRegistration
 
         services.AddNotificationsApplication(configuration);
         services.AddNotificationsInfrastructure(configuration);
+
+        services.AddAuditApplication();
+        services.AddAuditInfrastructure();
 
         services.AddOptions<OutboxWorkerOptions>()
             .Bind(configuration.GetSection("Workers:Outbox"));
@@ -71,11 +79,32 @@ public static class WorkerModuleRegistration
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityPasswordChangedIntegrationEventHandler>();
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityEmailVerifiedIntegrationEventHandler>();
 
+        services.Configure<AuditRabbitMqConsumerOptions>(
+            configuration.GetSection(AuditRabbitMqConsumerOptions.SectionName));
+
+        services.AddScoped<AuditIntegrationEventDispatcher>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationUserRoleAssignedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationUserRoleRevokedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRolePermissionGrantedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRolePermissionRevokedAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRoleCreatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRoleUpdatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRoleActivatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRoleDeactivatedAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionCreatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionUpdatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionActivatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionDeactivatedAuditHandler>();
+
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));
 
         services.AddHostedService<OutboxPollingService>();
         services.AddHostedService<NotificationsRabbitMqConsumerService>();
+        services.AddHostedService<AuditRabbitMqConsumerService>();
         services.AddHostedService<EmailDeliveryProcessingWorker>();
 
         return services;

@@ -56,6 +56,17 @@ public static class PermissionKeys
         }
     }
 
+    public static class Audit
+    {
+        public static class Logs
+        {
+            public const string Read = "audit:logs:read";
+            public const string ReadDetail = "audit:logs:read-detail";
+            public const string ReadByCorrelation = "audit:logs:read-by-correlation";
+            public const string ReadByEvent = "audit:logs:read-by-event";
+        }
+    }
+
     public static class Authz
     {
         public static class Permissions

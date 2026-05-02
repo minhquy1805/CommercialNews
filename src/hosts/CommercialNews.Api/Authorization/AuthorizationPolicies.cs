@@ -55,4 +55,9 @@ public static class AuthorizationPolicies
     public const string SeoSlugRoutesActivate = "Permission:seo:slug-routes:activate";
     public const string SeoSlugRoutesDeactivate = "Permission:seo:slug-routes:deactivate";
     public const string SeoSlugRoutesGenerate = "Permission:seo:slug-routes:generate";
+
+    public const string AuditLogsRead = "Permission:audit:logs:read";
+    public const string AuditLogsReadDetail = "Permission:audit:logs:read-detail";
+    public const string AuditLogsReadByCorrelation = "Permission:audit:logs:read-by-correlation";
+    public const string AuditLogsReadByEvent = "Permission:audit:logs:read-by-event";
 }

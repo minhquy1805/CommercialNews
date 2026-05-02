@@ -40,6 +40,11 @@ public static class DefaultRolePermissions
                 PermissionKeys.Seo.SlugRoutes.Deactivate,
                 PermissionKeys.Seo.SlugRoutes.Generate,
 
+                PermissionKeys.Audit.Logs.Read,
+                PermissionKeys.Audit.Logs.ReadDetail,
+                PermissionKeys.Audit.Logs.ReadByCorrelation,
+                PermissionKeys.Audit.Logs.ReadByEvent,
+
                 PermissionKeys.Authz.Permissions.Read,
                 PermissionKeys.Authz.Permissions.Create,
                 PermissionKeys.Authz.Permissions.Update,

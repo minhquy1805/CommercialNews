@@ -5,6 +5,7 @@ using Authorization.Infrastructure.Persistence.Exceptions;
 using Authorization.Infrastructure.Persistence.Repositories;
 using Authorization.Infrastructure.Persistence.Sql;
 using Authorization.Infrastructure.Seeding;
+using Authorization.Infrastructure.Service;
 using Authorization.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
