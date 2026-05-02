@@ -11,7 +11,7 @@ namespace Identity.Infrastructure.Services;
 
 public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
 {
-    private const string AggregateTypeUserAccount = "UserAccount";
+    private const string AggregateTypeUserAccount = "Identity.UserAccount";
 
     private static readonly JsonSerializerOptions SerializerOptions =
         new(JsonSerializerDefaults.Web);

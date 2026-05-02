@@ -7,7 +7,7 @@ using CommercialNews.BuildingBlocks.Outbox.Models;
 using CommercialNews.BuildingBlocks.Outbox.Ports;
 using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
 
-namespace Authorization.Infrastructure.Services;
+namespace Authorization.Infrastructure.Service;
 
 public sealed class AuthorizationOutboxWriter : IAuthorizationOutboxWriter
 {

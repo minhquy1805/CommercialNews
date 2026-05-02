@@ -24,20 +24,18 @@ public sealed class GetAuditLogByEventIdUseCase : IGetAuditLogByEventIdUseCase
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(request.AuditEventId))
-            {
-                return Result<GetAuditLogByEventIdResponse>.Failure(
-                    AuditErrors.AuditLog.InvalidAuditEventId);
-            }
+            ArgumentNullException.ThrowIfNull(request);
 
-            if (request.AuditEventId.Trim().Length > 26)
+            string auditEventId = request.AuditEventId?.Trim() ?? string.Empty;
+
+            if (!IsValidAuditEventId(auditEventId))
             {
                 return Result<GetAuditLogByEventIdResponse>.Failure(
                     AuditErrors.AuditLog.InvalidAuditEventId);
             }
 
             var auditLog = await _auditLogRepository.SelectDetailByAuditEventIdAsync(
-                request.AuditEventId.Trim(),
+                auditEventId,
                 cancellationToken);
 
             if (auditLog is null)
@@ -79,6 +77,25 @@ public sealed class GetAuditLogByEventIdUseCase : IGetAuditLogByEventIdUseCase
         }
     }
 
+    private static bool IsValidAuditEventId(string? auditEventId)
+    {
+        if (string.IsNullOrWhiteSpace(auditEventId))
+        {
+            return false;
+        }
+
+        string value = auditEventId.Trim();
+
+        if (value.Length != 26)
+        {
+            return false;
+        }
+
+        return value.All(static c =>
+            c is >= '0' and <= '9'
+            || c is >= 'A' and <= 'Z');
+    }
+
     private static Error MapDomainException(AuditDomainException exception)
     {
         return exception.Code switch
@@ -110,7 +127,10 @@ public sealed class GetAuditLogByEventIdUseCase : IGetAuditLogByEventIdUseCase
         {
             "AUDIT.LOG_NOT_FOUND" => AuditErrors.AuditLog.NotFound,
             "AUDIT.INVALID_AUDIT_EVENT_ID" => AuditErrors.AuditLog.InvalidAuditEventId,
-            _ => AuditErrors.ValidationFailed
+
+            _ => Error.Failure(
+                code: exception.Code,
+                message: exception.Message)
         };
     }
 }
