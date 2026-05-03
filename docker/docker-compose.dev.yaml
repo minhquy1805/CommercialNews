@@ -1,0 +1,185 @@
+services:
+  commercialnews-api:
+    build:
+      context: ..
+      dockerfile: docker/api/Dockerfile
+    container_name: commercialnews-api
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Development"
+      ASPNETCORE_URLS: "http://+:8080"
+
+      Sql__ConnectionString: "${API_SQL_CONNECTION_STRING}"
+
+      Logging__LogLevel__Default: "Information"
+      Logging__LogLevel__Microsoft.AspNetCore: "Warning"
+
+      Identity__Tokens__EmailVerificationTokenLifetimeHours: "${API_EMAIL_VERIFICATION_TOKEN_LIFETIME_HOURS}"
+      Identity__Tokens__PasswordResetTokenLifetimeHours: "${API_PASSWORD_RESET_TOKEN_LIFETIME_HOURS}"
+      Identity__Tokens__RefreshTokenLifetimeDays: "${API_REFRESH_TOKEN_LIFETIME_DAYS}"
+
+      Identity__Jwt__Issuer: "${API_JWT_ISSUER}"
+      Identity__Jwt__Audience: "${API_JWT_AUDIENCE}"
+      Identity__Jwt__SecretKey: "${API_JWT_SECRET_KEY}"
+      Identity__Jwt__AccessTokenLifetimeMinutes: "${API_JWT_ACCESS_TOKEN_LIFETIME_MINUTES}"
+
+      Identity__DefaultAdmin__Enabled: "${API_DEFAULT_ADMIN_ENABLED}"
+      Identity__DefaultAdmin__Email: "${API_DEFAULT_ADMIN_EMAIL}"
+      Identity__DefaultAdmin__Password: "${API_DEFAULT_ADMIN_PASSWORD}"
+      Identity__DefaultAdmin__FullName: "${API_DEFAULT_ADMIN_FULLNAME}"
+
+      Authorization__DefaultAdmin__Enabled: "${API_AUTHORIZATION_DEFAULT_ADMIN_ENABLED}"
+      Authorization__DefaultAdmin__Email: "${API_AUTHORIZATION_DEFAULT_ADMIN_EMAIL}"
+
+      AllowedHosts: "${API_ALLOWED_HOSTS}"
+    depends_on:
+      - cn-mssql
+    restart: unless-stopped
+
+  commercialnews-worker:
+    build:
+      context: ..
+      dockerfile: docker/worker/Dockerfile
+    container_name: commercialnews-worker
+    environment:
+      DOTNET_ENVIRONMENT: "Development"
+
+      Logging__LogLevel__Default: "Information"
+      Logging__LogLevel__Microsoft.Hosting.Lifetime: "Information"
+
+      Sql__ConnectionString: "${WORKER_SQL_CONNECTION_STRING}"
+
+      Workers__Outbox__IsEnabled: "${WORKER_OUTBOX_IS_ENABLED}"
+      Workers__Outbox__BatchSize: "${WORKER_OUTBOX_BATCH_SIZE}"
+      Workers__Outbox__PollIntervalSeconds: "${WORKER_OUTBOX_POLL_INTERVAL_SECONDS}"
+      Workers__Outbox__ErrorDelaySeconds: "${WORKER_OUTBOX_ERROR_DELAY_SECONDS}"
+      Workers__Outbox__StopOnFirstFailure: "${WORKER_OUTBOX_STOP_ON_FIRST_FAILURE}"
+      Workers__Outbox__BusyDelaySeconds: "${WORKER_OUTBOX_BUSY_DELAY_SECONDS}"
+
+      Workers__Outbox__Processing__MaxRetryAttempts: "${WORKER_OUTBOX_PROCESSING_MAX_RETRY_ATTEMPTS}"
+      Workers__Outbox__Processing__InitialRetryDelaySeconds: "${WORKER_OUTBOX_PROCESSING_INITIAL_RETRY_DELAY_SECONDS}"
+      Workers__Outbox__Processing__MaxRetryDelaySeconds: "${WORKER_OUTBOX_PROCESSING_MAX_RETRY_DELAY_SECONDS}"
+
+      Workers__EmailDeliveryProcessing__IsEnabled: "${WORKER_EMAIL_DELIVERY_PROCESSING_IS_ENABLED}"
+      Workers__EmailDeliveryProcessing__BatchSize: "${WORKER_EMAIL_DELIVERY_PROCESSING_BATCH_SIZE}"
+      Workers__EmailDeliveryProcessing__PollIntervalSeconds: "${WORKER_EMAIL_DELIVERY_PROCESSING_POLL_INTERVAL_SECONDS}"
+      Workers__EmailDeliveryProcessing__BusyDelaySeconds: "${WORKER_EMAIL_DELIVERY_PROCESSING_BUSY_DELAY_SECONDS}"
+      Workers__EmailDeliveryProcessing__ErrorDelaySeconds: "${WORKER_EMAIL_DELIVERY_PROCESSING_ERROR_DELAY_SECONDS}"
+
+      Notifications__Email__Host: "${WORKER_EMAIL_HOST}"
+      Notifications__Email__Port: "${WORKER_EMAIL_PORT}"
+      Notifications__Email__UseSsl: "${WORKER_EMAIL_USE_SSL}"
+      Notifications__Email__FromName: "${WORKER_EMAIL_FROM_NAME}"
+      Notifications__Email__FromEmail: "${WORKER_EMAIL_FROM_EMAIL}"
+      Notifications__Email__UserName: "${WORKER_EMAIL_USERNAME}"
+      Notifications__Email__Password: "${WORKER_EMAIL_PASSWORD}"
+      Notifications__Email__TimeoutMilliseconds: "${WORKER_EMAIL_TIMEOUT_MILLISECONDS}"
+
+      Notifications__EmailTemplates__TemplateDirectory: "${WORKER_EMAIL_TEMPLATE_DIRECTORY}"
+
+      Notifications__Delivery__Provider: "${WORKER_NOTIFICATION_PROVIDER}"
+      Notifications__Delivery__VerificationEmailPriority: "${WORKER_VERIFICATION_EMAIL_PRIORITY}"
+      Notifications__Delivery__PasswordResetPriority: "${WORKER_PASSWORD_RESET_PRIORITY}"
+      Notifications__Delivery__PasswordChangedPriority: "${WORKER_PASSWORD_CHANGED_PRIORITY}"
+      Notifications__Delivery__EmailVerifiedPriority: "${WORKER_EMAIL_VERIFIED_PRIORITY}"
+      Notifications__Delivery__MaxAttemptCount: "${WORKER_EMAIL_MAX_ATTEMPT_COUNT}"
+      Notifications__Delivery__InitialRetryDelaySeconds: "${WORKER_EMAIL_INITIAL_RETRY_DELAY_SECONDS}"
+      Notifications__Delivery__MaxRetryDelaySeconds: "${WORKER_EMAIL_MAX_RETRY_DELAY_SECONDS}"
+      Notifications__Delivery__PublicFrontendBaseUrl: "${WORKER_PUBLIC_FRONTEND_BASE_URL}"
+
+      RabbitMq__Outbox__HostName: "${RABBITMQ_HOST}"
+      RabbitMq__Outbox__Port: "${RABBITMQ_PORT}"
+      RabbitMq__Outbox__UserName: "${RABBITMQ_USERNAME}"
+      RabbitMq__Outbox__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__Outbox__VirtualHost: "${RABBITMQ_VIRTUAL_HOST}"
+      RabbitMq__Outbox__ExchangeName: "${RABBITMQ_EXCHANGE_NAME}"
+      RabbitMq__Outbox__ExchangeType: "${RABBITMQ_EXCHANGE_TYPE}"
+      RabbitMq__Outbox__DurableExchange: "${RABBITMQ_OUTBOX_DURABLE_EXCHANGE}"
+      RabbitMq__Outbox__PersistentMessages: "${RABBITMQ_OUTBOX_PERSISTENT_MESSAGES}"
+      RabbitMq__Outbox__PublishTimeoutSeconds: "${RABBITMQ_OUTBOX_PUBLISH_TIMEOUT_SECONDS}"
+      RabbitMq__Outbox__ClientProvidedName: "${RABBITMQ_OUTBOX_CLIENT_PROVIDED_NAME}"
+
+      RabbitMq__NotificationsConsumer__HostName: "${RABBITMQ_HOST}"
+      RabbitMq__NotificationsConsumer__Port: "${RABBITMQ_PORT}"
+      RabbitMq__NotificationsConsumer__UserName: "${RABBITMQ_USERNAME}"
+      RabbitMq__NotificationsConsumer__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__NotificationsConsumer__VirtualHost: "${RABBITMQ_VIRTUAL_HOST}"
+      RabbitMq__NotificationsConsumer__ExchangeName: "${RABBITMQ_EXCHANGE_NAME}"
+      RabbitMq__NotificationsConsumer__ExchangeType: "${RABBITMQ_EXCHANGE_TYPE}"
+      RabbitMq__NotificationsConsumer__QueueName: "${RABBITMQ_NOTIFICATIONS_QUEUE_NAME}"
+      RabbitMq__NotificationsConsumer__DurableQueue: "${RABBITMQ_NOTIFICATIONS_DURABLE_QUEUE}"
+      RabbitMq__NotificationsConsumer__ExclusiveQueue: "${RABBITMQ_NOTIFICATIONS_EXCLUSIVE_QUEUE}"
+      RabbitMq__NotificationsConsumer__AutoDeleteQueue: "${RABBITMQ_NOTIFICATIONS_AUTO_DELETE_QUEUE}"
+      RabbitMq__NotificationsConsumer__PrefetchCount: "${RABBITMQ_NOTIFICATIONS_PREFETCH_COUNT}"
+      RabbitMq__NotificationsConsumer__ConsumerTag: "${RABBITMQ_NOTIFICATIONS_CONSUMER_TAG}"
+      RabbitMq__NotificationsConsumer__ClientProvidedName: "${RABBITMQ_NOTIFICATIONS_CLIENT_PROVIDED_NAME}"
+      RabbitMq__NotificationsConsumer__RequeueOnFailure: "${RABBITMQ_NOTIFICATIONS_REQUEUE_ON_FAILURE}"
+
+      RabbitMq__NotificationsConsumer__RoutingKeys__0: "identity.verification_email_requested"
+      RabbitMq__NotificationsConsumer__RoutingKeys__1: "identity.password_reset_requested"
+      RabbitMq__NotificationsConsumer__RoutingKeys__2: "identity.password_changed"
+      RabbitMq__NotificationsConsumer__RoutingKeys__3: "identity.email_verified"
+
+      RabbitMq__AuditConsumer__HostName: "${RABBITMQ_HOST}"
+      RabbitMq__AuditConsumer__Port: "${RABBITMQ_PORT}"
+      RabbitMq__AuditConsumer__UserName: "${RABBITMQ_USERNAME}"
+      RabbitMq__AuditConsumer__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__AuditConsumer__VirtualHost: "${RABBITMQ_VIRTUAL_HOST}"
+      RabbitMq__AuditConsumer__ExchangeName: "${RABBITMQ_EXCHANGE_NAME}"
+      RabbitMq__AuditConsumer__ExchangeType: "${RABBITMQ_EXCHANGE_TYPE}"
+      RabbitMq__AuditConsumer__QueueName: "${RABBITMQ_AUDIT_QUEUE_NAME}"
+      RabbitMq__AuditConsumer__DurableQueue: "${RABBITMQ_AUDIT_DURABLE_QUEUE}"
+      RabbitMq__AuditConsumer__ExclusiveQueue: "${RABBITMQ_AUDIT_EXCLUSIVE_QUEUE}"
+      RabbitMq__AuditConsumer__AutoDeleteQueue: "${RABBITMQ_AUDIT_AUTO_DELETE_QUEUE}"
+      RabbitMq__AuditConsumer__PrefetchCount: "${RABBITMQ_AUDIT_PREFETCH_COUNT}"
+      RabbitMq__AuditConsumer__ConsumerTag: "${RABBITMQ_AUDIT_CONSUMER_TAG}"
+      RabbitMq__AuditConsumer__ClientProvidedName: "${RABBITMQ_AUDIT_CLIENT_PROVIDED_NAME}"
+      RabbitMq__AuditConsumer__RequeueOnFailure: "${RABBITMQ_AUDIT_REQUEUE_ON_FAILURE}"
+
+      RabbitMq__AuditConsumer__RoutingKeys__0: "authorization.user_role_assigned"
+      RabbitMq__AuditConsumer__RoutingKeys__1: "authorization.user_role_revoked"
+      RabbitMq__AuditConsumer__RoutingKeys__2: "authorization.role_permission_granted"
+      RabbitMq__AuditConsumer__RoutingKeys__3: "authorization.role_permission_revoked"
+      RabbitMq__AuditConsumer__RoutingKeys__4: "authorization.role_created"
+      RabbitMq__AuditConsumer__RoutingKeys__5: "authorization.role_updated"
+      RabbitMq__AuditConsumer__RoutingKeys__6: "authorization.role_activated"
+      RabbitMq__AuditConsumer__RoutingKeys__7: "authorization.role_deactivated"
+      RabbitMq__AuditConsumer__RoutingKeys__8: "authorization.permission_created"
+      RabbitMq__AuditConsumer__RoutingKeys__9: "authorization.permission_updated"
+      RabbitMq__AuditConsumer__RoutingKeys__10: "authorization.permission_activated"
+      RabbitMq__AuditConsumer__RoutingKeys__11: "authorization.permission_deactivated"
+    depends_on:
+      - cn-mssql
+      - rabbitmq
+    restart: unless-stopped
+
+  cn-mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: cn-mssql
+    ports:
+      - "1433:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      SA_PASSWORD: "${SA_PASSWORD}"
+    volumes:
+      - cn_mssql_data:/var/opt/mssql
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: cn-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USERNAME}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD}"
+    volumes:
+      - cn_rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+volumes:
+  cn_mssql_data:
+  cn_rabbitmq_data:

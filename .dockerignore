@@ -1,0 +1,132 @@
+# --------------------------------------------------
+# Git
+# --------------------------------------------------
+.git
+.gitignore
+
+# --------------------------------------------------
+# OS / Editor
+# --------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+.vs
+.vscode
+.idea
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# --------------------------------------------------
+# Build outputs
+# --------------------------------------------------
+**/bin
+**/obj
+out
+artifacts
+
+# --------------------------------------------------
+# .NET
+# --------------------------------------------------
+*.cache
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+TestResults
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+
+Generated
+*.generated.cs
+
+# --------------------------------------------------
+# Logs / temp
+# --------------------------------------------------
+*.log
+logs
+tmp
+temp
+
+# --------------------------------------------------
+# Coverage / test reports
+# --------------------------------------------------
+coverage
+coverage-report
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
+
+# --------------------------------------------------
+# Local app settings / secrets
+# --------------------------------------------------
+src/hosts/CommercialNews.Api/appsettings.json
+src/hosts/CommercialNews.Api/appsettings.Development.json
+src/hosts/CommercialNews.Worker/appsettings.json
+src/hosts/CommercialNews.Worker/appsettings.Development.json
+
+appsettings.Local.json
+appsettings.Development.json
+appsettings.*.local.json
+appsettings.Secrets.json
+secrets.json
+
+# --------------------------------------------------
+# Environment files / secrets
+# --------------------------------------------------
+.env
+.env.*
+docker/.env
+docker/.env.*
+!docker/.env.example
+!.env.example
+
+# --------------------------------------------------
+# Docker / containers
+# --------------------------------------------------
+docker-data
+*.pid
+
+# --------------------------------------------------
+# Database local artifacts / secrets
+# --------------------------------------------------
+*.mdf
+*.ldf
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+
+db/00_bootstrap/020_create_logins_users.local.sql
+
+# --------------------------------------------------
+# Node
+# --------------------------------------------------
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --------------------------------------------------
+# Terraform / infra
+# --------------------------------------------------
+.terraform
+*.tfstate
+*.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# --------------------------------------------------
+# Misc
+# --------------------------------------------------
+*.orig
+*.rej
