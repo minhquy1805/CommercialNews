@@ -76,7 +76,13 @@ secrets.json
 # Environment files
 .env
 .env.*
+**/.env
+**/.env.*
+
+# Keep templates
 !.env.example
+!**/.env.example
+!docker/.env.prod.example
 
 # --------------------------------------------------
 # Docker / containers
