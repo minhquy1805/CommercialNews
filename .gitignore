@@ -129,3 +129,7 @@ override.tf.json
 
 # Local SQL bootstrap secrets
 db/00_bootstrap/020_create_logins_users.local.sql
+
+# Certbot / Let's Encrypt local certificates
+docker/certbot/conf/
+docker/certbot/www/
