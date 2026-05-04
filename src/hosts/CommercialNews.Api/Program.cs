@@ -13,7 +13,10 @@ var app = builder.Build();
 
 app.UseHostOpenApi();
 
-app.UseHttpsRedirection();
+if (app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 await app.Services.InitializeApplicationDataAsync();
 
