@@ -29,7 +29,7 @@ using Identity.Application.UseCases.UpdateMyProfile;
 using Identity.Application.UseCases.VerifyEmail;
 using Microsoft.AspNetCore.Mvc;
 
-namespace CommercialNews.Api.Api.Public.Controllers;
+namespace CommercialNews.Api.Api.Public.Controllers.Identity;
 
 [ApiController]
 [Route("api/v1/identity")]
