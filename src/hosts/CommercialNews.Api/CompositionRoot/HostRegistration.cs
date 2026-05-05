@@ -66,6 +66,18 @@ namespace CommercialNews.Api.CompositionRoot
             services.AddScoped<IRequestContext, HttpRequestContext>();
 
             services.AddRouting();
+
+            services.AddCors(options =>
+            {
+                options.AddPolicy("FrontendCors", policy =>
+                {
+                    policy
+                        .WithOrigins("http://localhost:5173")
+                        .AllowAnyHeader()
+                        .AllowAnyMethod();
+                });
+            });
+
             services.AddControllers();
 
             services.AddHostHealthChecks();

@@ -27,6 +27,7 @@ using Identity.Application.UseCases.ResendVerificationEmail;
 using Identity.Application.UseCases.ResetPassword;
 using Identity.Application.UseCases.UpdateMyProfile;
 using Identity.Application.UseCases.VerifyEmail;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Public.Controllers.Identity;
@@ -254,7 +255,8 @@ public sealed class IdentityController : ControllerBase
 
         return this.ToActionResult(result);
     }
-
+    
+    [Authorize]
     [HttpPost("change-password")]
     [ProducesResponseType(typeof(ChangePasswordResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -287,6 +289,7 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
+    [Authorize]
     [HttpPost("logout")]
     [ProducesResponseType(typeof(LogoutResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -317,6 +320,7 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
+    [Authorize]
     [HttpGet("me")]
     [ProducesResponseType(typeof(GetMyProfileResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -349,6 +353,7 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
+    [Authorize]
     [HttpPut("me")]
     [ProducesResponseType(typeof(UpdateMyProfileResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -387,6 +392,7 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
+    [Authorize]
     [HttpPost("logout-all-sessions")]
     [ProducesResponseType(typeof(LogoutAllSessionsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

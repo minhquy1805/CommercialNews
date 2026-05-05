@@ -15,6 +15,8 @@ namespace CommercialNews.Api.CompositionRoot
 
             app.UseRouting();
 
+            app.UseCors("FrontendCors");
+
             app.UseAuthentication();
             app.UseAuthorization();
 
