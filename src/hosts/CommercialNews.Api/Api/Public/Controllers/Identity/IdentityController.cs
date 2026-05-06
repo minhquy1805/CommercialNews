@@ -28,6 +28,7 @@ using Identity.Application.UseCases.ResetPassword;
 using Identity.Application.UseCases.UpdateMyProfile;
 using Identity.Application.UseCases.VerifyEmail;
 using Microsoft.AspNetCore.Authorization;
+using CommercialNews.Api.Api.Common.Auth;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CommercialNews.Api.Api.Public.Controllers.Identity;
@@ -36,6 +37,14 @@ namespace CommercialNews.Api.Api.Public.Controllers.Identity;
 [Route("api/v1/identity")]
 public sealed class IdentityController : ControllerBase
 {
+
+    private readonly IHostEnvironment _environment;
+
+    public IdentityController(IHostEnvironment environment)
+    {
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+    }
+
     [HttpPost("register")]
     [ProducesResponseType(typeof(RegisterResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -120,15 +129,19 @@ public sealed class IdentityController : ControllerBase
         if (result.IsSuccess)
         {
             var value = result.Value!;
+
+            Response.SetRefreshTokenCookie(
+                value.RefreshToken,
+                value.RefreshTokenExpiresAtUtc,
+                _environment.IsProduction());
+
             return Ok(new LoginResponse
             {
                 UserId = value.UserId,
                 PublicId = value.PublicId,
                 Email = value.Email,
                 AccessToken = value.AccessToken,
-                RefreshToken = value.RefreshToken,
-                AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc,
-                RefreshTokenExpiresAtUtc = value.RefreshTokenExpiresAtUtc
+                AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc
             });
         }
 
@@ -201,13 +214,20 @@ public sealed class IdentityController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> RefreshToken(
-        [FromBody] RefreshTokenRequest request,
         [FromServices] IRefreshTokenUseCase useCase,
         CancellationToken cancellationToken)
     {
+        var refreshToken = Request.Cookies[AuthCookieNames.RefreshToken];
+
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            Response.ClearRefreshTokenCookie(_environment.IsProduction());
+            return Unauthorized();
+        }
+
         var applicationRequest = new RefreshTokenRequestDto
         {
-            RefreshToken = request.RefreshToken
+            RefreshToken = refreshToken
         };
 
         var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
@@ -215,15 +235,21 @@ public sealed class IdentityController : ControllerBase
         if (result.IsSuccess)
         {
             var value = result.Value!;
+
+            Response.SetRefreshTokenCookie(
+                value.RefreshToken,
+                value.RefreshTokenExpiresAtUtc,
+                _environment.IsProduction());
+
             return Ok(new RefreshTokenResponse
             {
                 UserId = value.UserId,
                 AccessToken = value.AccessToken,
-                RefreshToken = value.RefreshToken,
-                AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc,
-                RefreshTokenExpiresAtUtc = value.RefreshTokenExpiresAtUtc
+                AccessTokenExpiresAtUtc = value.AccessTokenExpiresAtUtc
             });
         }
+
+        Response.ClearRefreshTokenCookie(_environment.IsProduction());
 
         return this.ToActionResult(result);
     }
@@ -296,20 +322,34 @@ public sealed class IdentityController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Logout(
-        [FromBody] LogoutRequest request,
         [FromServices] ILogoutUseCase useCase,
         CancellationToken cancellationToken)
     {
+        var refreshToken = Request.Cookies[AuthCookieNames.RefreshToken];
+
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            Response.ClearRefreshTokenCookie(_environment.IsProduction());
+
+            return Ok(new LogoutResponse
+            {
+                LoggedOut = true
+            });
+        }
+
         var applicationRequest = new LogoutRequestDto
         {
-            RefreshToken = request.RefreshToken
+            RefreshToken = refreshToken
         };
 
         var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
 
+        Response.ClearRefreshTokenCookie(_environment.IsProduction());
+
         if (result.IsSuccess)
         {
             var value = result.Value!;
+
             return Ok(new LogoutResponse
             {
                 UserId = value.UserId,
@@ -407,6 +447,9 @@ public sealed class IdentityController : ControllerBase
         if (result.IsSuccess)
         {
             var value = result.Value!;
+
+            Response.ClearRefreshTokenCookie(_environment.IsProduction());
+
             return Ok(new LogoutAllSessionsResponse
             {
                 UserId = value.UserId,
