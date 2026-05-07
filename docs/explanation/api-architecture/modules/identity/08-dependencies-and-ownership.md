@@ -7,6 +7,7 @@ Related:
 - `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
 - `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../decisions/adr-0013-outbox-and-delivery-semantics-v1.md`
+- `../../../../decisions/adr-0016-authorization-model-rbac-abac-policies-v1.md`
 - `../../../../decisions/adr-0020-timeout-retry-and-failure-detection-policy-v1.md`
 - `../../../../decisions/adr-0027-stream-processing-and-derived-state-policy-v1.md`
 - `../../../../decisions/adr-0028-consumer-idempotency-replay-and-rebuild-policy-v1.md`
@@ -24,6 +25,9 @@ Identity owns:
   - token-family security truth
 - verification and password-reset tokens/policy
 - current account security truth
+- Identity Admin account status/security operations over Identity-owned truth
+- admin session revocation truth
+- admin email verification override truth
 - cleanup/reconciliation/retention workflows for Identity-owned auth artifacts
 
 Identity does **not** own:
@@ -31,9 +35,15 @@ Identity does **not** own:
 - notification delivery truth
 - audit evidence truth
 - authorization/governance truth
+- admin role assignment
+- admin permission grants
+- effective permission evaluation truth
 - reporting/dashboard truth in other modules
 
 **Rule:** Identity owns **live security truth**, not downstream delivery, evidence, or reporting truth.
+
+**Rule:** Identity Admin owns account/session/security truth only.
+It does not own role, permission, user-role, or role-permission governance.
 
 ---
 
@@ -57,9 +67,32 @@ Approved downstream consumers include:
 
 ### 2.2 Authorization boundary
 
-Identity does **not** depend on Authorization truth for its core domain behavior.
+Authorization owns:
 
-Host/API layers may enforce authorization policies around Identity-admin surfaces where applicable, but Identity domain truth remains independently owned by Identity.
+- roles
+- permissions
+- user-role assignments
+- role-permission grants
+- effective permission inputs
+- governance truth for admin authorization
+
+Identity does not own role/permission governance.
+
+Host/API layers enforce authorization policies around Identity Admin surfaces, but the permission truth used for that enforcement belongs to Authorization.
+
+Identity Admin may receive the authorized actor context, permission decision result, and request context. It must not mutate Authorization governance truth as part of an Identity transaction.
+
+Examples:
+
+- `POST /api/v1/admin/identity/users/{userId}:deactivate`
+  - enforced by `Permission:Identity.User.ManageStatus`
+  - mutates Identity account/session truth only
+  - does not assign/revoke roles
+
+- `POST /api/v1/admin/identity/users/{userId}:mark-email-verified`
+  - enforced by `Permission:Identity.User.VerifyEmail`
+  - mutates Identity verification truth only
+  - does not change Authorization state
 
 ### 2.3 Dependency rule
 
@@ -75,6 +108,10 @@ It does not synchronously call downstream modules to make its own truth valid.
 - Identity must not depend synchronously on Notifications for email delivery.
 - Identity must not depend synchronously on Audit for evidence persistence.
 - Identity must not mutate another module’s truth because it is physically reachable.
+- Identity Admin must not assign roles or revoke roles.
+- Identity Admin must not grant or revoke permissions.
+- Identity Admin must not update Authorization, Audit, Notifications, Redis, or derived read-model truth inside the Identity transaction.
+- Audit must not consume or persist raw verification/reset token fields from delivery-trigger events.
 - Cleanup/reporting workflows must not redefine current account or token-validity truth.
 - Partial maintenance/report outputs must not be treated as authoritative security truth.
 - Identity must not trust stale delivery/report/cache state as authority for:
@@ -189,6 +226,21 @@ Notifications owns:
 - retry/dead/remediation state
 - provider-side operational delivery status
 
+### 6.3.1 Secret-bearing delivery-trigger ownership
+
+Some Identity delivery-trigger events may contain raw one-time token material required for email rendering:
+
+- `identity.verification_email_requested` may carry `RawVerificationToken`
+- `identity.password_reset_requested` may carry `RawResetToken`
+
+These fields are secret-bearing delivery material.
+
+Notifications is the approved consumer for these delivery-trigger events.
+
+Audit, reporting, dashboards, and general operational tooling must not persist raw delivery-token fields.
+
+Identity lifecycle, admin, and audit-oriented events must not contain raw tokens or token hashes.
+
 ### 6.4 Audit owns evidence truth
 
 Audit owns:
@@ -209,6 +261,18 @@ It does **not** mean:
 - email has already been delivered
 - audit evidence is already queryable
 - downstream derived outputs are already current
+
+For Identity Admin mutations, success means:
+
+- Identity account/session/security truth committed
+- required admin outbox event committed
+
+It does not mean:
+
+- Audit has ingested the admin event
+- Notifications has sent an optional admin notification
+- Authorization state changed
+- cache/projection invalidation completed
 
 ---
 
@@ -315,6 +379,9 @@ Identity may expect:
 - Notifications to consume delivery-trigger events asynchronously
 - Audit to consume Identity events asynchronously
 - Authorization to remain a separate governance truth owner
+- Authorization/Host policy layer to enforce explicit admin permission policies before Identity Admin use cases mutate truth
+- Notifications to protect secret-bearing delivery-trigger payloads according to delivery-token policy
+- Audit to dedupe Identity admin events by `MessageId` or equivalent `AuditEventId`
 - cleanup/reconciliation/reporting to be normal operational tools for derived outputs
 
 ### 10.2 What others may expect from Identity
@@ -326,6 +393,9 @@ Other modules may expect:
 - async event emission after truth commit
 - stable `MessageId` on emitted async messages
 - truth-first handling of security-sensitive state
+- Identity Admin mutations emit sanitized admin events after truth commit
+- lifecycle/admin/audit-oriented Identity events never contain raw tokens or token hashes
+- delivery-trigger events that carry raw token material are restricted to approved notification workflows
 - no dependence on delivery/audit/report completion for security success
 
 ### 10.3 What nobody may assume
