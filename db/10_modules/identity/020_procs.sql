@@ -203,6 +203,154 @@ BEGIN
 END;
 GO
 
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_SelectSkipAndTake]
+    @Skip INT,
+    @Take INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Skip < 0 SET @Skip = 0;
+    IF @Take <= 0 SET @Take = 20;
+
+    SELECT
+        [UserId],
+        [PublicId],
+        [Email],
+        [EmailNormalized],
+        [FullName],
+        [AvatarUrl],
+        [IsEmailVerified],
+        [EmailVerifiedAt],
+        [Status],
+        [LockedUntil],
+        [CreatedAt],
+        [UpdatedAt],
+        [LastLoginAt],
+        [Version]
+    FROM [identity].[UserAccount]
+    ORDER BY [CreatedAt] DESC, [UserId] DESC
+    OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_SelectSkipAndTakeWhereDynamic]
+    @FromCreatedAt      DATETIME2(3) = NULL,
+    @ToCreatedAt        DATETIME2(3) = NULL,
+    @Status             VARCHAR(20) = NULL,
+    @IsEmailVerified    BIT = NULL,
+    @Query              NVARCHAR(320) = NULL,
+    @Skip               INT = 0,
+    @Take               INT = 20
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Skip < 0 SET @Skip = 0;
+    IF @Take <= 0 SET @Take = 20;
+
+    IF @FromCreatedAt IS NOT NULL
+       AND @ToCreatedAt IS NOT NULL
+       AND @FromCreatedAt > @ToCreatedAt
+        THROW 51213, 'User account created time range is invalid.', 1;
+
+    IF @Status IS NOT NULL
+        SET @Status = NULLIF(LTRIM(RTRIM(@Status)), '');
+
+    IF @Status IS NOT NULL
+       AND @Status NOT IN ('Unverified', 'Active', 'Locked', 'Disabled')
+        THROW 51214, 'User account status filter is invalid.', 1;
+
+    IF @Query IS NOT NULL
+        SET @Query = NULLIF(LTRIM(RTRIM(@Query)), N'');
+
+    SELECT
+        [UserId],
+        [PublicId],
+        [Email],
+        [EmailNormalized],
+        [FullName],
+        [AvatarUrl],
+        [IsEmailVerified],
+        [EmailVerifiedAt],
+        [Status],
+        [LockedUntil],
+        [CreatedAt],
+        [UpdatedAt],
+        [LastLoginAt],
+        [Version]
+    FROM [identity].[UserAccount]
+    WHERE
+        (@FromCreatedAt IS NULL OR [CreatedAt] >= @FromCreatedAt)
+        AND (@ToCreatedAt IS NULL OR [CreatedAt] <= @ToCreatedAt)
+        AND (@Status IS NULL OR [Status] = @Status)
+        AND (@IsEmailVerified IS NULL OR [IsEmailVerified] = @IsEmailVerified)
+        AND
+        (
+            @Query IS NULL
+            OR [PublicId] LIKE N'%' + @Query + N'%'
+            OR [Email] LIKE N'%' + @Query + N'%'
+            OR [EmailNormalized] LIKE N'%' + @Query + N'%'
+            OR [FullName] LIKE N'%' + @Query + N'%'
+        )
+    ORDER BY [CreatedAt] DESC, [UserId] DESC
+    OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_GetRecordCount]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT COUNT_BIG(1) AS [RecordCount]
+    FROM [identity].[UserAccount];
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_GetRecordCountWhereDynamic]
+    @FromCreatedAt      DATETIME2(3) = NULL,
+    @ToCreatedAt        DATETIME2(3) = NULL,
+    @Status             VARCHAR(20) = NULL,
+    @IsEmailVerified    BIT = NULL,
+    @Query              NVARCHAR(320) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromCreatedAt IS NOT NULL
+       AND @ToCreatedAt IS NOT NULL
+       AND @FromCreatedAt > @ToCreatedAt
+        THROW 51213, 'User account created time range is invalid.', 1;
+
+    IF @Status IS NOT NULL
+        SET @Status = NULLIF(LTRIM(RTRIM(@Status)), '');
+
+    IF @Status IS NOT NULL
+       AND @Status NOT IN ('Unverified', 'Active', 'Locked', 'Disabled')
+        THROW 51214, 'User account status filter is invalid.', 1;
+
+    IF @Query IS NOT NULL
+        SET @Query = NULLIF(LTRIM(RTRIM(@Query)), N'');
+
+    SELECT COUNT_BIG(1) AS [RecordCount]
+    FROM [identity].[UserAccount]
+    WHERE
+        (@FromCreatedAt IS NULL OR [CreatedAt] >= @FromCreatedAt)
+        AND (@ToCreatedAt IS NULL OR [CreatedAt] <= @ToCreatedAt)
+        AND (@Status IS NULL OR [Status] = @Status)
+        AND (@IsEmailVerified IS NULL OR [IsEmailVerified] = @IsEmailVerified)
+        AND
+        (
+            @Query IS NULL
+            OR [PublicId] LIKE N'%' + @Query + N'%'
+            OR [Email] LIKE N'%' + @Query + N'%'
+            OR [EmailNormalized] LIKE N'%' + @Query + N'%'
+            OR [FullName] LIKE N'%' + @Query + N'%'
+        );
+END;
+GO
+
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_UpdateProfile]
     @UserId          BIGINT,
     @FullName        NVARCHAR(200) = NULL,
@@ -305,6 +453,146 @@ BEGIN
         [UpdatedAt] = SYSUTCDATETIME(),
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId;
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_Activate]
+    @UserId          BIGINT,
+    @AffectedRows    INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    UPDATE [identity].[UserAccount]
+    SET
+        [Status] = 'Active',
+        [LockedUntil] = NULL,
+        [UpdatedAt] = SYSUTCDATETIME(),
+        [Version] = [Version] + 1
+    WHERE [UserId] = @UserId
+      AND
+      (
+          [Status] <> 'Active'
+          OR [LockedUntil] IS NOT NULL
+      );
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_Disable]
+    @UserId          BIGINT,
+    @AffectedRows    INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    UPDATE [identity].[UserAccount]
+    SET
+        [Status] = 'Disabled',
+        [LockedUntil] = NULL,
+        [UpdatedAt] = SYSUTCDATETIME(),
+        [Version] = [Version] + 1
+    WHERE [UserId] = @UserId
+      AND
+      (
+          [Status] <> 'Disabled'
+          OR [LockedUntil] IS NOT NULL
+      );
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_Lock]
+    @UserId          BIGINT,
+    @LockedUntil     DATETIME2(3),
+    @AffectedRows    INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
+    IF @LockedUntil IS NULL
+        THROW 51215, 'LockedUntil is required.', 1;
+
+    IF @LockedUntil <= @NowUtc
+        THROW 51216, 'LockedUntil must be in the future.', 1;
+
+    UPDATE [identity].[UserAccount]
+    SET
+        [Status] = 'Locked',
+        [LockedUntil] = @LockedUntil,
+        [UpdatedAt] = @NowUtc,
+        [Version] = [Version] + 1
+    WHERE [UserId] = @UserId
+      AND
+      (
+          [Status] <> 'Locked'
+          OR [LockedUntil] IS NULL
+          OR [LockedUntil] <> @LockedUntil
+      );
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_Unlock]
+    @UserId          BIGINT,
+    @AffectedRows    INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    UPDATE [identity].[UserAccount]
+    SET
+        [Status] = CASE
+            WHEN [IsEmailVerified] = 1 THEN 'Active'
+            ELSE 'Unverified'
+        END,
+        [LockedUntil] = NULL,
+        [UpdatedAt] = SYSUTCDATETIME(),
+        [Version] = [Version] + 1
+    WHERE [UserId] = @UserId
+      AND
+      (
+          [Status] = 'Locked'
+          OR [LockedUntil] IS NOT NULL
+      );
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_MarkEmailVerified]
+    @UserId          BIGINT,
+    @AffectedRows    INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
+    UPDATE [identity].[UserAccount]
+    SET
+        [IsEmailVerified] = 1,
+        [EmailVerifiedAt] = @NowUtc,
+        [Status] = CASE
+            WHEN [Status] = 'Unverified' THEN 'Active'
+            ELSE [Status]
+        END,
+        [UpdatedAt] = @NowUtc,
+        [Version] = [Version] + 1
+    WHERE [UserId] = @UserId
+      AND [IsEmailVerified] = 0;
 
     SET @AffectedRows = @@ROWCOUNT;
 END;
