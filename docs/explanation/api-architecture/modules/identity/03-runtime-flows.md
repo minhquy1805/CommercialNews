@@ -1,9 +1,10 @@
 # Identity — Runtime Flows (V1)
 
-This module supports arc42 runtime scenarios:
+This module supports arc42 runtime scenarios and Identity admin runtime operations:
 
 - Scenario 4: registration + verification
 - Scenario 5: forgot + reset password
+- Identity Admin account/session/security operations
 
 Related:
 
@@ -14,6 +15,8 @@ Related:
 - `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
 - `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../decisions/adr-0013-outbox-and-delivery-semantics-v1.md`
+- `../../../../decisions/adr-0016-authorization-model-rbac-abac-policies-v1.md`
+- `../../../../decisions/adr-0018-transaction-boundaries-and-consistency-model-v1.md`
 - `../../../../decisions/adr-0020-timeout-retry-and-failure-detection-policy-v1.md`
 - `../../../../decisions/adr-0027-stream-processing-and-derived-state-policy-v1.md`
 - `../../../../decisions/adr-0028-consumer-idempotency-replay-and-rebuild-policy-v1.md`
@@ -35,6 +38,10 @@ Used for:
 - forgot/reset password truth handling
 - password change
 - token revoke / reuse-detection response
+- admin account status changes
+- admin email verification override
+- admin refresh-token/session revocation
+- admin lock/unlock where schema support exists
 
 ### B) Async side-effect lane
 
@@ -45,6 +52,9 @@ Used for:
 - audit side effects
 - optional security notification signals
 - optional login-history style derived consumers
+- admin account/security audit events
+- optional admin security notification signals
+- optional cache invalidation for account/session/security changes
 
 ### C) Batch / cleanup / maintenance lane
 
@@ -55,6 +65,8 @@ Used for:
 - retention cleanup for auth/session artifacts
 - optional archival / summarization for login history or auth maintenance outputs
 - reconciliation/reporting for stuck or orphan auth artifacts
+- reconciliation between Identity truth and admin/security derived views
+- investigation summaries for account/session/security operations
 
 ### Core runtime rules
 
@@ -77,6 +89,49 @@ Duplicates, replay, lag, and worker restart must be tolerated safely.
 
 **Rule:** Identity resolves security ambiguity from authoritative truth, not from delivery state, timeout guesswork, or client belief.
 
+**Rule:** Identity Admin operations are policy-protected truth commands.
+Every `/api/v1/admin/identity/*` endpoint must enforce an explicit permission policy before mutating Identity truth.
+
+**Rule:** Identity Admin mutations write audit-oriented outbox events.
+Audit consumes these events asynchronously and idempotently. Audit visibility does not define whether the Identity mutation succeeded.
+
+**Rule:** Identity Admin transactions remain inside the Identity truth boundary.
+Admin commands must not update Authorization, Audit, Notifications, Redis, or derived read-model truth in the same transaction.
+
+### Event type payload rules
+
+Delivery-trigger events:
+
+- `identity.verification_email_requested`
+- `identity.password_reset_requested`
+
+Lifecycle/audit-oriented events include:
+
+- `identity.user_registered`
+- `identity.user_logged_in`
+- `identity.email_verified`
+- `identity.password_changed`
+- `identity.admin.user_activated`
+- `identity.admin.user_deactivated`
+- `identity.admin.email_marked_verified`
+- `identity.admin.user_sessions_revoked`
+- `identity.admin.user_locked`
+- `identity.admin.user_unlocked`
+
+Delivery-trigger events may carry raw one-time tokens when required by Notifications.
+
+Delivery-trigger events must be routed only to approved consumers such as Notifications. Audit consumers must not persist raw delivery-token fields.
+
+Lifecycle/audit-oriented events must never carry raw tokens or token hashes.
+
+Secret-bearing delivery-trigger messages must not be:
+
+- logged as raw payload JSON
+- attached to exception logs, traces, metrics, or error diagnostics
+- copied into `Audit.Data`
+- persisted into `EmailDelivery.Data` unless explicitly required and protected by policy
+- exposed through admin dashboards, support tools, or operational message viewers
+
 ---
 
 ## Flow A — Register → Verification email trigger → Verify
@@ -87,7 +142,7 @@ Create account truth synchronously, then trigger verification delivery asynchron
 
 ### Upstream truth boundary
 
-1. Client calls `POST /auth/register`.
+1. Client calls `POST /api/v1/auth/register`.
 2. Identity validates request and policy.
 3. Identity creates user in `Unverified` state.
 4. Identity creates verification intent/token according to policy.
@@ -97,27 +152,29 @@ Create account truth synchronously, then trigger verification delivery asynchron
 
 Identity may emit:
 
-- `Auth.UserRegistered`
+- `identity.user_registered`
   - business/audit timeline event
-- `Auth.EmailVerificationRequested`
+- `identity.verification_email_requested`
   - canonical delivery-trigger event for Notifications
 
 ### Required event semantics
 
 - each emitted async message carries a stable `MessageId`
 - payload must be minimal and privacy-aware
-- raw verification token must **not** be emitted
-- only token identifier or safe delivery context may be emitted where needed
+- general lifecycle/audit events must not include raw verification tokens
+- `identity.verification_email_requested` is a delivery-trigger event and may include `RawVerificationToken` because Notifications needs it to render the verification link
+- `RawVerificationToken` is a secret-bearing payload field and must be redacted from logs, errors, traces, metrics, audit payloads, and diagnostics
+- the database stores only `TokenHash`; the raw token is delivery material, not Identity persisted truth
 
 ### Downstream flow
 
-6. Notifications consumes `Auth.EmailVerificationRequested`.
+6. Notifications consumes `identity.verification_email_requested`.
 7. Notifications creates or loads delivery workflow state.
 8. Notifications attempts provider send using its own delivery-state rules.
-9. Client later calls `POST /auth/verify-email` with token.
+9. Client later calls `POST /api/v1/auth/verify-email` with token.
 10. Identity validates token against authoritative token/account truth.
 11. Identity marks user verified/active.
-12. Identity emits `Auth.UserEmailVerified`.
+12. Identity emits `identity.email_verified`.
 
 ### Runtime stream semantics
 
@@ -167,11 +224,11 @@ Issue and rotate session credentials safely with deterministic token-family beha
 
 ### Truth flow
 
-1. Client calls `POST /auth/login`.
+1. Client calls `POST /api/v1/auth/login`.
 2. Identity validates credentials and policy.
 3. Identity returns access token + refresh token according to policy.
 4. Refresh-token truth is persisted server-side.
-5. Client later calls `POST /auth/refresh`.
+5. Client later calls `POST /api/v1/auth/refresh`.
 6. Identity validates current refresh token against authoritative truth.
 7. Identity revokes old token, issues new refresh token, and returns new token pair.
 8. Identity persists replacement relation / token-family linkage if modeled.
@@ -180,7 +237,7 @@ Issue and rotate session credentials safely with deterministic token-family beha
 
 Identity may emit optional operational/audit events such as:
 
-- `Auth.UserLoggedIn`
+- `identity.user_logged_in`
 
 These are derived side effects and do not define session validity.
 
@@ -225,7 +282,7 @@ Allow secure password reset without leaking account existence and without coupli
 
 ### Truth flow
 
-1. Client calls `POST /auth/forgot-password`.
+1. Client calls `POST /api/v1/auth/forgot-password`.
 2. Identity applies anti-enumeration response policy.
 3. If account exists and policy allows, Identity creates password-reset intent/token.
 4. Identity writes async intent/outbox in the same truth transaction.
@@ -234,24 +291,26 @@ Allow secure password reset without leaking account existence and without coupli
 
 Identity emits:
 
-- `Auth.PasswordResetRequested`
+- `identity.password_reset_requested`
 
 ### Required event semantics
 
 - message carries stable `MessageId`
-- payload is minimal and delivery-safe
-- raw reset token must **not** be emitted
-- token identifier or safe delivery context only
+- payload must be minimal and privacy-aware
+- general lifecycle/audit events must not include raw reset tokens
+- `identity.password_reset_requested` is a delivery-trigger event and may include `RawResetToken` because Notifications needs it to render the reset link
+- `RawResetToken` is a secret-bearing payload field and must be redacted from logs, errors, traces, metrics, audit payloads, and diagnostics
+- the database stores only `TokenHash`; the raw token is delivery material, not Identity persisted truth
 
 ### Downstream flow
 
-5. Notifications consumes `Auth.PasswordResetRequested`.
+5. Notifications consumes `identity.password_reset_requested`.
 6. Notifications handles delivery workflow asynchronously.
-7. Client calls `POST /auth/reset-password` with token and new password.
+7. Client calls `POST /api/v1/auth/reset-password` with token and new password.
 8. Identity validates token against authoritative truth.
 9. Identity updates password.
 10. Identity revokes relevant refresh tokens by policy.
-11. Identity emits `Auth.UserPasswordChanged`.
+11. Identity emits `identity.password_changed`.
 
 ### Runtime stream semantics
 
@@ -305,7 +364,7 @@ Create a valid **new** verification intent safely without being blocked by old d
 
 ### Truth flow
 
-1. Client calls `POST /auth/resend-verification`.
+1. Client calls `POST /api/v1/auth/resend-verification`.
 2. Identity enforces anti-abuse / rate-limit policy.
 3. Identity determines whether resend is allowed under current verification truth.
 4. Identity creates a **new logical verification intent/token** if policy allows.
@@ -315,7 +374,7 @@ Create a valid **new** verification intent safely without being blocked by old d
 
 Identity emits a new delivery-trigger event:
 
-- `Auth.EmailVerificationRequested`
+- `identity.verification_email_requested`
 
 ### Runtime semantics
 
@@ -414,6 +473,244 @@ Ensure security-sensitive behavior remains correct even when email, audit, or ma
 
 ---
 
+## Flow G — Admin activates or deactivates user
+
+### Goal
+
+Change account access state immediately from Identity truth and emit an auditable admin security event without waiting for downstream consumers.
+
+### Truth flow
+
+1. Admin calls one of:
+   - `POST /api/v1/admin/identity/users/{userId}:activate`
+   - `POST /api/v1/admin/identity/users/{userId}:deactivate`
+2. API enforces `Permission:Identity.User.ManageStatus`.
+3. ABAC/context rules are evaluated:
+   - actor cannot deactivate themselves through normal admin APIs
+   - protected system accounts cannot be deactivated through normal admin APIs
+4. Identity loads target `UserAccount`.
+5. Identity applies the account status transition.
+6. Identity revokes active refresh tokens when policy or request requires it.
+7. Identity writes the corresponding outbox event in the same truth transaction.
+8. Transaction commits.
+9. API returns committed Identity result.
+
+### Async events emitted
+
+Identity emits one of:
+
+- `identity.admin.user_activated`
+- `identity.admin.user_deactivated`
+
+### Event semantics
+
+- carries stable `MessageId`
+- includes target user id, actor user id, previous/new status, reason, and correlation id where available
+- must not contain password hashes, raw tokens, token hashes, or unnecessary PII
+- safe under duplicate delivery, retry, and replay
+
+### Downstream flow
+
+10. Outbox worker publishes the event to RabbitMQ.
+11. Audit consumes the event idempotently.
+12. Notifications may consume selected events if user-facing security notification is enabled.
+13. Cache/projection invalidation may happen asynchronously.
+
+### Failure modes
+
+- audit ingestion delayed:
+  - account status truth still applies immediately
+- notification delivery failed:
+  - account status truth still applies immediately
+- RabbitMQ publish timeout:
+  - outbox retry handles producer-side ambiguity
+- client timeout:
+  - admin reconciles by reading Identity truth
+- duplicate request:
+  - command converges to current target state
+- duplicate event delivery:
+  - Audit dedupes by `MessageId` or equivalent `AuditEventId`
+
+### Runtime rules
+
+- Identity truth defines account status.
+- Deactivated users must not be able to login or refresh from Identity truth.
+- Audit is evidence, not account truth.
+- Notifications are side effects, not success criteria.
+
+---
+
+## Flow H — Admin marks email as verified
+
+### Goal
+
+Allow a privileged admin override of email verification state while preserving auditability and avoiding token leakage.
+
+### Truth flow
+
+1. Admin calls `POST /api/v1/admin/identity/users/{userId}:mark-email-verified`.
+2. API enforces `Permission:Identity.User.VerifyEmail`.
+3. ABAC/context rules are evaluated where required:
+   - protected system-account restrictions apply where policy requires
+   - actor, target, IP/UserAgent, and correlation context are captured for audit
+4. Identity loads target `UserAccount`.
+5. Identity sets `IsEmailVerified = true` and `EmailVerifiedAt`.
+6. Identity may revoke or obsolete active verification tokens according to policy.
+7. Identity writes `identity.admin.email_marked_verified` outbox event in the same truth transaction.
+8. Transaction commits.
+9. API returns committed verification state.
+
+### Async event emitted
+
+Identity emits:
+
+- `identity.admin.email_marked_verified`
+
+### Event semantics
+
+- this event is distinct from user-driven `identity.email_verified`
+- carries stable `MessageId`
+- includes actor user id, target user id, reason, and correlation id where available
+- must not contain raw verification tokens or token hashes
+
+### Downstream flow
+
+10. Outbox worker publishes the event to RabbitMQ.
+11. Audit consumes the event idempotently.
+12. Notifications may consume the event if user-facing verification notification is enabled.
+13. Cache/projection invalidation may happen asynchronously.
+
+### Failure modes
+
+- audit ingestion delayed:
+  - email verification truth still applies immediately
+- duplicate request:
+  - command converges safely if already verified
+- stale verification email later delivered:
+  - delivery does not change already-verified truth
+- replay of old verification delivery event:
+  - must not override fresher verification truth
+
+### Runtime rules
+
+- admin verification override is high-risk and must be audited.
+- verification truth is owned by Identity.
+- notification delivery state does not define verification state.
+
+---
+
+## Flow I — Admin revokes user sessions
+
+### Goal
+
+Invalidate active refresh-token sessions for a target user immediately from Identity truth.
+
+### Truth flow
+
+1. Admin calls `POST /api/v1/admin/identity/users/{userId}:revoke-sessions`.
+2. API enforces `Permission:Identity.User.RevokeSessions`.
+3. ABAC/context rules are evaluated:
+   - actor cannot revoke their own current session through normal admin APIs unless explicitly allowed
+   - protected system-account restrictions apply where policy requires
+4. Identity loads active refresh tokens for target user.
+5. Identity revokes matching active refresh tokens.
+6. Identity writes `identity.admin.user_sessions_revoked` outbox event in the same truth transaction.
+7. Transaction commits.
+8. API returns committed revocation result.
+
+### Async event emitted
+
+Identity emits:
+
+- `identity.admin.user_sessions_revoked`
+
+### Event semantics
+
+- carries stable `MessageId`
+- includes actor user id, target user id, revoked session count, reason, and correlation id where available
+- must not contain raw refresh tokens or token hashes
+
+### Downstream flow
+
+9. Outbox worker publishes the event to RabbitMQ.
+10. Audit consumes the event idempotently.
+11. Cache/projection invalidation may happen asynchronously.
+
+### Failure modes
+
+- audit ingestion delayed:
+  - revoked sessions remain invalid immediately
+- duplicate request:
+  - command converges to zero or current revoked session count according to documented result policy
+- client timeout:
+  - reconcile from Identity session truth
+- duplicate event delivery:
+  - Audit dedupes by `MessageId` or equivalent `AuditEventId`
+
+### Runtime rules
+
+- refresh-token validity is determined by Identity truth.
+- revoked refresh tokens must not authorize refresh.
+- cache/projection lag must not preserve old token authority.
+
+---
+
+## Flow J — Admin locks or unlocks user *(conditional in V1)*
+
+### Goal
+
+Set or clear account lock state where Identity schema supports lock fields.
+
+### Availability
+
+This flow is available only if Identity V1 schema supports lock state such as `LockedUntil` or equivalent account-security fields.
+
+### Truth flow
+
+1. Admin calls one of:
+   - `POST /api/v1/admin/identity/users/{userId}:lock`
+   - `POST /api/v1/admin/identity/users/{userId}:unlock`
+2. API enforces `Permission:Identity.User.ManageSecurity`.
+3. ABAC/context rules are evaluated:
+   - actor cannot lock themselves through normal admin APIs
+   - protected system accounts cannot be locked through normal admin APIs
+4. Identity loads target `UserAccount`.
+5. Identity applies or clears lock state.
+6. Identity revokes active refresh tokens if policy or request requires it.
+7. Identity writes the corresponding outbox event in the same truth transaction.
+8. Transaction commits.
+9. API returns committed lock state.
+
+### Async events emitted
+
+Identity emits one of:
+
+- `identity.admin.user_locked`
+- `identity.admin.user_unlocked`
+
+### Failure modes
+
+- schema does not support lock state:
+  - flow remains unavailable/out of scope
+- audit ingestion delayed:
+  - lock/unlock truth still applies immediately
+- duplicate request:
+  - command converges to current lock state
+- client timeout:
+  - reconcile from Identity account/security truth
+- duplicate event delivery:
+  - Audit dedupes by `MessageId` or equivalent `AuditEventId`
+
+### Runtime rules
+
+- lock state is Identity security truth.
+- locked users cannot sign in according to account state policy.
+- unlocking does not verify email.
+- unlocking does not assign roles or permissions.
+- Audit/Notifications lag does not define lock truth.
+
+---
+
 ## Summary
 
 Identity runtime in V1 is governed by the following rules:
@@ -423,10 +720,18 @@ Identity runtime in V1 is governed by the following rules:
 3. Successful Identity writes mean truth committed, and where needed, async intent/outbox committed.  
 4. Identity-derived async processing is at-least-once; duplicates and replay are normal.  
 5. Verification/reset flows depend on committed identity intents, not provider success.  
-6. `Auth.EmailVerificationRequested` and `Auth.PasswordResetRequested` are canonical delivery-trigger events for Notifications.  
+6. `identity.verification_email_requested` and `identity.password_reset_requested` are canonical delivery-trigger events for Notifications.
 7. Async events use stable `MessageId` and minimal privacy-aware payloads.  
-8. Raw verification/reset tokens must never appear in async event payloads.  
+8. Raw verification/reset tokens may appear only in approved Notifications delivery-trigger events and must be treated as secret-bearing payload fields. They must never appear in audit, lifecycle, logging, metrics, traces, errors, or general reporting payloads.
 9. Refresh rotation and reuse detection must converge deterministically from authoritative token truth.  
 10. Read-your-writes is required after security-sensitive truth changes.  
 11. Expired/revoked artifacts may be cleaned up later without redefining current truth.  
 12. Timeout ambiguity must be resolved from Identity truth, not from client belief or delivery state.
+13. Identity Admin endpoints must enforce explicit permission policies before mutating truth.
+14. Identity Admin mutations commit Identity truth and admin outbox events atomically.
+15. Audit consumes Identity Admin events asynchronously and idempotently.
+16. Admin command success does not imply Audit ingestion, Notification delivery, cache invalidation, or projection refresh.
+17. Admin state-setting commands should converge safely under repeated requests.
+18. Identity Admin must not mutate Authorization role/permission truth.
+19. Session revocation and account deactivation must take effect immediately from Identity truth.
+20. Lock/unlock flows are conditional until Identity schema supports lock state.

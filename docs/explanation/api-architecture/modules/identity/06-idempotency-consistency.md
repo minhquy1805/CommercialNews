@@ -495,6 +495,35 @@ Examples:
 - forgot-password may create a new reset intent by policy
 - duplicate retry of the same old request must not create multiple conflicting truth states
 
+## 5.5 Admin command idempotency and convergence
+
+Identity Admin state-setting commands are convergent by default.
+
+Applies to:
+
+- `POST /api/v1/admin/identity/users/{userId}:activate`
+- `POST /api/v1/admin/identity/users/{userId}:deactivate`
+- `POST /api/v1/admin/identity/users/{userId}:lock` *(where schema supports lock state)*
+- `POST /api/v1/admin/identity/users/{userId}:unlock` *(where schema supports lock state)*
+- `POST /api/v1/admin/identity/users/{userId}:mark-email-verified`
+- `POST /api/v1/admin/identity/users/{userId}:revoke-sessions`
+
+Rules:
+
+- same state-setting command against an already matching state should return the current committed state
+- convergent no-op commands should not emit duplicate state-change events unless audit policy explicitly requires attempt logging
+- client timeout after an admin mutation must be reconciled from Identity truth
+- repeated admin commands must not create duplicate harmful downstream effects
+- required admin outbox events must use stable `MessageId`
+- downstream Audit must dedupe admin events by `MessageId` or equivalent `AuditEventId`
+
+Examples:
+
+- activating an already active user returns current active state
+- deactivating an already inactive user returns current inactive state
+- marking an already verified email returns current verified state
+- revoking sessions when no active sessions remain returns a successful committed state with zero newly revoked sessions
+
 ---
 
 ## 6) Outbox & downstream side effects
@@ -505,41 +534,77 @@ Email sending must not block core Identity flows.
 
 Identity endpoints may return success or accepted-style outcomes before email delivery completes.
 
+Examples:
+
+- registration may commit before verification email is delivered
+- forgot-password may commit before reset email is delivered
+- resend-verification may commit before verification email is delivered
+
 ### 6.2 Canonical async event categories
 
-Identity may emit two broad categories of async events.
+Identity emits two broad categories of async events.
 
-#### Business/audit timeline events
+#### Lifecycle / audit-oriented events
 
 Examples:
 
-- `Auth.UserRegistered`
-- `Auth.UserEmailVerified`
-- `Auth.UserPasswordChanged`
-- `Auth.UserLoggedIn` *(optional)*
+- `identity.user_registered`
+- `identity.email_verified`
+- `identity.password_changed`
+- `identity.user_logged_in` *(optional)*
+- `identity.admin.user_activated`
+- `identity.admin.user_deactivated`
+- `identity.admin.email_marked_verified`
+- `identity.admin.user_sessions_revoked`
+- `identity.admin.user_locked`
+- `identity.admin.user_unlocked`
+
+Lifecycle/audit-oriented events must never contain:
+
+- raw verification tokens
+- raw reset tokens
+- raw refresh tokens
+- token hashes
+- password hashes
+- unnecessary PII
 
 #### Delivery-trigger events for Notifications
 
 Examples:
 
-- `Auth.EmailVerificationRequested`
-- `Auth.PasswordResetRequested`
+- `identity.verification_email_requested`
+- `identity.password_reset_requested`
 
-These are the canonical notification-trigger events for downstream delivery workflows.
+These are canonical notification-trigger events for downstream delivery workflows.
+
+Delivery-trigger events may carry raw one-time token material when required by Notifications:
+
+- `identity.verification_email_requested` may carry `RawVerificationToken`
+- `identity.password_reset_requested` may carry `RawResetToken`
+
+These fields are secret-bearing delivery material.
+
+They must not be:
+
+- logged as raw payload JSON
+- attached to exception logs
+- copied into `Audit.Data`
+- exposed through metrics, traces, diagnostics, dashboards, or support tools
+- routed to consumers that are not approved to handle secret-bearing delivery messages
 
 ### 6.3 Producer-side contract
 
 Identity guarantees that emitted async messages:
 
 - carry stable `MessageId`
-- are derived from committed truth
+- are derived from committed Identity truth
 - contain minimal privacy-aware payloads
-- never contain raw verification/reset token values
+- use `BusinessDedupeKey` where duplicate outward effects may be harmful
+- distinguish lifecycle/audit events from delivery-trigger events
 
-If a downstream delivery flow needs token-related context, Identity emits only:
+For delivery-trigger events, raw verification/reset token fields are delivery material only.
 
-- token identifier
-- or equivalent safe delivery context
+Identity database truth stores only token hashes.
 
 ### 6.4 Consumer requirements
 
@@ -550,11 +615,24 @@ Downstream consumers must tolerate:
 - provider timeout ambiguity
 - delayed or replayed delivery after newer truth already exists
 
-Notifications and other consumers must apply:
+Audit consumers must:
 
-- message-level dedupe
-- business-intent protections where needed
-- truth resync when freshness/order matters
+- dedupe by `MessageId` or equivalent `AuditEventId`
+- never persist raw delivery-token fields
+- store only sanitized investigation metadata
+
+Notifications consumers must apply:
+
+- message-level dedupe by `MessageId`
+- business-level dedupe by `BusinessDedupeKey` where duplicate user-visible delivery is harmful
+- durable delivery state before/around provider calls
+- redaction of secret-bearing token fields from logs and diagnostics
+
+Cache/projection consumers must:
+
+- treat Identity truth as authoritative
+- avoid stale event apply over fresher Identity truth
+- resync from truth where freshness/order matters
 
 ### 6.5 Timeout ambiguity rule
 
@@ -581,8 +659,20 @@ For Identity, Outbox is the durable bridge between:
 This means:
 
 - side effects derive from committed Identity truth
-- missing or delayed side effects are recoverable by replay
+- missing or delayed side effects are recoverable by retry/replay
 - side-effect timing does not redefine security truth
+
+### 6.7 Required outbox atomicity
+
+When an Identity operation requires downstream side effects, Identity must commit atomically:
+
+- Identity truth change
+- required lifecycle/token updates
+- required `OutboxMessage`
+
+If the required outbox intent cannot be committed, the Identity command must not return success.
+
+After commit, producer-side publish failures and consumer-side processing failures are handled by worker/consumer retry, DLQ/dead-state, observability, and remediation.
 
 ---
 
@@ -766,6 +856,93 @@ A repeated reset/change request must not:
 - create contradictory password truth
 - leave old sessions active because a downstream cleanup job has not caught up
 
+## 10.5 Identity Admin consistency
+
+### 10.5.1 Admin account status changes
+
+Admin activate/deactivate operations must be truth-first.
+
+For deactivate:
+
+- account status must update in Identity truth
+- active refresh tokens should be revoked when policy/request requires it
+- outbox event must be committed atomically with the truth change
+- deactivated users must not login or refresh from Identity truth
+
+Allowed to lag:
+
+- Audit ingestion
+- Notifications delivery
+- cache invalidation
+- projections/security summaries
+
+Not allowed to lag:
+
+- account status truth
+- refresh-token revocation truth where applied
+
+### 10.5.2 Admin email verification override
+
+Admin email verification override must update Identity verification truth directly.
+
+Rules:
+
+- `IsEmailVerified` and `EmailVerifiedAt` are Identity truth
+- active verification tokens may be revoked or made obsolete according to policy
+- admin event `identity.admin.email_marked_verified` must not contain raw verification tokens or token hashes
+- this event is distinct from user-driven `identity.email_verified`
+- repeated override against an already verified user should converge safely
+
+### 10.5.3 Admin session revocation
+
+Admin session revocation must invalidate refresh-token truth immediately.
+
+Rules:
+
+- revoked refresh tokens must not authorize refresh
+- cache/projection lag must not preserve old token authority
+- duplicate revoke command should converge safely
+- if no active sessions remain, the command should return current committed revocation state according to response policy
+- admin event `identity.admin.user_sessions_revoked` must not contain raw refresh tokens or token hashes
+
+### 10.5.4 Admin lock/unlock consistency
+
+Where schema supports lock state:
+
+- lock/unlock state is Identity security truth
+- locked users cannot sign in according to account state policy
+- unlock does not verify email
+- unlock does not assign roles or permissions
+- repeated lock/unlock commands should converge safely
+
+Where schema does not support lock state:
+
+- lock/unlock commands remain unavailable or out of scope
+- callers must receive deterministic unsupported-operation behavior
+
+### 10.5.5 Admin transaction boundary
+
+Identity Admin commands must not update the following inside the Identity truth transaction:
+
+- Authorization role/permission truth
+- Audit business truth
+- Notifications delivery truth
+- Redis/cache state as success condition
+- derived read-model truth
+
+Admin success means:
+
+- Identity truth committed
+- required admin outbox intent committed
+
+Admin success does not mean:
+
+- RabbitMQ publish completed
+- Audit ingested the event
+- Notifications sent email
+- cache invalidation completed
+- projections caught up
+
 ---
 
 ## 11) Safe reconciliation after ambiguous outcomes
@@ -926,6 +1103,18 @@ Minimum signals:
 - stale/replayed security action rejection count
 - cleanup/reconciliation activity for auth artifacts where used
 - ownership-generation mismatch count if future ownership-sensitive workflows are introduced
+- admin identity mutation success/failure rate
+- admin deactivate/activate count
+- admin mark-email-verified count
+- admin revoke-sessions count
+- admin lock/unlock count where supported
+- admin protected-account denial count
+- admin self-action denial count
+- admin ABAC denial count
+- Audit ingestion lag for `identity.admin.*`
+- Audit dedupe hits for `identity.admin.*`
+- Notification business-dedupe rejects for Identity delivery-trigger events
+- raw-token redaction/secret-field logging violations where detectable
 
 Logs should include:
 
@@ -961,4 +1150,11 @@ Identity correctness in V1 rests on the following rules:
 12. Stale derived state must never weaken fresher security truth.  
 13. Replay/rebuild/remediation workflows must remain rerun-safe.  
 14. Candidate derived maintenance/reporting output must be validated before publication when correctness matters.  
-15. Singleton/ownership semantics are not relied on unless explicitly protected by authoritative generation/fencing rules.
+15. Singleton/ownership semantics are not relied on unless explicitly protected by authoritative generation/fencing rules.  
+16. Raw verification/reset tokens may appear only in approved Notifications delivery-trigger events and must be treated as secret-bearing payload fields.  
+17. Lifecycle, audit-oriented, admin, logging, metrics, trace, error, and reporting payloads must never contain raw tokens or token hashes.  
+18. Identity Admin state-setting commands are convergent by default.  
+19. Identity Admin mutations must commit Identity truth and required admin outbox events atomically.  
+20. Audit consumes Identity Admin events asynchronously and idempotently.  
+21. Identity Admin must not mutate Authorization role/permission truth.  
+22. Admin account deactivation and session revocation must take effect immediately from Identity truth.
