@@ -4,6 +4,7 @@ using CommercialNews.BuildingBlocks.Outbox.Runtime;
 using CommercialNews.Worker.Audit.Consumers;
 using CommercialNews.Worker.Audit.Handlers;
 using CommercialNews.Worker.Audit.Handlers.Authorization;
+using CommercialNews.Worker.Audit.Handlers.Identity;
 using CommercialNews.Worker.Configuration;
 using CommercialNews.Worker.Notifications.Consumers;
 using CommercialNews.Worker.Notifications.Handlers;
@@ -49,6 +50,12 @@ public static class WorkerModuleRegistration
         services.AddScoped<IOutboxMessageHandler, IdentityPasswordResetRequestedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, IdentityPasswordChangedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, IdentityEmailVerifiedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, IdentityUserActivatedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, IdentityUserDisabledOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, IdentityUserLockedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, IdentityUserUnlockedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, IdentityEmailMarkedVerifiedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, IdentityUserSessionsRevokedOutboxHandler>();
 
         services.AddScoped<IOutboxMessageHandler, NotificationsEmailSentOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, NotificationsEmailFailedOutboxHandler>();
@@ -98,6 +105,17 @@ public static class WorkerModuleRegistration
         services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionUpdatedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionActivatedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionDeactivatedAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, IdentityEmailVerifiedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, IdentityPasswordChangedAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserActivatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserDisabledAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserLockedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserUnlockedAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, IdentityEmailMarkedVerifiedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserSessionsRevokedAuditHandler>();
 
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));
