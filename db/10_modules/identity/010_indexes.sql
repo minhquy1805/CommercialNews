@@ -72,6 +72,27 @@ BEGIN
 END
 GO
 
+-- Admin user list: status filter + created date sorting/paging
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_UserAccount_Status_CreatedAt'
+      AND [object_id] = OBJECT_ID(N'[identity].[UserAccount]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_UserAccount_Status_CreatedAt]
+    ON [identity].[UserAccount] ([Status] ASC, [CreatedAt] DESC)
+    INCLUDE ([PublicId], [Email], [EmailNormalized], [FullName], [IsEmailVerified], [UpdatedAt], [LastLoginAt]);
+
+    PRINT N'Created index: [identity].[UserAccount].[IX_UserAccount_Status_CreatedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [identity].[UserAccount].[IX_UserAccount_Status_CreatedAt]';
+END
+GO
+
 -- Useful for verification-state reviews / onboarding ops / filtering
 IF NOT EXISTS
 (
@@ -198,6 +219,27 @@ BEGIN
 END
 GO
 
+-- Admin session list: per-user sessions ordered by created time
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_RefreshToken_UserId_CreatedAt'
+      AND [object_id] = OBJECT_ID(N'[identity].[RefreshToken]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_RefreshToken_UserId_CreatedAt]
+    ON [identity].[RefreshToken] ([UserId] ASC, [CreatedAt] DESC)
+    INCLUDE ([ExpiresAt], [RevokedAt], [RevokedReason], [CreatedIp], [UserAgent], [CorrelationId]);
+
+    PRINT N'Created index: [identity].[RefreshToken].[IX_RefreshToken_UserId_CreatedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [identity].[RefreshToken].[IX_RefreshToken_UserId_CreatedAt]';
+END
+GO
+
 -- Cleanup job support for expired refresh tokens
 IF NOT EXISTS
 (
@@ -294,6 +336,27 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [identity].[LoginHistory].[IX_LoginHistory_UserId_AttemptedAt]';
+END
+GO
+
+-- Admin security summary: last login lookup
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_LoginHistory_UserId_AttemptedAt_Desc'
+      AND [object_id] = OBJECT_ID(N'[identity].[LoginHistory]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_LoginHistory_UserId_AttemptedAt_Desc]
+    ON [identity].[LoginHistory] ([UserId] ASC, [AttemptedAt] DESC)
+    INCLUDE ([Succeeded], [FailureReason], [IpAddress], [UserAgent], [CorrelationId]);
+
+    PRINT N'Created index: [identity].[LoginHistory].[IX_LoginHistory_UserId_AttemptedAt_Desc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [identity].[LoginHistory].[IX_LoginHistory_UserId_AttemptedAt_Desc]';
 END
 GO
 
