@@ -5,21 +5,29 @@ public static class RefreshTokenRevokedReasons
     public const string Logout = "Logout";
     public const string LogoutAll = "LogoutAll";
     public const string Rotated = "Rotated";
-    public const string PasswordReset = "PasswordReset";
+
     public const string PasswordChanged = "PasswordChanged";
-    public const string AdminSecurityAction = "AdminSecurityAction";
+    public const string PasswordReset = "PasswordReset";
+
+    public const string UserDisabled = "UserDisabled";
+    public const string UserLocked = "UserLocked";
+    public const string UserSessionsRevoked = "UserSessionsRevoked";
+
     public const string ReuseDetected = "ReuseDetected";
 
-    public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        Logout,
-        LogoutAll,
-        Rotated,
-        PasswordReset,
-        PasswordChanged,
-        AdminSecurityAction,
-        ReuseDetected
-    };
+    public static readonly IReadOnlySet<string> All =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            Logout,
+            LogoutAll,
+            Rotated,
+            PasswordChanged,
+            PasswordReset,
+            UserDisabled,
+            UserLocked,
+            UserSessionsRevoked,
+            ReuseDetected
+        };
 
     public static bool IsValid(string? value)
     {
