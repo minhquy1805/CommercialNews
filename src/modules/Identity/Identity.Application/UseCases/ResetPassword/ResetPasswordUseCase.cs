@@ -7,6 +7,7 @@ using Identity.Application.Ports.Persistence;
 using Identity.Application.Ports.Services;
 using Identity.Application.Validation.ResetPassword;
 using Identity.Domain.Entities;
+using Identity.Domain.Enums;
 using Identity.Domain.Exceptions;
 
 namespace Identity.Application.UseCases.ResetPassword;
@@ -78,6 +79,18 @@ public sealed class ResetPasswordUseCase : IResetPasswordUseCase
                     IdentityErrors.User.NotFound);
             }
 
+            if (string.Equals(user.Status, UserAccountStatuses.Disabled, StringComparison.OrdinalIgnoreCase))
+            {
+                return Result<ResetPasswordResponseDto>.Failure(
+                    IdentityErrors.Auth.AccountDisabled);
+            }
+
+            if (user.IsLockedAt(nowUtc))
+            {
+                return Result<ResetPasswordResponseDto>.Failure(
+                    IdentityErrors.Auth.AccountLocked);
+            }
+
             string newPasswordHash = _passwordHasher.Hash(request.NewPassword);
             resetToken.MarkUsed(nowUtc);
 
@@ -112,7 +125,7 @@ public sealed class ResetPasswordUseCase : IResetPasswordUseCase
                 await _refreshTokenRepository.RevokeAllActiveByUserIdAsync(
                     resetToken.UserId,
                     nowUtc,
-                    "PasswordReset",
+                    RefreshTokenRevokedReasons.PasswordReset,
                     cancellationToken);
 
                 await _outboxWriter.EnqueuePasswordChangedAsync(
@@ -121,7 +134,7 @@ public sealed class ResetPasswordUseCase : IResetPasswordUseCase
                     userPublicId: user.PublicId,
                     email: user.Email,
                     fullName: user.FullName,
-                    reason: "PasswordReset",
+                    reason: PasswordChangedReasons.ResetByUser,
                     occurredAtUtc: nowUtc,
                     cancellationToken: cancellationToken);
 
@@ -156,7 +169,7 @@ public sealed class ResetPasswordUseCase : IResetPasswordUseCase
             "IDENTITY.PASSWORD_RESET_TOKEN_ALREADY_USED" => IdentityErrors.PasswordReset.TokenAlreadyUsed,
             "IDENTITY.PASSWORD_RESET_TOKEN_REVOKED" => IdentityErrors.PasswordReset.TokenRevoked,
             "IDENTITY.PASSWORD_RESET_TOKEN_EXPIRED" => IdentityErrors.PasswordReset.TokenExpired,
-            _ => IdentityErrors.ValidationFailed
+            _ => IdentityErrors.PasswordReset.ResetFailed
         };
     }
 
@@ -167,7 +180,7 @@ public sealed class ResetPasswordUseCase : IResetPasswordUseCase
             "IDENTITY.PASSWORD_RESET_TOKEN_NOT_FOUND" => IdentityErrors.PasswordReset.TokenNotFound,
             "IDENTITY.PASSWORD_RESET_TOKEN_ALREADY_USED" => IdentityErrors.PasswordReset.TokenAlreadyUsed,
             "IDENTITY.PASSWORD_RESET_TOKEN_REVOKED" => IdentityErrors.PasswordReset.TokenRevoked,
-            _ => IdentityErrors.ValidationFailed
+            _ => IdentityErrors.PasswordReset.ResetFailed
         };
     }
 }
