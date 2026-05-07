@@ -50,6 +50,17 @@ public sealed class AuditRabbitMqConsumerOptions
         "authorization.permission_created",
         "authorization.permission_updated",
         "authorization.permission_activated",
-        "authorization.permission_deactivated"
+        "authorization.permission_deactivated",
+
+        "identity.email_verified",
+        "identity.password_changed",
+
+        "identity.user_activated",
+        "identity.user_disabled",
+        "identity.user_locked",
+        "identity.user_unlocked",
+
+        "identity.email_marked_verified",
+        "identity.user_sessions_revoked"
     ];
 }
