@@ -1139,6 +1139,68 @@ BEGIN
 END;
 GO
 
+CREATE OR ALTER PROCEDURE [identity].[LoginHistory_SelectSkipAndTakeByUserId]
+    @UserId BIGINT,
+    @Succeeded BIT = NULL,
+    @FromAttemptedAt DATETIME2(3) = NULL,
+    @ToAttemptedAt DATETIME2(3) = NULL,
+    @Skip INT = 0,
+    @Take INT = 20
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Skip < 0 SET @Skip = 0;
+    IF @Take <= 0 SET @Take = 20;
+
+    IF @FromAttemptedAt IS NOT NULL
+       AND @ToAttemptedAt IS NOT NULL
+       AND @FromAttemptedAt > @ToAttemptedAt
+        THROW 51230, 'Login history time range is invalid.', 1;
+
+    SELECT
+        [LoginId],
+        [UserId],
+        [EmailNormalizedAttempted],
+        [Succeeded],
+        [FailureReason],
+        [AttemptedAt],
+        [IpAddress],
+        [UserAgent],
+        [CorrelationId]
+    FROM [identity].[LoginHistory]
+    WHERE [UserId] = @UserId
+      AND (@Succeeded IS NULL OR [Succeeded] = @Succeeded)
+      AND (@FromAttemptedAt IS NULL OR [AttemptedAt] >= @FromAttemptedAt)
+      AND (@ToAttemptedAt IS NULL OR [AttemptedAt] <= @ToAttemptedAt)
+    ORDER BY [AttemptedAt] DESC, [LoginId] DESC
+    OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[LoginHistory_GetRecordCountByUserId]
+    @UserId BIGINT,
+    @Succeeded BIT = NULL,
+    @FromAttemptedAt DATETIME2(3) = NULL,
+    @ToAttemptedAt DATETIME2(3) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromAttemptedAt IS NOT NULL
+       AND @ToAttemptedAt IS NOT NULL
+       AND @FromAttemptedAt > @ToAttemptedAt
+        THROW 51230, 'Login history time range is invalid.', 1;
+
+    SELECT COUNT_BIG(1) AS [RecordCount]
+    FROM [identity].[LoginHistory]
+    WHERE [UserId] = @UserId
+      AND (@Succeeded IS NULL OR [Succeeded] = @Succeeded)
+      AND (@FromAttemptedAt IS NULL OR [AttemptedAt] >= @FromAttemptedAt)
+      AND (@ToAttemptedAt IS NULL OR [AttemptedAt] <= @ToAttemptedAt);
+END;
+GO
+
 /* =========================================================
    Compound atomic helper: Verify Email
    ========================================================= */
