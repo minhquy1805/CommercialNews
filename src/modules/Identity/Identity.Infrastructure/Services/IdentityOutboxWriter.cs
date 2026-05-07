@@ -194,6 +194,324 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
             cancellationToken: cancellationToken);
     }
 
+    public async Task<long> EnqueueUserActivatedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        string previousStatus,
+        string newStatus,
+        DateTime activatedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateAdminTargetEnvelope(
+            targetUserId,
+            targetUserPublicId,
+            targetEmail,
+            actorUserId,
+            activatedAtUtc);
+        ValidateRequired(previousStatus, nameof(previousStatus));
+        ValidateRequired(newStatus, nameof(newStatus));
+
+        string businessDedupeKey =
+            $"identity:admin:user-activated:{targetUserId}:{actorUserId}:{activatedAtUtc.Ticks}";
+
+        var payload = new UserActivatedIntegrationEventPayload(
+            TargetUserId: targetUserId,
+            TargetUserPublicId: targetUserPublicId.Trim(),
+            TargetEmail: targetEmail.Trim(),
+            TargetFullName: NormalizeOptional(targetFullName),
+            ActorUserId: actorUserId,
+            Reason: NormalizeOptional(reason),
+            PreviousStatus: previousStatus.Trim(),
+            NewStatus: newStatus.Trim(),
+            ActivatedAtUtc: activatedAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.UserActivated,
+            userId: targetUserId,
+            userPublicId: targetUserPublicId,
+            payload: payload,
+            occurredAtUtc: activatedAtUtc,
+            priority: 1,
+            initiatorUserId: actorUserId,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<long> EnqueueUserDisabledAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        string previousStatus,
+        string newStatus,
+        bool sessionsRevoked,
+        int revokedSessionCount,
+        DateTime disabledAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateAdminTargetEnvelope(
+            targetUserId,
+            targetUserPublicId,
+            targetEmail,
+            actorUserId,
+            disabledAtUtc);
+        ValidateRequired(previousStatus, nameof(previousStatus));
+        ValidateRequired(newStatus, nameof(newStatus));
+        ValidateNonNegative(revokedSessionCount, nameof(revokedSessionCount));
+
+        string businessDedupeKey =
+            $"identity:admin:user-disabled:{targetUserId}:{actorUserId}:{disabledAtUtc.Ticks}";
+
+        var payload = new UserDisabledIntegrationEventPayload(
+            TargetUserId: targetUserId,
+            TargetUserPublicId: targetUserPublicId.Trim(),
+            TargetEmail: targetEmail.Trim(),
+            TargetFullName: NormalizeOptional(targetFullName),
+            ActorUserId: actorUserId,
+            Reason: NormalizeOptional(reason),
+            PreviousStatus: previousStatus.Trim(),
+            NewStatus: newStatus.Trim(),
+            SessionsRevoked: sessionsRevoked,
+            RevokedSessionCount: revokedSessionCount,
+            DisabledAtUtc: disabledAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.UserDisabled,
+            userId: targetUserId,
+            userPublicId: targetUserPublicId,
+            payload: payload,
+            occurredAtUtc: disabledAtUtc,
+            priority: 1,
+            initiatorUserId: actorUserId,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<long> EnqueueUserLockedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        string previousStatus,
+        string newStatus,
+        DateTime lockedUntilUtc,
+        bool sessionsRevoked,
+        int revokedSessionCount,
+        DateTime lockedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateAdminTargetEnvelope(
+            targetUserId,
+            targetUserPublicId,
+            targetEmail,
+            actorUserId,
+            lockedAtUtc);
+        ValidateRequired(previousStatus, nameof(previousStatus));
+        ValidateRequired(newStatus, nameof(newStatus));
+        ValidateRequiredDate(lockedUntilUtc, nameof(lockedUntilUtc));
+        ValidateNonNegative(revokedSessionCount, nameof(revokedSessionCount));
+
+        string businessDedupeKey =
+            $"identity:admin:user-locked:{targetUserId}:{actorUserId}:{lockedAtUtc.Ticks}";
+
+        var payload = new UserLockedIntegrationEventPayload(
+            TargetUserId: targetUserId,
+            TargetUserPublicId: targetUserPublicId.Trim(),
+            TargetEmail: targetEmail.Trim(),
+            TargetFullName: NormalizeOptional(targetFullName),
+            ActorUserId: actorUserId,
+            Reason: NormalizeOptional(reason),
+            PreviousStatus: previousStatus.Trim(),
+            NewStatus: newStatus.Trim(),
+            LockedUntilUtc: lockedUntilUtc,
+            SessionsRevoked: sessionsRevoked,
+            RevokedSessionCount: revokedSessionCount,
+            LockedAtUtc: lockedAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.UserLocked,
+            userId: targetUserId,
+            userPublicId: targetUserPublicId,
+            payload: payload,
+            occurredAtUtc: lockedAtUtc,
+            priority: 1,
+            initiatorUserId: actorUserId,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<long> EnqueueUserUnlockedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        string previousStatus,
+        string newStatus,
+        DateTime unlockedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateAdminTargetEnvelope(
+            targetUserId,
+            targetUserPublicId,
+            targetEmail,
+            actorUserId,
+            unlockedAtUtc);
+        ValidateRequired(previousStatus, nameof(previousStatus));
+        ValidateRequired(newStatus, nameof(newStatus));
+
+        string businessDedupeKey =
+            $"identity:admin:user-unlocked:{targetUserId}:{actorUserId}:{unlockedAtUtc.Ticks}";
+
+        var payload = new UserUnlockedIntegrationEventPayload(
+            TargetUserId: targetUserId,
+            TargetUserPublicId: targetUserPublicId.Trim(),
+            TargetEmail: targetEmail.Trim(),
+            TargetFullName: NormalizeOptional(targetFullName),
+            ActorUserId: actorUserId,
+            Reason: NormalizeOptional(reason),
+            PreviousStatus: previousStatus.Trim(),
+            NewStatus: newStatus.Trim(),
+            UnlockedAtUtc: unlockedAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.UserUnlocked,
+            userId: targetUserId,
+            userPublicId: targetUserPublicId,
+            payload: payload,
+            occurredAtUtc: unlockedAtUtc,
+            priority: 1,
+            initiatorUserId: actorUserId,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<long> EnqueueEmailMarkedVerifiedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        bool wasAlreadyVerified,
+        string previousStatus,
+        string newStatus,
+        DateTime markedVerifiedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateAdminTargetEnvelope(
+            targetUserId,
+            targetUserPublicId,
+            targetEmail,
+            actorUserId,
+            markedVerifiedAtUtc);
+        ValidateRequired(previousStatus, nameof(previousStatus));
+        ValidateRequired(newStatus, nameof(newStatus));
+
+        string businessDedupeKey =
+            $"identity:admin:email-marked-verified:{targetUserId}:{actorUserId}:{markedVerifiedAtUtc.Ticks}";
+
+        var payload = new EmailMarkedVerifiedIntegrationEventPayload(
+            TargetUserId: targetUserId,
+            TargetUserPublicId: targetUserPublicId.Trim(),
+            TargetEmail: targetEmail.Trim(),
+            TargetFullName: NormalizeOptional(targetFullName),
+            ActorUserId: actorUserId,
+            Reason: NormalizeOptional(reason),
+            WasAlreadyVerified: wasAlreadyVerified,
+            PreviousStatus: previousStatus.Trim(),
+            NewStatus: newStatus.Trim(),
+            MarkedVerifiedAtUtc: markedVerifiedAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.EmailMarkedVerified,
+            userId: targetUserId,
+            userPublicId: targetUserPublicId,
+            payload: payload,
+            occurredAtUtc: markedVerifiedAtUtc,
+            priority: 1,
+            initiatorUserId: actorUserId,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<long> EnqueueUserSessionsRevokedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        int revokedSessionCount,
+        DateTime revokedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateAdminTargetEnvelope(
+            targetUserId,
+            targetUserPublicId,
+            targetEmail,
+            actorUserId,
+            revokedAtUtc);
+        ValidateNonNegative(revokedSessionCount, nameof(revokedSessionCount));
+
+        string businessDedupeKey =
+            $"identity:admin:user-sessions-revoked:{targetUserId}:{actorUserId}:{revokedAtUtc.Ticks}";
+
+        var payload = new UserSessionsRevokedIntegrationEventPayload(
+            TargetUserId: targetUserId,
+            TargetUserPublicId: targetUserPublicId.Trim(),
+            TargetEmail: targetEmail.Trim(),
+            TargetFullName: NormalizeOptional(targetFullName),
+            ActorUserId: actorUserId,
+            Reason: NormalizeOptional(reason),
+            RevokedSessionCount: revokedSessionCount,
+            RevokedAtUtc: revokedAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.UserSessionsRevoked,
+            userId: targetUserId,
+            userPublicId: targetUserPublicId,
+            payload: payload,
+            occurredAtUtc: revokedAtUtc,
+            priority: 1,
+            initiatorUserId: actorUserId,
+            cancellationToken: cancellationToken);
+    }
+
     private async Task<long> InsertOutboxMessageAsync<TPayload>(
         IIdentityUnitOfWork unitOfWork,
         string eventType,
@@ -202,8 +520,16 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
         TPayload payload,
         DateTime occurredAtUtc,
         byte priority,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long? initiatorUserId = null,
+        string? correlationId = null)
     {
+        if (!unitOfWork.HasActiveTransaction)
+        {
+            throw new InvalidOperationException(
+                "Identity outbox message must be written inside an active transaction.");
+        }
+
         string payloadJson = JsonSerializer.Serialize(
             payload,
             SerializerOptions);
@@ -219,8 +545,8 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
             aggregatePublicId: userPublicId.Trim(),
             aggregateVersion: null,
             headers: null,
-            correlationId: userPublicId.Trim(),
-            initiatorUserId: userId);
+            correlationId: NormalizeOptional(correlationId),
+            initiatorUserId: initiatorUserId ?? userId);
 
         return await _outboxMessageRepository.InsertAsync(
             unitOfWork,
@@ -244,11 +570,36 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
         ValidateRequiredDate(occurredAtUtc, nameof(occurredAtUtc));
     }
 
+    private static void ValidateAdminTargetEnvelope(
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        long actorUserId,
+        DateTime occurredAtUtc)
+    {
+        ValidateUserEnvelope(
+            targetUserId,
+            targetUserPublicId,
+            targetEmail,
+            occurredAtUtc);
+        ValidatePositiveId(actorUserId, nameof(actorUserId));
+    }
+
     private static void ValidatePositiveId(
         long value,
         string parameterName)
     {
         if (value <= 0)
+        {
+            throw new ArgumentOutOfRangeException(parameterName);
+        }
+    }
+
+    private static void ValidateNonNegative(
+        int value,
+        string parameterName)
+    {
+        if (value < 0)
         {
             throw new ArgumentOutOfRangeException(parameterName);
         }
