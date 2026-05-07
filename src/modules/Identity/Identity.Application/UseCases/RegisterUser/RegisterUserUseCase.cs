@@ -1,5 +1,6 @@
 ﻿using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Identity.Application.Configuration;
@@ -24,6 +25,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
     private readonly IRawTokenGenerator _rawTokenGenerator;
     private readonly ITokenHashProvider _tokenHashProvider;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IRequestContext _requestContext;
     private readonly IIdentityOutboxWriter _outboxWriter;
     private readonly IdentityTokenOptions _tokenOptions;
 
@@ -36,6 +38,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
         IRawTokenGenerator rawTokenGenerator,
         ITokenHashProvider tokenHashProvider,
         IDateTimeProvider dateTimeProvider,
+        IRequestContext requestContext,
         IIdentityOutboxWriter outboxWriter,
         IOptions<IdentityTokenOptions> tokenOptions)
     {
@@ -47,6 +50,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
         _rawTokenGenerator = rawTokenGenerator ?? throw new ArgumentNullException(nameof(rawTokenGenerator));
         _tokenHashProvider = tokenHashProvider ?? throw new ArgumentNullException(nameof(tokenHashProvider));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
         _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
         _tokenOptions = tokenOptions?.Value ?? throw new ArgumentNullException(nameof(tokenOptions));
     }
@@ -108,8 +112,8 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
                     tokenHash: verificationTokenHash,
                     createdAt: nowUtc,
                     expiresAt: verificationTokenExpiresAtUtc,
-                    createdIp: null,
-                    correlationId: null);
+                    createdIp: _requestContext.IpAddress,
+                    correlationId: _requestContext.CorrelationId);
 
                 long verificationTokenId = await _emailVerificationTokenRepository.InsertAsync(
                     verificationToken,
@@ -149,7 +153,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
         }
         catch (IdentityDomainException)
         {
-            return Result<RegisterUserResponseDto>.Failure(IdentityErrors.ValidationFailed);
+            return Result<RegisterUserResponseDto>.Failure(IdentityErrors.Register.RequestFailed);
         }
     }
 
@@ -170,7 +174,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
         return exception.Code switch
         {
             "IDENTITY.EMAIL_EXISTS" => IdentityErrors.EmailAlreadyExists,
-            _ => IdentityErrors.ValidationFailed
+            _ => IdentityErrors.Register.RequestFailed
         };
     }
 }

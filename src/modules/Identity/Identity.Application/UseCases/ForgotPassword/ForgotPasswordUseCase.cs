@@ -1,4 +1,5 @@
 ﻿using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Identity.Application.Configuration;
@@ -20,6 +21,7 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
     private readonly IRawTokenGenerator _rawTokenGenerator;
     private readonly ITokenHashProvider _tokenHashProvider;
     private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IRequestContext _requestContext;
     private readonly IIdentityUnitOfWork _unitOfWork;
     private readonly IIdentityOutboxWriter _outboxWriter;
     private readonly IdentityTokenOptions _tokenOptions;
@@ -30,6 +32,7 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
         IRawTokenGenerator rawTokenGenerator,
         ITokenHashProvider tokenHashProvider,
         IDateTimeProvider dateTimeProvider,
+        IRequestContext requestContext,
         IIdentityUnitOfWork unitOfWork,
         IIdentityOutboxWriter outboxWriter,
         IOptions<IdentityTokenOptions> tokenOptions)
@@ -39,6 +42,7 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
         _rawTokenGenerator = rawTokenGenerator ?? throw new ArgumentNullException(nameof(rawTokenGenerator));
         _tokenHashProvider = tokenHashProvider ?? throw new ArgumentNullException(nameof(tokenHashProvider));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _outboxWriter = outboxWriter ?? throw new ArgumentNullException(nameof(outboxWriter));
         _tokenOptions = tokenOptions?.Value ?? throw new ArgumentNullException(nameof(tokenOptions));
@@ -79,8 +83,8 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
                 tokenHash: resetTokenHash,
                 createdAt: nowUtc,
                 expiresAt: resetTokenExpiresAtUtc,
-                createdIp: null,
-                correlationId: null);
+                createdIp: _requestContext.IpAddress,
+                correlationId: _requestContext.CorrelationId);
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
@@ -119,11 +123,13 @@ public sealed class ForgotPasswordUseCase : IForgotPasswordUseCase
         }
         catch (PersistenceException)
         {
-            return Result<ForgotPasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
+            return Result<ForgotPasswordResponseDto>.Failure(
+                IdentityErrors.PasswordReset.RequestFailed);
         }
         catch (IdentityDomainException)
         {
-            return Result<ForgotPasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
+            return Result<ForgotPasswordResponseDto>.Failure(
+                IdentityErrors.PasswordReset.RequestFailed);
         }
     }
 

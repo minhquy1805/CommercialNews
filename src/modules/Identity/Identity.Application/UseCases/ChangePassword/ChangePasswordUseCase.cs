@@ -52,7 +52,8 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
         long? currentUserId = _requestContext.CurrentUserId;
         if (currentUserId is null)
         {
-            return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.InvalidCredentials);
+            return Result<ChangePasswordResponseDto>.Failure(
+                IdentityErrors.Auth.Unauthenticated);
         }
 
         try
@@ -65,27 +66,32 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
 
             if (user is null)
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.User.NotFound);
+                return Result<ChangePasswordResponseDto>.Failure(
+                    IdentityErrors.User.NotFound);
             }
 
             if (!user.IsEmailVerified)
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.VerificationRequired);
+                return Result<ChangePasswordResponseDto>.Failure(
+                    IdentityErrors.Auth.VerificationRequired);
             }
 
             if (string.Equals(user.Status, UserAccountStatuses.Disabled, StringComparison.OrdinalIgnoreCase))
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.AccountDisabled);
+                return Result<ChangePasswordResponseDto>.Failure(
+                    IdentityErrors.Auth.AccountDisabled);
             }
 
             if (user.IsLockedAt(nowUtc))
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.Auth.AccountLocked);
+                return Result<ChangePasswordResponseDto>.Failure(
+                    IdentityErrors.Auth.AccountLocked);
             }
 
             if (!_passwordHasher.Verify(request.CurrentPassword, user.PasswordHash))
             {
-                return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.InvalidCredentials);
+                return Result<ChangePasswordResponseDto>.Failure(
+                    IdentityErrors.InvalidCredentials);
             }
 
             string newPasswordHash = _passwordHasher.Hash(request.NewPassword);
@@ -102,13 +108,15 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
                 if (!updated)
                 {
                     await _unitOfWork.RollbackAsync(cancellationToken);
-                    return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.User.NotFound);
+
+                    return Result<ChangePasswordResponseDto>.Failure(
+                        IdentityErrors.User.ChangePasswordFailed);
                 }
 
                 await _refreshTokenRepository.RevokeAllActiveByUserIdAsync(
                     user.UserId,
                     nowUtc,
-                    "PasswordChanged",
+                    PasswordChangedReasons.ChangedByUser,
                     cancellationToken);
 
                 await _outboxWriter.EnqueuePasswordChangedAsync(
@@ -117,7 +125,7 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
                     userPublicId: user.PublicId,
                     email: user.Email,
                     fullName: user.FullName,
-                    reason: "PasswordChanged",
+                    reason: PasswordChangedReasons.ChangedByUser,
                     occurredAtUtc: nowUtc,
                     cancellationToken: cancellationToken);
 
@@ -137,7 +145,8 @@ public sealed class ChangePasswordUseCase : IChangePasswordUseCase
         }
         catch (PersistenceException)
         {
-            return Result<ChangePasswordResponseDto>.Failure(IdentityErrors.ValidationFailed);
+            return Result<ChangePasswordResponseDto>.Failure(
+                IdentityErrors.User.ChangePasswordFailed);
         }
     }
 }
