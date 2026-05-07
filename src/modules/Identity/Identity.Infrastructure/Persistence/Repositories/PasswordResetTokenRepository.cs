@@ -3,7 +3,6 @@ using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Identity.Application.Ports.Persistence;
 using Identity.Domain.Entities;
 using Identity.Infrastructure.Persistence.Exceptions;
-using Identity.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
 namespace Identity.Infrastructure.Persistence.Repositories;
@@ -13,14 +12,15 @@ public sealed class PasswordResetTokenRepository : IPasswordResetTokenRepository
     private const string PasswordResetTokenRevokeActiveByUserIdProc = "[identity].[PasswordResetToken_RevokeActiveByUserId]";
     private const string PasswordResetTokenInsertProc = "[identity].[PasswordResetToken_Insert]";
     private const string PasswordResetTokenSelectActiveByTokenHashProc = "[identity].[PasswordResetToken_SelectActiveByTokenHash]";
+    private const string PasswordResetTokenSelectByUserIdProc = "[identity].[PasswordResetToken_SelectByUserId]";
     private const string PasswordResetTokenMarkUsedProc = "[identity].[PasswordResetToken_MarkUsed]";
 
-    private readonly IdentityUnitOfWork _unitOfWork;
+    private readonly IIdentityUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
     private readonly IdentitySqlExceptionTranslator _sqlExceptionTranslator;
 
     public PasswordResetTokenRepository(
-        IdentityUnitOfWork unitOfWork,
+        IIdentityUnitOfWork unitOfWork,
         ISqlConnectionFactory sqlConnectionFactory,
         IdentitySqlExceptionTranslator sqlExceptionTranslator)
     {
@@ -126,13 +126,13 @@ public sealed class PasswordResetTokenRepository : IPasswordResetTokenRepository
                 command.Parameters.Add(
                     new SqlParameter("@CreatedIp", SqlDbType.NVarChar, 45)
                     {
-                        Value = (object?)token.CreatedIp ?? DBNull.Value
+                        Value = ToTrimmedDbValue(token.CreatedIp)
                     });
 
                 command.Parameters.Add(
                     new SqlParameter("@CorrelationId", SqlDbType.NVarChar, 100)
                     {
-                        Value = (object?)token.CorrelationId ?? DBNull.Value
+                        Value = ToTrimmedDbValue(token.CorrelationId)
                     });
 
                 SqlParameter resetTokenIdParameter = new("@ResetTokenId", SqlDbType.BigInt)
@@ -196,6 +196,57 @@ public sealed class PasswordResetTokenRepository : IPasswordResetTokenRepository
                 }
 
                 return MapPasswordResetToken(reader);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<IReadOnlyList<PasswordResetToken>> GetByUserIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return [];
+        }
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(PasswordResetTokenSelectByUserIdProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt)
+                    {
+                        Value = userId
+                    });
+
+                List<PasswordResetToken> tokens = [];
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    tokens.Add(MapPasswordResetToken(reader));
+                }
+
+                return tokens;
             }
         }
         catch (SqlException exception)
@@ -322,5 +373,12 @@ public sealed class PasswordResetTokenRepository : IPasswordResetTokenRepository
     {
         int ordinal = reader.GetOrdinal(columnName);
         return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+    }
+
+    private static object ToTrimmedDbValue(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            ? value.Trim()
+            : DBNull.Value;
     }
 }

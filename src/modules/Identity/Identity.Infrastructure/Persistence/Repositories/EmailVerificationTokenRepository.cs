@@ -3,7 +3,6 @@ using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Identity.Application.Ports.Persistence;
 using Identity.Domain.Entities;
 using Identity.Infrastructure.Persistence.Exceptions;
-using Identity.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
 namespace Identity.Infrastructure.Persistence.Repositories;
@@ -12,14 +11,15 @@ public sealed class EmailVerificationTokenRepository : IEmailVerificationTokenRe
 {
     private const string EmailVerificationTokenInsertProc = "[identity].[EmailVerificationToken_Insert]";
     private const string EmailVerificationTokenSelectActiveByTokenHashProc = "[identity].[EmailVerificationToken_SelectActiveByTokenHash]";
+    private const string EmailVerificationTokenSelectByUserIdProc = "[identity].[EmailVerificationToken_SelectByUserId]";
     private const string EmailVerificationTokenMarkUsedProc = "[identity].[EmailVerificationToken_MarkUsed]";
 
-    private readonly IdentityUnitOfWork _unitOfWork;
+    private readonly IIdentityUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
     private readonly IdentitySqlExceptionTranslator _sqlExceptionTranslator;
 
     public EmailVerificationTokenRepository(
-        IdentityUnitOfWork unitOfWork,
+        IIdentityUnitOfWork unitOfWork,
         ISqlConnectionFactory sqlConnectionFactory,
         IdentitySqlExceptionTranslator sqlExceptionTranslator)
     {
@@ -66,13 +66,13 @@ public sealed class EmailVerificationTokenRepository : IEmailVerificationTokenRe
                 command.Parameters.Add(
                     new SqlParameter("@CreatedIp", SqlDbType.NVarChar, 45)
                     {
-                        Value = (object?)token.CreatedIp ?? DBNull.Value
+                        Value = ToTrimmedDbValue(token.CreatedIp)
                     });
 
                 command.Parameters.Add(
                     new SqlParameter("@CorrelationId", SqlDbType.NVarChar, 100)
                     {
-                        Value = (object?)token.CorrelationId ?? DBNull.Value
+                        Value = ToTrimmedDbValue(token.CorrelationId)
                     });
 
                 SqlParameter verificationTokenIdParameter = new("@VerificationTokenId", SqlDbType.BigInt)
@@ -136,6 +136,57 @@ public sealed class EmailVerificationTokenRepository : IEmailVerificationTokenRe
                 }
 
                 return MapEmailVerificationToken(reader);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<IReadOnlyList<EmailVerificationToken>> GetByUserIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return [];
+        }
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(EmailVerificationTokenSelectByUserIdProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt)
+                    {
+                        Value = userId
+                    });
+
+                List<EmailVerificationToken> tokens = [];
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    tokens.Add(MapEmailVerificationToken(reader));
+                }
+
+                return tokens;
             }
         }
         catch (SqlException exception)
@@ -261,5 +312,12 @@ public sealed class EmailVerificationTokenRepository : IEmailVerificationTokenRe
     {
         int ordinal = reader.GetOrdinal(columnName);
         return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+    }
+
+    private static object ToTrimmedDbValue(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            ? value.Trim()
+            : DBNull.Value;
     }
 }

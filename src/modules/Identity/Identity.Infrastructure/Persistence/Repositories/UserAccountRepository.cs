@@ -1,9 +1,10 @@
 ﻿using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using Identity.Application.Models.QueryModels;
 using Identity.Application.Ports.Persistence;
 using Identity.Domain.Entities;
 using Identity.Infrastructure.Persistence.Exceptions;
-using Identity.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
 namespace Identity.Infrastructure.Persistence.Repositories;
@@ -14,19 +15,26 @@ public sealed class UserAccountRepository : IUserAccountRepository
     private const string UserAccountSelectByIdProc = "[identity].[UserAccount_SelectById]";
     private const string UserAccountSelectByPublicIdProc = "[identity].[UserAccount_SelectByPublicId]";
     private const string UserAccountSelectByEmailNormalizedProc = "[identity].[UserAccount_SelectByEmailNormalized]";
+    private const string UserAccountSelectSkipAndTakeWhereDynamicProc = "[identity].[UserAccount_SelectSkipAndTakeWhereDynamic]";
+    private const string UserAccountGetRecordCountWhereDynamicProc = "[identity].[UserAccount_GetRecordCountWhereDynamic]";
     private const string UserAccountUpdateProfileProc = "[identity].[UserAccount_UpdateProfile]";
     private const string UserAccountUpdatePasswordProc = "[identity].[UserAccount_UpdatePassword]";
     private const string UserAccountUpdateLastLoginProc = "[identity].[UserAccount_UpdateLastLogin]";
-    private const string UserAccountMarkEmailVerifiedProc = "[identity].[UserAccount_SetEmailVerified]";
+    private const string UserAccountSetEmailVerifiedProc = "[identity].[UserAccount_SetEmailVerified]";
     private const string UserAccountUpdateStatusProc = "[identity].[UserAccount_UpdateStatus]";
+    private const string UserAccountActivateProc = "[identity].[UserAccount_Activate]";
+    private const string UserAccountDisableProc = "[identity].[UserAccount_Disable]";
+    private const string UserAccountLockProc = "[identity].[UserAccount_Lock]";
+    private const string UserAccountUnlockProc = "[identity].[UserAccount_Unlock]";
+    private const string UserAccountMarkEmailVerifiedProc = "[identity].[UserAccount_MarkEmailVerified]";
     private const string UserAccountInsertBootstrapAdminProc = "[identity].[UserAccount_InsertBootstrapAdmin]";
 
-    private readonly IdentityUnitOfWork _unitOfWork;
+    private readonly IIdentityUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
     private readonly IdentitySqlExceptionTranslator _sqlExceptionTranslator;
 
     public UserAccountRepository(
-        IdentityUnitOfWork unitOfWork,
+        IIdentityUnitOfWork unitOfWork,
         ISqlConnectionFactory sqlConnectionFactory,
         IdentitySqlExceptionTranslator sqlExceptionTranslator)
     {
@@ -157,6 +165,109 @@ public sealed class UserAccountRepository : IUserAccountRepository
 
                 return MapUserAccount(reader);
             }
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<UserAccountDetailResult?> SelectDetailByIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return null;
+        }
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountSelectByIdProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapUserAccountDetailResult(reader);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<PagedQueryResult<UserAccountListResultItem>> SelectSkipAndTakeAsync(
+        UserAccountListQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            int skip = Math.Max(0, query.Skip);
+            int take = query.Take <= 0 ? 20 : query.Take;
+            int page = query.Page <= 0 ? 1 : query.Page;
+
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountSelectSkipAndTakeWhereDynamicProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                AddUserAccountListQueryParameters(command, query, skip, take);
+
+                List<UserAccountListResultItem> items = [];
+
+                using (SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
+                {
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        items.Add(MapUserAccountListResultItem(reader));
+                    }
+                }
+
+                int totalItems = await GetRecordCountAsync(query, cancellationToken);
+
+                return new PagedQueryResult<UserAccountListResultItem>
+                {
+                    Items = items,
+                    Page = page,
+                    PageSize = take,
+                    TotalItems = totalItems
+                };
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
         }
         finally
         {
@@ -445,7 +556,7 @@ public sealed class UserAccountRepository : IUserAccountRepository
         }
     }
 
-    public async Task<bool> MarkEmailVerifiedAsync(
+    public async Task<bool> SetEmailVerifiedAsync(
         long userId,
         DateTime verifiedAtUtc,
         CancellationToken cancellationToken = default)
@@ -460,7 +571,7 @@ public sealed class UserAccountRepository : IUserAccountRepository
         try
         {
             (SqlCommand command, SqlConnection? connection) =
-                await CreateCommandAsync(UserAccountMarkEmailVerifiedProc, cancellationToken);
+                await CreateCommandAsync(UserAccountSetEmailVerifiedProc, cancellationToken);
 
             ownedConnection = connection;
 
@@ -547,6 +658,185 @@ public sealed class UserAccountRepository : IUserAccountRepository
         }
     }
 
+    public async Task<bool> ActivateAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
+
+        return await ExecuteUserAccountMutationAsync(
+            UserAccountActivateProc,
+            userId,
+            cancellationToken);
+    }
+
+    public async Task<bool> DisableAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
+
+        return await ExecuteUserAccountMutationAsync(
+            UserAccountDisableProc,
+            userId,
+            cancellationToken);
+    }
+
+    public async Task<bool> LockAsync(
+        long userId,
+        DateTime lockedUntilUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountLockProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
+
+                command.Parameters.Add(
+                    new SqlParameter("@LockedUntil", SqlDbType.DateTime2) { Value = lockedUntilUtc });
+
+                return await ExecuteAffectedRowsAsync(command, cancellationToken);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<bool> UnlockAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
+
+        return await ExecuteUserAccountMutationAsync(
+            UserAccountUnlockProc,
+            userId,
+            cancellationToken);
+    }
+
+    public async Task<bool> MarkEmailVerifiedAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
+
+        return await ExecuteUserAccountMutationAsync(
+            UserAccountMarkEmailVerifiedProc,
+            userId,
+            cancellationToken);
+    }
+
+    private async Task<int> GetRecordCountAsync(
+        UserAccountListQuery query,
+        CancellationToken cancellationToken)
+    {
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountGetRecordCountWhereDynamicProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                AddUserAccountListQueryParameters(command, query);
+
+                object? scalar = await command.ExecuteScalarAsync(cancellationToken);
+
+                long total = scalar is null or DBNull
+                    ? 0L
+                    : Convert.ToInt64(scalar);
+
+                return total > int.MaxValue
+                    ? int.MaxValue
+                    : (int)total;
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task<bool> ExecuteUserAccountMutationAsync(
+        string storedProcedureName,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(storedProcedureName, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
+
+                return await ExecuteAffectedRowsAsync(command, cancellationToken);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
     private async Task<(SqlCommand Command, SqlConnection? OwnedConnection)> CreateCommandAsync(
         string storedProcedureName,
         CancellationToken cancellationToken)
@@ -592,6 +882,34 @@ public sealed class UserAccountRepository : IUserAccountRepository
         return affectedRows > 0;
     }
 
+    private static void AddUserAccountListQueryParameters(
+        SqlCommand command,
+        UserAccountListQuery query,
+        int? skip = null,
+        int? take = null)
+    {
+        command.Parameters.AddRange(
+        [
+            new SqlParameter("@FromCreatedAt", SqlDbType.DateTime2) { Value = ToDbValue(query.FromCreatedAt) },
+            new SqlParameter("@ToCreatedAt", SqlDbType.DateTime2) { Value = ToDbValue(query.ToCreatedAt) },
+            new SqlParameter("@Status", SqlDbType.VarChar, 20) { Value = ToTrimmedDbValue(query.Status) },
+            new SqlParameter("@IsEmailVerified", SqlDbType.Bit) { Value = ToDbValue(query.IsEmailVerified) },
+            new SqlParameter("@Query", SqlDbType.NVarChar, 320) { Value = ToTrimmedDbValue(query.Query) }
+        ]);
+
+        if (skip.HasValue)
+        {
+            command.Parameters.Add(
+                new SqlParameter("@Skip", SqlDbType.Int) { Value = skip.Value });
+        }
+
+        if (take.HasValue)
+        {
+            command.Parameters.Add(
+                new SqlParameter("@Take", SqlDbType.Int) { Value = take.Value });
+        }
+    }
+
     private static UserAccount MapUserAccount(SqlDataReader reader)
     {
         return UserAccount.Rehydrate(
@@ -612,6 +930,48 @@ public sealed class UserAccountRepository : IUserAccountRepository
             version: reader.GetInt32(reader.GetOrdinal("Version")));
     }
 
+    private static UserAccountDetailResult MapUserAccountDetailResult(SqlDataReader reader)
+    {
+        return new UserAccountDetailResult
+        {
+            UserId = reader.GetInt64(reader.GetOrdinal("UserId")),
+            PublicId = reader.GetString(reader.GetOrdinal("PublicId")),
+            Email = reader.GetString(reader.GetOrdinal("Email")),
+            EmailNormalized = reader.GetString(reader.GetOrdinal("EmailNormalized")),
+            FullName = ReadNullableString(reader, "FullName"),
+            AvatarUrl = ReadNullableString(reader, "AvatarUrl"),
+            IsEmailVerified = reader.GetBoolean(reader.GetOrdinal("IsEmailVerified")),
+            EmailVerifiedAt = ReadNullableDateTime(reader, "EmailVerifiedAt"),
+            Status = reader.GetString(reader.GetOrdinal("Status")),
+            LockedUntil = ReadNullableDateTime(reader, "LockedUntil"),
+            CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
+            UpdatedAt = reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
+            LastLoginAt = ReadNullableDateTime(reader, "LastLoginAt"),
+            Version = reader.GetInt32(reader.GetOrdinal("Version"))
+        };
+    }
+
+    private static UserAccountListResultItem MapUserAccountListResultItem(SqlDataReader reader)
+    {
+        return new UserAccountListResultItem
+        {
+            UserId = reader.GetInt64(reader.GetOrdinal("UserId")),
+            PublicId = reader.GetString(reader.GetOrdinal("PublicId")),
+            Email = reader.GetString(reader.GetOrdinal("Email")),
+            EmailNormalized = reader.GetString(reader.GetOrdinal("EmailNormalized")),
+            FullName = ReadNullableString(reader, "FullName"),
+            AvatarUrl = ReadNullableString(reader, "AvatarUrl"),
+            IsEmailVerified = reader.GetBoolean(reader.GetOrdinal("IsEmailVerified")),
+            EmailVerifiedAt = ReadNullableDateTime(reader, "EmailVerifiedAt"),
+            Status = reader.GetString(reader.GetOrdinal("Status")),
+            LockedUntil = ReadNullableDateTime(reader, "LockedUntil"),
+            CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
+            UpdatedAt = reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
+            LastLoginAt = ReadNullableDateTime(reader, "LastLoginAt"),
+            Version = reader.GetInt32(reader.GetOrdinal("Version"))
+        };
+    }
+
     private static string? ReadNullableString(SqlDataReader reader, string columnName)
     {
         int ordinal = reader.GetOrdinal(columnName);
@@ -630,6 +990,11 @@ public sealed class UserAccountRepository : IUserAccountRepository
     }
 
     private static object ToDbValue(DateTime? value)
+    {
+        return value.HasValue ? value.Value : DBNull.Value;
+    }
+
+    private static object ToDbValue(bool? value)
     {
         return value.HasValue ? value.Value : DBNull.Value;
     }
