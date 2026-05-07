@@ -473,6 +473,7 @@ BEGIN
         [UpdatedAt] = SYSUTCDATETIME(),
         [Version] = [Version] + 1
     WHERE [UserId] = @UserId
+      AND [IsEmailVerified] = 1
       AND
       (
           [Status] <> 'Active'
