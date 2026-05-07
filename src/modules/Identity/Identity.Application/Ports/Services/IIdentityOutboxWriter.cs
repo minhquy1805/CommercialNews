@@ -47,4 +47,87 @@ public interface IIdentityOutboxWriter
         long verificationTokenId,
         DateTime verifiedAtUtc,
         CancellationToken cancellationToken = default);
+
+    Task<long> EnqueueUserActivatedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        string previousStatus,
+        string newStatus,
+        DateTime activatedAtUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<long> EnqueueUserDisabledAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        string previousStatus,
+        string newStatus,
+        bool sessionsRevoked,
+        int revokedSessionCount,
+        DateTime disabledAtUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<long> EnqueueUserLockedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        string previousStatus,
+        string newStatus,
+        DateTime lockedUntilUtc,
+        bool sessionsRevoked,
+        int revokedSessionCount,
+        DateTime lockedAtUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<long> EnqueueUserUnlockedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        string previousStatus,
+        string newStatus,
+        DateTime unlockedAtUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<long> EnqueueEmailMarkedVerifiedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        bool wasAlreadyVerified,
+        string previousStatus,
+        string newStatus,
+        DateTime markedVerifiedAtUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<long> EnqueueUserSessionsRevokedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long targetUserId,
+        string targetUserPublicId,
+        string targetEmail,
+        string? targetFullName,
+        long actorUserId,
+        string? reason,
+        int revokedSessionCount,
+        DateTime revokedAtUtc,
+        CancellationToken cancellationToken = default);
 }
