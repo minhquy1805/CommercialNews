@@ -171,9 +171,22 @@ public sealed class RefreshToken
             correlationId: NormalizeOptional(correlationId));
     }
 
-    public bool IsExpired(DateTime nowUtc) => nowUtc >= ExpiresAt;
+    public bool IsExpired(DateTime nowUtc)
+    {
+        EnsureValidTimestamp(nowUtc, "IDENTITY.REFRESH_INVALID_NOW");
+        return nowUtc >= ExpiresAt;
+    }
 
-    public bool CanBeUsed(DateTime nowUtc) => !IsRevoked && !HasBeenReplaced && !IsExpired(nowUtc);
+    public bool IsActiveAt(DateTime nowUtc)
+    {
+        EnsureValidTimestamp(nowUtc, "IDENTITY.REFRESH_INVALID_NOW");
+
+        return !IsRevoked
+            && !HasBeenReplaced
+            && nowUtc < ExpiresAt;
+    }
+
+    public bool CanBeUsed(DateTime nowUtc) => IsActiveAt(nowUtc);
 
     public void Revoke(
         DateTime revokedAtUtc,
@@ -201,9 +214,33 @@ public sealed class RefreshToken
                 $"ReplacedByTokenHash must be exactly {TokenHashLength} bytes when provided.");
         }
 
+        if (replacedByTokenHash is not null && replacedByTokenHash.SequenceEqual(_tokenHash))
+        {
+            throw new IdentityDomainException(
+                "IDENTITY.REFRESH_REPLACEMENT_CANNOT_BE_SELF",
+                "A refresh token cannot be replaced by itself.");
+        }
+
         RevokedAt = revokedAtUtc;
         RevokedReason = NormalizeOptional(revokedReason);
         _replacedByTokenHash = replacedByTokenHash?.ToArray();
+    }
+
+    public void ReplaceBy(
+        DateTime revokedAtUtc,
+        byte[] replacementTokenHash,
+        string? revokedReason = null)
+    {
+        ValidateTokenHash(replacementTokenHash);
+
+        if (replacementTokenHash.SequenceEqual(_tokenHash))
+        {
+            throw new IdentityDomainException(
+                "IDENTITY.REFRESH_REPLACEMENT_CANNOT_BE_SELF",
+                "A refresh token cannot be replaced by itself.");
+        }
+
+        Revoke(revokedAtUtc, revokedReason, replacementTokenHash);
     }
 
     private static void ValidateTokenHash(byte[] tokenHash)
@@ -268,5 +305,13 @@ public sealed class RefreshToken
         return string.IsNullOrWhiteSpace(value)
             ? null
             : value.Trim();
+    }
+
+    private static void EnsureValidTimestamp(DateTime value, string code)
+    {
+        if (value == default)
+        {
+            throw new IdentityDomainException(code, "Timestamp is required.");
+        }
     }
 }

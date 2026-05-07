@@ -192,12 +192,16 @@ public sealed class UserAccount
             return;
         }
 
-        EnsureNotDisabled();
         EnsureValidTimestamp(verifiedAtUtc, "IDENTITY.USER_INVALID_EMAIL_VERIFIED_AT");
 
         IsEmailVerified = true;
         EmailVerifiedAt = verifiedAtUtc;
-        Status = UserAccountStatuses.Active;
+
+        if (IsUnverified)
+        {
+            Status = UserAccountStatuses.Active;
+        }
+
         Touch(verifiedAtUtc);
     }
 
@@ -233,7 +237,14 @@ public sealed class UserAccount
 
         if (lockedUntilUtc <= updatedAtUtc)
         {
-            throw new IdentityDomainException("IDENTITY.USER_INVALID_LOCKED_UNTIL", "LockedUntil must be later than the update timestamp.");
+            throw new IdentityDomainException(
+                "IDENTITY.USER_INVALID_LOCKED_UNTIL",
+                "LockedUntil must be later than the update timestamp.");
+        }
+
+        if (IsLocked && LockedUntil == lockedUntilUtc)
+        {
+            return;
         }
 
         Status = UserAccountStatuses.Locked;
@@ -245,14 +256,27 @@ public sealed class UserAccount
     {
         EnsureValidTimestamp(updatedAtUtc, "IDENTITY.USER_INVALID_UPDATED_AT");
 
+        if (!IsLocked && LockedUntil is null)
+        {
+            return;
+        }
+
         LockedUntil = null;
-        Status = IsEmailVerified ? UserAccountStatuses.Active : UserAccountStatuses.Unverified;
+        Status = IsEmailVerified
+            ? UserAccountStatuses.Active
+            : UserAccountStatuses.Unverified;
+
         Touch(updatedAtUtc);
     }
 
     public void Disable(DateTime updatedAtUtc)
     {
         EnsureValidTimestamp(updatedAtUtc, "IDENTITY.USER_INVALID_UPDATED_AT");
+
+        if (IsDisabled && LockedUntil is null)
+        {
+            return;
+        }
 
         LockedUntil = null;
         Status = UserAccountStatuses.Disabled;
@@ -265,12 +289,39 @@ public sealed class UserAccount
 
         if (!IsEmailVerified)
         {
-            throw new IdentityDomainException("IDENTITY.USER_CANNOT_ACTIVATE_UNVERIFIED", "Unverified user cannot be activated.");
+            throw new IdentityDomainException(
+                "IDENTITY.USER_CANNOT_ACTIVATE_UNVERIFIED",
+                "Unverified user cannot be activated.");
+        }
+
+        if (IsActive && LockedUntil is null)
+        {
+            return;
         }
 
         LockedUntil = null;
         Status = UserAccountStatuses.Active;
         Touch(updatedAtUtc);
+    }
+
+    public void MarkEmailVerified(DateTime verifiedAtUtc)
+    {
+        if (IsEmailVerified)
+        {
+            return;
+        }
+
+        EnsureValidTimestamp(verifiedAtUtc, "IDENTITY.USER_INVALID_EMAIL_VERIFIED_AT");
+
+        IsEmailVerified = true;
+        EmailVerifiedAt = verifiedAtUtc;
+
+        if (IsUnverified)
+        {
+            Status = UserAccountStatuses.Active;
+        }
+
+        Touch(verifiedAtUtc);
     }
 
     public bool IsLockedAt(DateTime nowUtc)

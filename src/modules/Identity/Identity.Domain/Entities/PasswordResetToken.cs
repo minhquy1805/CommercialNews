@@ -63,6 +63,8 @@ public sealed class PasswordResetToken
         ValidateTokenHash(tokenHash);
         ValidateCreatedIp(createdIp);
         ValidateCorrelationId(correlationId);
+        EnsureValidTimestamp(createdAt, "IDENTITY.PASSWORD_RESET_INVALID_CREATED_AT");
+        EnsureValidTimestamp(expiresAt, "IDENTITY.PASSWORD_RESET_INVALID_EXPIRES_AT");
 
         if (expiresAt <= createdAt)
         {
@@ -111,6 +113,8 @@ public sealed class PasswordResetToken
         ValidateTokenHash(tokenHash);
         ValidateCreatedIp(createdIp);
         ValidateCorrelationId(correlationId);
+        EnsureValidTimestamp(createdAt, "IDENTITY.PASSWORD_RESET_INVALID_CREATED_AT");
+        EnsureValidTimestamp(expiresAt, "IDENTITY.PASSWORD_RESET_INVALID_EXPIRES_AT");
 
         if (expiresAt <= createdAt)
         {
@@ -152,12 +156,22 @@ public sealed class PasswordResetToken
             correlationId: NormalizeOptional(correlationId));
     }
 
-    public bool IsExpired(DateTime nowUtc) => nowUtc >= ExpiresAt;
+    public bool IsExpired(DateTime nowUtc)
+    {
+        EnsureValidTimestamp(nowUtc, "IDENTITY.PASSWORD_RESET_INVALID_NOW");
+        return nowUtc >= ExpiresAt;
+    }
 
-    public bool CanBeUsed(DateTime nowUtc) => !IsUsed && !IsRevoked && !IsExpired(nowUtc);
+    public bool CanBeUsed(DateTime nowUtc)
+    {
+        EnsureValidTimestamp(nowUtc, "IDENTITY.PASSWORD_RESET_INVALID_NOW");
+        return !IsUsed && !IsRevoked && nowUtc < ExpiresAt;
+    }
 
     public void MarkUsed(DateTime usedAtUtc)
     {
+        EnsureValidTimestamp(usedAtUtc, "IDENTITY.PASSWORD_RESET_INVALID_USED_AT");
+
         if (IsUsed)
         {
             throw new IdentityDomainException(
@@ -191,6 +205,8 @@ public sealed class PasswordResetToken
 
     public void Revoke(DateTime revokedAtUtc)
     {
+        EnsureValidTimestamp(revokedAtUtc, "IDENTITY.PASSWORD_RESET_INVALID_REVOKED_AT");
+
         if (IsRevoked)
         {
             return;
@@ -243,10 +259,19 @@ public sealed class PasswordResetToken
         }
     }
 
+
     private static string? NormalizeOptional(string? value)
     {
         return string.IsNullOrWhiteSpace(value)
             ? null
             : value.Trim();
+    }
+
+    private static void EnsureValidTimestamp(DateTime value, string code)
+    {
+        if (value == default)
+        {
+            throw new IdentityDomainException(code, "Timestamp is required.");
+        }
     }
 }
