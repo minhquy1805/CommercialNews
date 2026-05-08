@@ -19,7 +19,7 @@ public static class AuthCookieExtensions
                 Secure = isProduction,
                 SameSite = isProduction ? SameSiteMode.None : SameSiteMode.Lax,
                 Expires = new DateTimeOffset(DateTime.SpecifyKind(expiresAtUtc, DateTimeKind.Utc)),
-                Path = "/api/v1/identity",
+                Path = "/api/v1/auth",
                 IsEssential = true
             });
     }
@@ -37,7 +37,7 @@ public static class AuthCookieExtensions
                 HttpOnly = true,
                 Secure = isProduction,
                 SameSite = isProduction ? SameSiteMode.None : SameSiteMode.Lax,
-                Path = "/api/v1/identity"
+                Path = "/api/v1/auth"
             });
     }
 }

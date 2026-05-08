@@ -12,6 +12,10 @@ public interface IPasswordResetTokenRepository
         byte[] tokenHash,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<PasswordResetToken>> GetByUserIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default);
+
     Task<int> RevokeActiveByUserIdAsync(
         long userId,
         DateTime revokedAtUtc,

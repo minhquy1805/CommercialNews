@@ -31,10 +31,35 @@ public static class IdentityErrors
 
     public static class User
     {
+        public static readonly Error InvalidRequest =
+            Error.Validation(
+                code: "IDENTITY.USER_INVALID_REQUEST",
+                message: "The user request is invalid.");
+
         public static readonly Error NotFound =
             Error.NotFound(
                 code: "IDENTITY.USER_NOT_FOUND",
                 message: "User account was not found.");
+
+        public static readonly Error QueryFailed =
+            Error.Failure(
+                code: "IDENTITY.USER_QUERY_FAILED",
+                message: "User account query could not be completed.");
+
+        public static readonly Error InvalidPaging =
+            Error.Validation(
+                code: "IDENTITY.USER_INVALID_PAGING",
+                message: "User account paging parameters are invalid.");
+
+        public static readonly Error InvalidDateRange =
+            Error.Validation(
+                code: "IDENTITY.USER_INVALID_DATE_RANGE",
+                message: "User account date range is invalid.");
+
+        public static readonly Error QueryTooLong =
+            Error.Validation(
+                code: "IDENTITY.USER_QUERY_TOO_LONG",
+                message: "User account search query must not exceed 320 characters.");
 
         public static readonly Error InvalidStatus =
             Error.Validation(
@@ -50,10 +75,65 @@ public static class IdentityErrors
             Error.Validation(
                 code: "IDENTITY.USER_CANNOT_ACTIVATE_UNVERIFIED",
                 message: "An unverified user cannot be activated.");
+
+        public static readonly Error ActivateFailed =
+            Error.Failure(
+                code: "IDENTITY.USER_ACTIVATE_FAILED",
+                message: "User activation could not be completed.");
+
+        public static readonly Error DisableFailed =
+            Error.Failure(
+                code: "IDENTITY.USER_DISABLE_FAILED",
+                message: "User disabling could not be completed.");
+
+        public static readonly Error LockFailed =
+            Error.Failure(
+                code: "IDENTITY.USER_LOCK_FAILED",
+                message: "User lock could not be completed.");
+
+        public static readonly Error UnlockFailed =
+            Error.Failure(
+                code: "IDENTITY.USER_UNLOCK_FAILED",
+                message: "User unlock could not be completed.");
+
+        public static readonly Error MarkEmailVerifiedFailed =
+            Error.Failure(
+                code: "IDENTITY.USER_MARK_EMAIL_VERIFIED_FAILED",
+                message: "Marking user email as verified could not be completed.");
+
+        public static readonly Error ProtectedAccount =
+            Error.Forbidden(
+                code: "IDENTITY.USER_PROTECTED_ACCOUNT",
+                message: "This protected user account cannot be modified by this operation.");
+
+        public static readonly Error SelfActionDenied =
+            Error.Forbidden(
+                code: "IDENTITY.USER_SELF_ACTION_DENIED",
+                message: "This user operation cannot be performed on the current authenticated user.");
+
+        public static readonly Error InvalidLockUntil =
+            Error.Validation(
+                code: "IDENTITY.USER_INVALID_LOCK_UNTIL",
+                message: "LockedUntil must be a valid future timestamp.");
+
+        public static readonly Error ChangePasswordFailed =
+            Error.Failure(
+                code: "IDENTITY.USER_CHANGE_PASSWORD_FAILED",
+                message: "Password change could not be completed.");
     }
 
     public static class Auth
     {
+        public static readonly Error Unauthenticated =
+            Error.Unauthorized(
+                code: "IDENTITY.UNAUTHENTICATED",
+                message: "Authentication is required.");
+
+        public static readonly Error Forbidden =
+            Error.Forbidden(
+                code: "IDENTITY.FORBIDDEN",
+                message: "The authenticated caller is not allowed to perform this operation.");
+
         public static readonly Error VerificationRequired =
             Error.Forbidden(
                 code: "IDENTITY.EMAIL_VERIFICATION_REQUIRED",
@@ -95,6 +175,21 @@ public static class IdentityErrors
 
     public static class PasswordReset
     {
+        public static readonly Error InvalidRequest =
+            Error.Validation(
+                code: "IDENTITY.PASSWORD_RESET_INVALID_REQUEST",
+                message: "The password reset request is invalid.");
+
+        public static readonly Error RequestFailed =
+            Error.Failure(
+                code: "IDENTITY.PASSWORD_RESET_REQUEST_FAILED",
+                message: "The password reset request could not be completed.");
+
+        public static readonly Error ResetFailed =
+            Error.Failure(
+                code: "IDENTITY.PASSWORD_RESET_FAILED",
+                message: "Password reset could not be completed.");
+
         public static readonly Error TokenNotFound =
             Error.NotFound(
                 code: "IDENTITY.PASSWORD_RESET_TOKEN_NOT_FOUND",
@@ -114,6 +209,14 @@ public static class IdentityErrors
             Error.Validation(
                 code: "IDENTITY.PASSWORD_RESET_TOKEN_EXPIRED",
                 message: "Password reset token has expired.");
+    }
+
+    public static class Register
+    {
+        public static readonly Error RequestFailed =
+            Error.Failure(
+                code: "IDENTITY.REGISTER_FAILED",
+                message: "Registration could not be completed.");
     }
 
     public static class Refresh
@@ -152,6 +255,47 @@ public static class IdentityErrors
             Error.Validation(
                 code: "IDENTITY.REFRESH_INVALID_REPLACEMENT_STATE",
                 message: "A replaced refresh token must also be revoked.");
+    }
+
+    public static class Session
+    {
+        public static readonly Error InvalidRequest =
+            Error.Validation(
+                code: "IDENTITY.SESSION_INVALID_REQUEST",
+                message: "The user session request is invalid.");
+
+        public static readonly Error QueryFailed =
+            Error.Failure(
+                code: "IDENTITY.SESSION_QUERY_FAILED",
+                message: "User session query could not be completed.");
+
+        public static readonly Error RevokeFailed =
+            Error.Failure(
+                code: "IDENTITY.SESSION_REVOKE_FAILED",
+                message: "User sessions could not be revoked.");
+    }
+
+    public static class LoginHistory
+    {
+        public static readonly Error InvalidRequest =
+            Error.Validation(
+                code: "IDENTITY.LOGIN_HISTORY_INVALID_REQUEST",
+                message: "The login history request is invalid.");
+
+        public static readonly Error InvalidPaging =
+            Error.Validation(
+                code: "IDENTITY.LOGIN_HISTORY_INVALID_PAGING",
+                message: "Login history paging parameters are invalid.");
+
+        public static readonly Error InvalidDateRange =
+            Error.Validation(
+                code: "IDENTITY.LOGIN_HISTORY_INVALID_DATE_RANGE",
+                message: "Login history date range is invalid.");
+
+        public static readonly Error QueryFailed =
+            Error.Failure(
+                code: "IDENTITY.LOGIN_HISTORY_QUERY_FAILED",
+                message: "Login history query could not be completed.");
     }
 
     public static class Profile

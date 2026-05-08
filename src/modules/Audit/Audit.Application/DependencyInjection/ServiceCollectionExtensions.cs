@@ -1,4 +1,5 @@
 using Audit.Application.Consumers.Authorization;
+using Audit.Application.Consumers.Identity;
 using Audit.Application.Services;
 using Audit.Application.UseCases.GetAuditLogByEventId;
 using Audit.Application.UseCases.GetAuditLogById;
@@ -27,6 +28,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<
             IAuthorizationAuditEventIngestionService,
             AuthorizationAuditEventIngestionService>();
+
+        services.AddScoped<
+            IIdentityAuditEventIngestionService,
+            IdentityAuditEventIngestionService>();
 
         return services;
     }

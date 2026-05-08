@@ -59,6 +59,8 @@ public sealed class EmailVerificationToken
         ValidateTokenHash(tokenHash);
         ValidateCreatedIp(createdIp);
         ValidateCorrelationId(correlationId);
+        EnsureValidTimestamp(createdAt, "IDENTITY.EMAIL_VERIFICATION_INVALID_CREATED_AT");
+        EnsureValidTimestamp(expiresAt, "IDENTITY.EMAIL_VERIFICATION_INVALID_EXPIRES_AT");
 
         if (expiresAt <= createdAt)
         {
@@ -105,6 +107,8 @@ public sealed class EmailVerificationToken
         ValidateTokenHash(tokenHash);
         ValidateCreatedIp(createdIp);
         ValidateCorrelationId(correlationId);
+        EnsureValidTimestamp(createdAt, "IDENTITY.EMAIL_VERIFICATION_INVALID_CREATED_AT");
+        EnsureValidTimestamp(expiresAt, "IDENTITY.EMAIL_VERIFICATION_INVALID_EXPIRES_AT");
 
         if (expiresAt <= createdAt)
         {
@@ -138,12 +142,22 @@ public sealed class EmailVerificationToken
             correlationId: NormalizeOptional(correlationId));
     }
 
-    public bool IsExpired(DateTime nowUtc) => nowUtc >= ExpiresAt;
+    public bool IsExpired(DateTime nowUtc)
+    {
+        EnsureValidTimestamp(nowUtc, "IDENTITY.EMAIL_VERIFICATION_INVALID_NOW");
+        return nowUtc >= ExpiresAt;
+    }
 
-    public bool CanBeUsed(DateTime nowUtc) => !IsUsed && !IsExpired(nowUtc);
+    public bool CanBeUsed(DateTime nowUtc)
+    {
+        EnsureValidTimestamp(nowUtc, "IDENTITY.EMAIL_VERIFICATION_INVALID_NOW");
+        return !IsUsed && nowUtc < ExpiresAt;
+    }
 
     public void MarkUsed(DateTime usedAtUtc)
     {
+        EnsureValidTimestamp(usedAtUtc, "IDENTITY.EMAIL_VERIFICATION_INVALID_USED_AT");
+
         if (IsUsed)
         {
             throw new IdentityDomainException(
@@ -210,5 +224,13 @@ public sealed class EmailVerificationToken
         return string.IsNullOrWhiteSpace(value)
             ? null
             : value.Trim();
+    }
+
+    private static void EnsureValidTimestamp(DateTime value, string code)
+    {
+        if (value == default)
+        {
+            throw new IdentityDomainException(code, "Timestamp is required.");
+        }
     }
 }

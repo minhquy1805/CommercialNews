@@ -3,7 +3,6 @@ using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Identity.Application.Ports.Persistence;
 using Identity.Domain.Entities;
 using Identity.Infrastructure.Persistence.Exceptions;
-using Identity.Infrastructure.Persistence.Sql;
 using Microsoft.Data.SqlClient;
 
 namespace Identity.Infrastructure.Persistence.Repositories;
@@ -13,16 +12,17 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
     private const string RefreshTokenInsertProc = "[identity].[RefreshToken_Insert]";
     private const string RefreshTokenSelectActiveByTokenHashProc = "[identity].[RefreshToken_SelectActiveByTokenHash]";
     private const string RefreshTokenSelectByTokenHashProc = "[identity].[RefreshToken_SelectByTokenHash]";
+    private const string RefreshTokenSelectByUserIdProc = "[identity].[RefreshToken_SelectByUserId]";
     private const string RefreshTokenRevokeProc = "[identity].[RefreshToken_Revoke]";
     private const string RefreshTokenRevokeAllActiveByUserIdProc = "[identity].[RefreshToken_RevokeAllActiveByUserId]";
     private const string RefreshTokenRotateProc = "[identity].[RefreshToken_Rotate]";
 
-    private readonly IdentityUnitOfWork _unitOfWork;
+    private readonly IIdentityUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
     private readonly IdentitySqlExceptionTranslator _sqlExceptionTranslator;
 
     public RefreshTokenRepository(
-        IdentityUnitOfWork unitOfWork,
+        IIdentityUnitOfWork unitOfWork,
         ISqlConnectionFactory sqlConnectionFactory,
         IdentitySqlExceptionTranslator sqlExceptionTranslator)
     {
@@ -69,19 +69,19 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
                 command.Parameters.Add(
                     new SqlParameter("@CreatedIp", SqlDbType.NVarChar, 45)
                     {
-                        Value = (object?)refreshToken.CreatedIp ?? DBNull.Value
+                        Value = ToTrimmedDbValue(refreshToken.CreatedIp)
                     });
 
                 command.Parameters.Add(
                     new SqlParameter("@UserAgent", SqlDbType.NVarChar, 300)
                     {
-                        Value = (object?)refreshToken.UserAgent ?? DBNull.Value
+                        Value = ToTrimmedDbValue(refreshToken.UserAgent)
                     });
 
                 command.Parameters.Add(
                     new SqlParameter("@CorrelationId", SqlDbType.NVarChar, 100)
                     {
-                        Value = (object?)refreshToken.CorrelationId ?? DBNull.Value
+                        Value = ToTrimmedDbValue(refreshToken.CorrelationId)
                     });
 
                 SqlParameter refreshTokenIdParameter = new("@RefreshTokenId", SqlDbType.BigInt)
@@ -189,6 +189,57 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
                 }
 
                 return MapRefreshToken(reader);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<IReadOnlyList<RefreshToken>> GetByUserIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return [];
+        }
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(RefreshTokenSelectByUserIdProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt)
+                    {
+                        Value = userId
+                    });
+
+                List<RefreshToken> refreshTokens = [];
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    refreshTokens.Add(MapRefreshToken(reader));
+                }
+
+                return refreshTokens;
             }
         }
         catch (SqlException exception)
@@ -351,7 +402,7 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
         }
     }
 
-    public async Task<long?> RotateAsync(
+    public async Task<RefreshTokenRotateResult?> RotateAsync(
         byte[] currentTokenHash,
         DateTime revokedAtUtc,
         string? revokedReason,
@@ -425,19 +476,19 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
                 command.Parameters.Add(
                     new SqlParameter("@CreatedIp", SqlDbType.NVarChar, 45)
                     {
-                        Value = (object?)createdIp ?? DBNull.Value
+                        Value = ToTrimmedDbValue(createdIp)
                     });
 
                 command.Parameters.Add(
                     new SqlParameter("@UserAgent", SqlDbType.NVarChar, 300)
                     {
-                        Value = (object?)userAgent ?? DBNull.Value
+                        Value = ToTrimmedDbValue(userAgent)
                     });
 
                 command.Parameters.Add(
                     new SqlParameter("@CorrelationId", SqlDbType.NVarChar, 100)
                     {
-                        Value = (object?)correlationId ?? DBNull.Value
+                        Value = ToTrimmedDbValue(correlationId)
                     });
 
                 SqlParameter newRefreshTokenIdParameter = new("@NewRefreshTokenId", SqlDbType.BigInt)
@@ -454,12 +505,17 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
 
                 await command.ExecuteNonQueryAsync(cancellationToken);
 
-                if (userIdParameter.Value is DBNull)
+                if (newRefreshTokenIdParameter.Value is DBNull ||
+                    userIdParameter.Value is DBNull)
                 {
                     return null;
                 }
 
-                return Convert.ToInt64(userIdParameter.Value);
+                return new RefreshTokenRotateResult
+                {
+                    NewRefreshTokenId = Convert.ToInt64(newRefreshTokenIdParameter.Value),
+                    UserId = Convert.ToInt64(userIdParameter.Value)
+                };
             }
         }
         catch (SqlException exception)
@@ -533,5 +589,12 @@ public sealed class RefreshTokenRepository : IRefreshTokenRepository
     {
         int ordinal = reader.GetOrdinal(columnName);
         return reader.IsDBNull(ordinal) ? null : (byte[])reader[columnName];
+    }
+
+    private static object ToTrimmedDbValue(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            ? value.Trim()
+            : DBNull.Value;
     }
 }

@@ -60,4 +60,11 @@ public static class AuthorizationPolicies
     public const string AuditLogsReadDetail = "Permission:audit:logs:read-detail";
     public const string AuditLogsReadByCorrelation = "Permission:audit:logs:read-by-correlation";
     public const string AuditLogsReadByEvent = "Permission:audit:logs:read-by-event";
+
+    public const string IdentityUsersRead = "Permission:identity:users:read";
+    public const string IdentityUsersReadSecurity = "Permission:identity:users:read-security";
+    public const string IdentityUsersManageStatus = "Permission:identity:users:manage-status";
+    public const string IdentityUsersManageSecurity = "Permission:identity:users:manage-security";
+    public const string IdentityUsersVerifyEmail = "Permission:identity:users:verify-email";
+    public const string IdentityUsersRevokeSessions = "Permission:identity:users:revoke-sessions";
 }
