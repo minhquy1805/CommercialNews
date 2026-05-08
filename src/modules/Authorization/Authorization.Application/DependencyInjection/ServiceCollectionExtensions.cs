@@ -1,3 +1,4 @@
+using Authorization.Application.Consumers.Identity;
 using Authorization.Application.UseCases.Permissions.ActivatePermission;
 using Authorization.Application.UseCases.Permissions.CreatePermission;
 using Authorization.Application.UseCases.Permissions.DeactivatePermission;
@@ -48,6 +49,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGetPermissionRolesUseCase, GetPermissionRolesUseCase>();
 
         services.AddScoped<IGetUserEffectivePermissionsUseCase, GetUserEffectivePermissionsUseCase>();
+
+        services.AddScoped<
+            IIdentityUserRegisteredConsumerService,
+            IdentityUserRegisteredConsumerService>();
 
         return services;
     }

@@ -2,6 +2,9 @@ namespace Identity.Application.Outbox;
 
 public static class IdentityIntegrationEventTypes
 {
+    public const string UserRegistered =
+        "identity.user_registered";
+
     public const string VerificationEmailRequested =
         "identity.verification_email_requested";
 

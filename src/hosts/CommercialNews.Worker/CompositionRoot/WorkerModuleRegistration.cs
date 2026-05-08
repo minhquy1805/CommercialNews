@@ -1,6 +1,11 @@
 using Audit.Application.DependencyInjection;
 using Audit.Infrastructure.DependencyInjection;
+using Authorization.Application.Consumers.Identity;
+using Authorization.Infrastructure.DependencyInjection;
 using CommercialNews.BuildingBlocks.Outbox.Runtime;
+using CommercialNews.Worker.Authorization.Consumers;
+using CommercialNews.Worker.Authorization.Handlers;
+using CommercialNews.Worker.Authorization.Handlers.Identity;
 using CommercialNews.Worker.Audit.Consumers;
 using CommercialNews.Worker.Audit.Handlers;
 using CommercialNews.Worker.Audit.Handlers.Authorization;
@@ -32,6 +37,11 @@ public static class WorkerModuleRegistration
         services.AddNotificationsApplication(configuration);
         services.AddNotificationsInfrastructure(configuration);
 
+        services.AddAuthorizationInfrastructure(configuration);
+        services.AddScoped<
+            IIdentityUserRegisteredConsumerService,
+            IdentityUserRegisteredConsumerService>();
+
         services.AddAuditApplication();
         services.AddAuditInfrastructure();
 
@@ -46,6 +56,7 @@ public static class WorkerModuleRegistration
 
         services.AddScoped<IOutboxEventPublisher, RabbitMqOutboxEventPublisher>();
 
+        services.AddScoped<IOutboxMessageHandler, IdentityUserRegisteredOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, IdentityVerificationEmailRequestedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, IdentityPasswordResetRequestedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, IdentityPasswordChangedOutboxHandler>();
@@ -86,6 +97,13 @@ public static class WorkerModuleRegistration
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityPasswordChangedIntegrationEventHandler>();
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityEmailVerifiedIntegrationEventHandler>();
 
+        services.Configure<AuthorizationRabbitMqConsumerOptions>(
+            configuration.GetSection(AuthorizationRabbitMqConsumerOptions.SectionName));
+
+        services.AddScoped<AuthorizationIntegrationEventDispatcher>();
+
+        services.AddScoped<IAuthorizationIntegrationEventHandler, IdentityUserRegisteredIntegrationEventHandler>();
+
         services.Configure<AuditRabbitMqConsumerOptions>(
             configuration.GetSection(AuditRabbitMqConsumerOptions.SectionName));
 
@@ -121,6 +139,7 @@ public static class WorkerModuleRegistration
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));
 
         services.AddHostedService<OutboxPollingService>();
+        services.AddHostedService<AuthorizationRabbitMqConsumerService>();
         services.AddHostedService<NotificationsRabbitMqConsumerService>();
         services.AddHostedService<AuditRabbitMqConsumerService>();
         services.AddHostedService<EmailDeliveryProcessingWorker>();

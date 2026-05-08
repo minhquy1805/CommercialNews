@@ -107,6 +107,17 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
                     user,
                     cancellationToken);
 
+                await _outboxWriter.EnqueueUserRegisteredAsync(
+                    unitOfWork: _unitOfWork,
+                    userId: userId,
+                    userPublicId: user.PublicId,
+                    email: user.Email,
+                    fullName: user.FullName,
+                    status: user.Status,
+                    registeredAtUtc: nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    cancellationToken: cancellationToken);
+
                 EmailVerificationToken verificationToken = EmailVerificationToken.Create(
                     userId: userId,
                     tokenHash: verificationTokenHash,
