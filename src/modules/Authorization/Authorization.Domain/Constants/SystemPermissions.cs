@@ -173,6 +173,42 @@ public static class SystemPermissions
             Description: "Generate slug suggestions"),
 
         new(
+            Key: PermissionKeys.Identity.Users.Read,
+            Module: "Identity",
+            Action: "Read",
+            Description: "Read Identity user accounts in admin workflows"),
+
+        new(
+            Key: PermissionKeys.Identity.Users.ReadSecurity,
+            Module: "Identity",
+            Action: "ReadSecurity",
+            Description: "Read Identity user sessions and security summaries"),
+
+        new(
+            Key: PermissionKeys.Identity.Users.ManageStatus,
+            Module: "Identity",
+            Action: "ManageStatus",
+            Description: "Activate or deactivate Identity user accounts"),
+
+        new(
+            Key: PermissionKeys.Identity.Users.ManageSecurity,
+            Module: "Identity",
+            Action: "ManageSecurity",
+            Description: "Lock or unlock Identity user accounts"),
+
+        new(
+            Key: PermissionKeys.Identity.Users.VerifyEmail,
+            Module: "Identity",
+            Action: "VerifyEmail",
+            Description: "Mark Identity user email addresses as verified"),
+
+        new(
+            Key: PermissionKeys.Identity.Users.RevokeSessions,
+            Module: "Identity",
+            Action: "RevokeSessions",
+            Description: "Revoke Identity user refresh-token sessions"),
+
+        new(
             Key: PermissionKeys.Authz.Permissions.Read,
             Module: "Authz",
             Action: "Read",

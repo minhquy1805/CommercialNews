@@ -7,6 +7,7 @@ using CommercialNews.Api.Api.Public.Identity.Contracts.User.Requests;
 using CommercialNews.Api.Api.Public.Identity.Contracts.User.Responses;
 using Identity.Application.Contracts.ChangePassword;
 using Identity.Application.Contracts.ForgotPassword;
+using Identity.Application.Contracts.LoginHistory.GetMyLoginHistory;
 using Identity.Application.Contracts.LoginUser;
 using Identity.Application.Contracts.Logout;
 using Identity.Application.Contracts.RefreshToken;
@@ -18,6 +19,7 @@ using Identity.Application.Contracts.VerifyEmail;
 using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.GetMyProfile;
+using Identity.Application.UseCases.LoginHistory.GetMyLoginHistory;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.Logout;
 using Identity.Application.UseCases.LogoutAllSessions;
@@ -34,7 +36,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace CommercialNews.Api.Api.Public.Controllers.Identity;
 
 [ApiController]
-[Route("api/v1/identity")]
+[Route("api/v1/auth")]
 public sealed class IdentityController : ControllerBase
 {
 
@@ -45,6 +47,7 @@ public sealed class IdentityController : ControllerBase
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
     }
 
+    [AllowAnonymous]
     [HttpPost("register")]
     [ProducesResponseType(typeof(RegisterResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -78,6 +81,7 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
+    [AllowAnonymous]
     [HttpPost("verify-email")]
     [ProducesResponseType(typeof(VerifyEmailResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -108,6 +112,7 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
+    [AllowAnonymous]
     [HttpPost("login")]
     [ProducesResponseType(typeof(LoginResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -148,6 +153,7 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
+    [AllowAnonymous]
     [HttpPost("forgot-password")]
     [ProducesResponseType(typeof(ForgotPasswordResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -176,9 +182,11 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
+    [AllowAnonymous]
     [HttpPost("reset-password")]
     [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> ResetPassword(
@@ -207,10 +215,12 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
-    [HttpPost("refresh-token")]
+    [AllowAnonymous]
+    [HttpPost("refresh")]
     [ProducesResponseType(typeof(RefreshTokenResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> RefreshToken(
@@ -254,7 +264,8 @@ public sealed class IdentityController : ControllerBase
         return this.ToActionResult(result);
     }
 
-    [HttpPost("resend-verification-email")]
+    [AllowAnonymous]
+    [HttpPost("resend-verification")]
     [ProducesResponseType(typeof(ResendVerificationEmailResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ResendVerificationEmail(
@@ -387,6 +398,58 @@ public sealed class IdentityController : ControllerBase
                 CreatedAt = value.CreatedAt,
                 UpdatedAt = value.UpdatedAt,
                 LastLoginAt = value.LastLoginAt
+            });
+        }
+
+        return this.ToActionResult(result);
+    }
+
+    [Authorize]
+    [HttpGet("me/login-history")]
+    [ProducesResponseType(typeof(GetMyLoginHistoryResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetMyLoginHistory(
+        [FromQuery] bool? succeeded,
+        [FromQuery] DateTime? fromAttemptedAt,
+        [FromQuery] DateTime? toAttemptedAt,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        [FromServices] IGetMyLoginHistoryUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        var applicationRequest = new GetMyLoginHistoryRequestDto
+        {
+            Succeeded = succeeded,
+            FromAttemptedAt = fromAttemptedAt,
+            ToAttemptedAt = toAttemptedAt,
+            Page = page ?? 1,
+            PageSize = pageSize ?? 20
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new GetMyLoginHistoryResponse
+            {
+                Items = value.Items
+                    .Select(item => new LoginHistoryItemResponse
+                    {
+                        LoginId = item.LoginId,
+                        Succeeded = item.Succeeded,
+                        FailureReason = item.FailureReason,
+                        AttemptedAt = item.AttemptedAt,
+                        IpAddress = item.IpAddress,
+                        UserAgent = item.UserAgent,
+                        CorrelationId = item.CorrelationId
+                    })
+                    .ToArray(),
+                Page = value.Page,
+                PageSize = value.PageSize,
+                TotalItems = value.TotalItems
             });
         }
 

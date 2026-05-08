@@ -51,17 +51,20 @@ public sealed class LogoutAllSessionsUseCase : ILogoutAllSessionsUseCase
 
             if (user is null)
             {
-                return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.User.NotFound);
+                return Result<LogoutAllSessionsResponseDto>.Failure(
+                    IdentityErrors.User.NotFound);
             }
 
             if (string.Equals(user.Status, UserAccountStatuses.Disabled, StringComparison.OrdinalIgnoreCase))
             {
-                return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.Auth.AccountDisabled);
+                return Result<LogoutAllSessionsResponseDto>.Failure(
+                    IdentityErrors.Auth.AccountDisabled);
             }
 
             if (user.IsLockedAt(nowUtc))
             {
-                return Result<LogoutAllSessionsResponseDto>.Failure(IdentityErrors.Auth.AccountLocked);
+                return Result<LogoutAllSessionsResponseDto>.Failure(
+                    IdentityErrors.Auth.AccountLocked);
             }
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -71,7 +74,7 @@ public sealed class LogoutAllSessionsUseCase : ILogoutAllSessionsUseCase
                 await _refreshTokenRepository.RevokeAllActiveByUserIdAsync(
                     userId: user.UserId,
                     revokedAtUtc: nowUtc,
-                    revokedReason: "LoggedOutAllSessions",
+                    revokedReason: RefreshTokenRevokedReasons.LogoutAll,
                     cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);

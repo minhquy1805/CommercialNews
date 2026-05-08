@@ -1,484 +1,909 @@
 # Identity — Domain Contracts (V1)
 
-This document defines the **domain contracts** for Identity: entities, states, invariants, and emitted events.  
-It is the source of truth for how Identity behaves regardless of implementation details.
-
-Related:
-
-- System-wide auth rules: `../../08-authentication-and-authorization.md`
-- Runtime scenarios: `../../../architecture/arc42/04-runtime-view-v1.md`
-- Standards: `../../02-contracts-and-standards.md`
-- ADR-0013: outbox and delivery semantics
-- ADR-0020: timeout, retry, and failure detection policy
-- ADR-0028: consumer idempotency, replay, and rebuild policy
-
----
-
-## 1) Domain scope (what Identity owns)
+## 1) Ownership
 
 Identity owns:
 
-- account lifecycle
-  - unverified → verified/active
-  - optional locked/disabled extensions
-- credential lifecycle
-  - password hashing
-  - password change
-  - password reset initiation and completion
-- session lifecycle
-  - refresh tokens
-  - logout
-  - token rotation / revocation policy
-- verification/reset token policy
-  - issuance
-  - expiry
-  - single-use consumption
-  - invalidation policy
+- `UserAccount`
+- `RefreshToken`
+- `EmailVerificationToken`
+- `PasswordResetToken`
+- account identity truth
+- credential truth
+- email verification truth
+- refresh-token/session truth
+- password reset token truth
+- account security state owned by Identity
+
+Identity is the canonical source of truth for:
+
+- which user accounts exist
+- account email and normalized email identity
+- password hash / credential state
+- account status
+- email verification state
+- active/revoked refresh tokens
+- verification token lifecycle
+- password reset token lifecycle
+- session revocation truth
 
 Identity does **not** own:
 
-- roles/permissions logic
-- governance truth
-- audit persistence
-- email delivery execution
-- notification delivery workflow state
+- roles
+- permissions
+- user-role assignment
+- role-permission grants
+- effective authorization truth
+- audit-log truth
+- notification delivery truth
+- downstream projections or cache truth
 
-### Boundary rule
+Role and permission governance belongs to the Authorization module.
 
-Identity is a **truth-owning module**.
-
-When email side effects are needed, Identity commits its own truth first and emits async intent via outbox/event publication.
-Identity does not wait for Notifications to complete delivery in order to consider its own truth mutation successful.
+Audit and Notifications may consume Identity events asynchronously, but they do not define Identity truth.
 
 ---
 
-## 2) Core entities (conceptual model)
+## 2) Domain responsibilities
 
-### 2.1 UserAccount
+Identity is responsible for:
 
-Core attributes (conceptual):
+- registering user accounts
+- authenticating email/password credentials
+- issuing and rotating refresh tokens
+- revoking refresh tokens
+- verifying email ownership through time-bound tokens
+- issuing password reset tokens
+- resetting passwords through valid reset tokens
+- supporting self-service profile/security operations
+- supporting admin account/session/security operations over Identity-owned truth
+- emitting outbox events for important account/security lifecycle changes
 
-- `UserId` *(stable system-wide identity)*
+Identity must support:
+
+- strong local consistency for security/auth state changes
+- deterministic token validation outcomes
+- safe refresh-token rotation and revocation
+- anti-enumeration behavior for forgot-password and resend-verification flows
+- async side effects through Outbox, not direct synchronous downstream calls
+- truth-backed reconciliation after timeout ambiguity
+
+Identity must **not** rely on:
+
+- email delivery state as proof of account truth
+- audit ingestion as part of Identity success
+- Redis/cache as the source of truth for security decisions
+- client-supplied role/permission data as authoritative
+- downstream projections as authority for login, refresh, verification, or session revocation
+
+---
+
+## 3) Entities — conceptual contract
+
+### 3.1 UserAccount
+
+A `UserAccount` represents an Identity-owned user account and credential boundary.
+
+**Fields**
+
+- `UserId`
 - `Email`
 - `EmailNormalized`
 - `PasswordHash`
+- `FullName?`
 - `Status`
+- `IsEmailVerified`
+- `EmailVerifiedAt?`
 - `CreatedAt`
 - `UpdatedAt`
-- `VerifiedAt?`
+- `LastLoginAt?` *(optional / derived depending on implementation)*
+- `LockedUntil?` *(conditional if lockout is implemented in V1)*
+- `FailedLoginCount?` *(optional / policy-defined)*
 
-Optional operational fields (policy-driven):
+**Notes**
 
-- `LockoutUntil?`
-- `FailedLoginCount?`
-- `LastLoginAt?`
+- `EmailNormalized` is the canonical comparison key.
+- `PasswordHash` is secret-bearing and must never be returned, logged, or emitted.
+- `Status` gates authentication according to policy.
+- `IsEmailVerified` and `EmailVerifiedAt` are Identity truth.
+- Lock fields are conditional until schema support exists.
 
-### 2.2 RefreshToken
+---
 
-Core attributes (conceptual):
+### 3.2 RefreshToken
 
-- `TokenId`
+A `RefreshToken` represents an opaque refresh-token session artifact.
+
+**Fields**
+
+- `RefreshTokenId` or equivalent stable internal identity
 - `UserId`
-- `Token` *(opaque string or equivalent protected representation)*
+- `TokenHash`
 - `CreatedAt`
-- `ExpiryDate`
-- `RevokedAt?`
-- `ReplacedByToken?`
-- `IPAddress?`
-- `UserAgent?`
-- `FamilyId?` *(optional; token-family revocation support)*
-
-### 2.3 EmailToken (logical concept)
-
-This may be implemented as stored tokens, hashed token records, or signed tokens, but the contract is:
-
-- token has a `Type`
-  - `VerifyEmail`
-  - `ResetPassword`
-- token is **time-bound**
-- token is **single-use** by policy
-- raw token value is never logged
-- raw token value is never emitted in async event payloads
-
-Conceptual fields:
-
-- `TokenId` *(or equivalent token identifier)*
-- `UserId`
-- `Type`
 - `ExpiresAt`
-- `ConsumedAt?`
+- `RevokedAt?`
+- `ReplacedByTokenHash?`
+- `CreatedByIp?`
+- `RevokedByIp?`
+- `UserAgent?`
+
+**Notes**
+
+- raw refresh tokens must never be stored.
+- `TokenHash` must never be returned, logged, or emitted.
+- refresh-token rotation revokes the old token and issues a successor.
+- revoked or expired refresh tokens must not authorize refresh.
+- reuse detection behavior is policy-defined and documented in `06-idempotency-consistency.md`.
 
 ---
 
-## 3) States and lifecycle rules
+### 3.3 EmailVerificationToken
 
-### 3.1 Account states (V1 baseline)
+An `EmailVerificationToken` represents a time-bound, one-time-use verification artifact.
 
-- `Unverified`
-- `Active`
+**Fields**
 
-Optional V1/V2 hooks:
+- `EmailVerificationTokenId`
+- `UserId`
+- `TokenHash`
+- `ExpiresAt`
+- `UsedAt?`
+- `CreatedAt`
+- `RevokedAt?` *(optional if policy requires explicit revocation)*
 
+**Notes**
+
+- raw verification tokens must never be stored.
+- `TokenHash` must never be returned, logged, or emitted.
+- a token is usable only when it is not used, not expired, and not revoked if revocation is implemented.
+- admin email verification override must not expose or require raw token material.
+
+---
+
+### 3.4 PasswordResetToken
+
+A `PasswordResetToken` represents a time-bound, one-time-use password reset artifact.
+
+**Fields**
+
+- `PasswordResetTokenId`
+- `UserId`
+- `TokenHash`
+- `ExpiresAt`
+- `UsedAt?`
+- `CreatedAt`
+- `RevokedAt?` *(optional if policy requires explicit revocation)*
+
+**Notes**
+
+- raw reset tokens must never be stored.
+- `TokenHash` must never be returned, logged, or emitted.
+- issuing a new reset token may revoke older active reset tokens according to policy.
+- successful password reset updates credential truth atomically.
+
+---
+
+### 3.5 LoginHistory *(optional / recommended)*
+
+`LoginHistory` represents minimal operational login evidence for abuse detection and investigation.
+
+**Fields**
+
+- `LoginHistoryId`
+- `UserId?`
+- `EmailNormalized?`
+- `OccurredAt`
+- `Succeeded`
+- `FailureReason?`
+- `IpAddress?`
+- `UserAgent?`
+- `CorrelationId?`
+
+**Notes**
+
+- Login history must remain privacy-aware.
+- Login history must not store raw credentials or tokens.
+- Login history may be written asynchronously depending on implementation.
+- Login history must not define authentication success.
+
+---
+
+## 4) Contract DTOs
+
+Contract names should describe the resource and purpose.
+
+Admin context is represented by namespace, route, folder, and policy — not by prefixing every DTO with `Admin`.
+
+### 4.1 Public / self-service contracts
+
+#### RegisterUser
+
+Request:
+
+- `Email`
+- `Password`
+
+Response:
+
+- `UserId`
+- `Email`
+- `Status`
+
+#### LoginUser
+
+Request:
+
+- `Email`
+- `Password`
+
+Response:
+
+- `AccessToken`
+- `ExpiresIn`
+- `RefreshToken`
+- `RefreshExpiresIn`
+- `User`
+
+#### RefreshToken
+
+Request:
+
+- `RefreshToken`
+
+Response:
+
+- same shape as login response
+
+#### VerifyEmail
+
+Request:
+
+- `Token`
+
+Response:
+
+- `Verified`
+
+#### ResendVerificationEmail
+
+Request:
+
+- `Email`
+
+Response:
+
+- `Accepted`
+
+#### ForgotPassword
+
+Request:
+
+- `Email`
+
+Response:
+
+- `Accepted`
+
+#### ResetPassword
+
+Request:
+
+- `Token`
+- `NewPassword`
+
+Response:
+
+- `Reset`
+
+#### GetMyProfile
+
+Response:
+
+- `UserId`
+- `Email`
+- `FullName?`
+- `Status`
+- `Verified`
+- `Roles[]` *(client-facing snapshot only; Authorization remains the owner)*
+
+#### UpdateMyProfile
+
+Request:
+
+- `FullName`
+
+Response:
+
+- `Updated`
+
+#### ChangePassword
+
+Request:
+
+- `CurrentPassword`
+- `NewPassword`
+
+Response:
+
+- `Changed`
+
+---
+
+### 4.2 Admin account contracts
+
+#### UserAccountListItem
+
+Used for admin user list views.
+
+Fields:
+
+- `UserId`
+- `Email`
+- `FullName?`
+- `Status`
+- `Verified`
+- `CreatedAtUtc`
+- `UpdatedAtUtc?`
+- `LastLoginAtUtc?`
+
+#### UserAccountDetail
+
+Used for admin account detail views.
+
+Fields:
+
+- `UserId`
+- `Email`
+- `FullName?`
+- `Status`
+- `Verified`
+- `EmailVerifiedAtUtc?`
+- `CreatedAtUtc`
+- `UpdatedAtUtc?`
+- `ActiveRefreshTokenCount`
+- `LastLoginAtUtc?`
+- `LockedUntilUtc?`
+
+#### UserSessionItem
+
+Used for admin session/security views.
+
+Fields:
+
+- `RefreshTokenId`
+- `CreatedAtUtc`
+- `ExpiresAtUtc`
+- `RevokedAtUtc?`
+- `IpAddress?`
+- `UserAgent?`
+
+Rules:
+
+- `RefreshTokenId` must be a public-safe identifier.
+- It must not expose or be derived from raw token value or token hash.
+- raw refresh tokens and token hashes must never be returned.
+
+#### UserSecuritySummary
+
+Used for admin security investigation views.
+
+Fields:
+
+- `UserId`
+- `Status`
+- `Verified`
+- `ActiveRefreshTokenCount`
+- `LastLoginAtUtc?`
+- `LockedUntilUtc?`
+- `RiskFlags[]`
+
+Rules:
+
+- V1 may return partial security summary if optional data is not implemented.
+- The summary must not expose secrets or raw token material.
+
+---
+
+### 4.3 Admin command contracts
+
+#### ActivateUserRequest
+
+Fields:
+
+- `Reason`
+
+#### ActivateUserResult
+
+Fields:
+
+- `UserId`
+- `Status`
+- `OccurredAtUtc`
+
+#### DeactivateUserRequest
+
+Fields:
+
+- `Reason`
+- `RevokeSessions`
+
+#### DeactivateUserResult
+
+Fields:
+
+- `UserId`
+- `Status`
+- `SessionsRevoked`
+- `OccurredAtUtc`
+
+#### LockUserRequest
+
+Fields:
+
+- `Reason`
+- `LockedUntilUtc?`
+- `RevokeSessions`
+
+#### LockUserResult
+
+Fields:
+
+- `UserId`
 - `Locked`
-- `Disabled`
+- `LockedUntilUtc?`
+- `SessionsRevoked`
 
-### 3.2 State invariants
+#### UnlockUserRequest
 
-- a user becomes `Active` only when verification policy is satisfied
-- verification completion is an Identity truth transition
-- Notifications may deliver verification mail, but delivery success is not itself the verification truth
-- admin access always requires authentication plus authorization policy coverage
+Fields:
 
-### 3.3 Verification gating
+- `Reason`
 
-Allowed baseline actions before verification:
+#### UnlockUserResult
+
+Fields:
+
+- `UserId`
+- `Locked`
+- `LockedUntilUtc?`
+
+#### MarkEmailVerifiedRequest
+
+Fields:
+
+- `Reason`
+
+#### MarkEmailVerifiedResult
+
+Fields:
+
+- `UserId`
+- `Verified`
+- `EmailVerifiedAtUtc`
+
+#### RevokeUserSessionsRequest
+
+Fields:
+
+- `Reason`
+- `Scope`
+
+Allowed `Scope` values:
+
+- `All`
+
+#### RevokeUserSessionsResult
+
+Fields:
+
+- `UserId`
+- `RevokedSessionCount`
+- `OccurredAtUtc`
+
+---
+
+## 5) Lifecycle rules
+
+### 5.1 UserAccount lifecycle
+
+User accounts support lifecycle transitions through:
 
 - register
-- resend verification
 - verify email
-- forgot password
-- reset password
+- update profile
+- change password
+- activate
+- deactivate
+- lock *(conditional if schema supports lock state)*
+- unlock *(conditional if schema supports lock state)*
 
-Policy-driven items:
+**V1 posture**
 
-- whether login before verification is allowed
-- whether interaction actions require verified email
-- whether some self-service endpoints are accessible before verification
-
-> Final gating decisions should be captured in ADRs and applied consistently.
-
----
-
-## 4) Security invariants (non-negotiable)
-
-### 4.1 Sensitive data handling
-
-Identity must never store or emit secrets unsafely.
-
-Rules:
-
-- passwords are never stored in plaintext
-- password verification uses strong hashing
-- access tokens, refresh tokens, verification tokens, and reset tokens must never appear in logs
-- raw token values must never appear in async event payloads
-- token-bearing templates and delivery flows must use minimum necessary secret exposure only
-- upstream truth payloads must remain privacy-aware and minimal
-
-### 4.2 Credential rules
-
-- password hashing uses a strong approved algorithm
-- password reset and password change should revoke active refresh tokens by policy
-- reset/verification token validity must be bounded and enforceable
-
-### 4.3 Session rules
-
-- refresh tokens are opaque and server-controlled
-- refresh token rotation is enabled by default or by recommended policy
-- retry/replay of refresh-related flows must not produce inconsistent token-family state
+- physical delete is not part of normal Identity account management.
+- deactivate is preferred for disabling account access.
+- protected system accounts may be blocked from unsafe admin mutation.
+- repeated state-setting commands must converge safely.
 
 ---
 
-## 5) Truth-success and async-side-effect semantics
+### 5.2 RefreshToken lifecycle
 
-### 5.1 Identity truth success
+Refresh tokens support lifecycle transitions through:
 
-A successful Identity write means:
+- issue
+- rotate
+- revoke current token
+- revoke all active tokens for a user
+- expire naturally
+- mark replaced by successor token
 
-- Identity truth committed
-- and, where required, async intent/outbox committed
+**V1 posture**
 
-It does **not** mean:
-
-- broker publish already happened
-- Notifications already sent an email
-- Audit already persisted a record
-- downstream consumers are caught up
-
-### 5.2 Non-blocking requirement
-
-The following must remain non-blocking on Notifications:
-
-- register
-- resend verification
-- forgot password
-- password reset request acceptance
-- verification-related truth transitions
-
-### 5.3 Reconciliation rule
-
-If ambiguity exists after client timeout or downstream lag, the source of truth is:
-
-- Identity truth state
-- not notification completion state
-- not timeout interpretation alone
+- refresh-token rotation is the default refresh model.
+- successful rotation must revoke the old token.
+- revoke-sessions must take effect immediately from Identity truth.
+- token reuse after revocation is suspicious and policy-defined.
 
 ---
 
-## 6) Idempotency and retry semantics (contract-level)
+### 5.3 EmailVerificationToken lifecycle
 
-Identity must be safe under retries and ambiguous client outcomes.
+Verification tokens support lifecycle transitions through:
 
-### 6.1 Anti-enumeration
+- issue
+- use once
+- expire
+- revoke/obsolete active token when policy requires
 
-The following flows must remain privacy-safe and anti-enumeration-aware:
+**V1 posture**
 
-- `/forgot-password`
-- `/resend-verification`
+- tokens are time-bound and single-use.
+- admin email verification override may obsolete active verification tokens according to policy.
+- verification email delivery is async and does not define verification truth.
 
-Recommended response posture:
+---
 
-- accepted-style response regardless of account existence when policy requires it
+### 5.4 PasswordResetToken lifecycle
 
-### 6.2 Idempotency support
+Password reset tokens support lifecycle transitions through:
 
-Idempotency keys are recommended for operations such as:
+- issue
+- use once
+- expire
+- revoke/obsolete prior active tokens
 
-- register
-- resend verification
-- forgot password
+**V1 posture**
 
-### 6.3 Token and session consistency
+- tokens are time-bound and single-use.
+- issuing a new reset token should invalidate older active reset tokens according to policy.
+- successful password reset updates credential truth atomically.
 
-Refresh rotation and token consumption flows must tolerate retries without producing inconsistent truth.
+---
+
+## 6) Invariants
+
+### 6.1 Account identity invariants
+
+- `EmailNormalized` must be unique.
+- email normalization must be deterministic.
+- one account identity maps to one canonical normalized email.
+- account lookup for login and anti-enumeration flows must use normalized email.
+
+### 6.2 Secret-handling invariants
+
+Identity must never return, log, or emit:
+
+- `PasswordHash`
+- raw verification token
+- verification `TokenHash`
+- raw reset token
+- reset `TokenHash`
+- raw refresh token
+- refresh `TokenHash`
+
+### 6.3 Authentication gate invariants
+
+- inactive users cannot sign in.
+- locked users cannot sign in where lock state exists.
+- email verification gating is policy-defined.
+- stale cache or derived state must not authorize authentication when Identity truth would deny it.
+
+### 6.4 Token lifecycle invariants
+
+- verification tokens are time-bound and single-use.
+- password reset tokens are time-bound and single-use.
+- refresh tokens are time-bound and revocable.
+- revoked refresh tokens must not authorize refresh.
+- expired refresh tokens must not authorize refresh.
+- successful refresh rotation must not leave multiple active successor tokens for the same rotation intent.
+
+### 6.5 Admin mutation invariants
+
+- admin account/security mutations must be protected by explicit permission policies.
+- admin status/security mutations must emit outbox events unless documented as no-op/convergent.
+- admin cannot deactivate or lock their own account through normal admin APIs.
+- protected system accounts cannot be deactivated or locked through normal admin APIs.
+- Identity Admin must not assign or revoke roles.
+- Identity Admin must not grant or revoke permissions.
+
+### 6.6 Convergent command invariants
+
+State-setting admin commands are convergent by default.
 
 Examples:
 
-- duplicate client retry must not create contradictory refresh-token family state
-- consumed token must not become reusable because of retry ambiguity
+- activating an already active user should return the current committed state.
+- deactivating an already inactive user should return the current committed state.
+- unlocking an already unlocked user should return the current committed state.
+- marking an already verified email should return the current committed state.
+
+Convergent no-op commands should not emit duplicate state-change events unless explicitly required by audit policy.
+
+### 6.7 Replay-safety invariant
+
+Replayed or delayed downstream effects must not:
+
+- re-enable a revoked refresh token.
+- re-open a used verification/reset token.
+- override fresher account security truth.
+- create duplicate audit records.
+- send duplicate harmful notifications without business-level idempotency.
 
 ---
 
-## 7) Domain events (for async side effects)
+## 7) Policy coverage invariant
 
-Identity emits events for:
+- 100% of `/api/v1/admin/identity/*` endpoints must enforce explicit authorization policies.
+- policy format is `Permission:<PermissionKey>`.
+- authorization checks must be deny-by-default.
+- generic authentication alone is not sufficient for admin endpoints.
+- object-level ABAC checks must be composed with permission checks where required.
 
-- Notifications
-- Audit
-- optional login-history or derived operational consumers
+Required V1 permissions:
 
-### 7.1 Event envelope
+- `Identity.User.Read`
+- `Identity.Session.Read`
+- `Identity.User.ManageStatus`
+- `Identity.User.ManageSecurity`
+- `Identity.User.VerifyEmail`
+- `Identity.User.RevokeSessions`
 
-Identity async events should use the system-wide async envelope:
+Optional / recommended if finer-grained read security is desired:
 
-- `MessageId`
-- `OccurredAt`
-- `CorrelationId`
+- `Identity.User.ReadSecurity`
+
+---
+
+## 8) ABAC context contract
+
+Identity Admin may require ABAC checks for high-risk operations.
+
+### 8.1 SubjectAttributes
+
+- `UserId`
+- `Email`
+- `Roles[]`
+- `TenantId?`
+- `Groups[]?`
+- `Department?`
+- `IsMfaOn?`
+
+### 8.2 ResourceAttributes
+
+For Identity user resources:
+
+- `ResourceType = "Identity.User"`
+- `Id = target UserId`
+- `OwnerId = target UserId`
+- `Status = target account status`
+- `Sensitivity = "Protected"` when target is a protected system account
+- `TenantId?`
+
+### 8.3 EnvironmentAttributes
+
+- `Now`
+- `Ip?`
+- `UserAgent?`
+- `CorrelationId?`
+- `TenantId?`
+
+### 8.4 Required ABAC rules
+
+High-risk Identity Admin actions must enforce contextual rules such as:
+
+- actor cannot deactivate themselves.
+- actor cannot lock themselves.
+- actor cannot revoke their own current session through normal admin APIs unless explicitly allowed.
+- protected system accounts cannot be deactivated or locked through normal admin APIs.
+- future: MFA may be required for selected high-risk operations.
+- future: tenant/department constraints may apply.
+
+---
+
+## 9) Domain events
+
+Identity emits minimal, privacy-aware events through the standard outbox path.
+
+### 9.1 Event identity and transport posture
+
+Identity events must:
+
+- be emitted only with committed Identity truth.
+- carry stable `MessageId`.
+- include `EventType`.
+- include `AggregateType`.
+- include `AggregateId`.
+- include `Version` where ordered transitions matter.
+- include `OccurredAt`.
+- include `CorrelationId` where available.
+- be safe under retry, duplicate delivery, and replay.
+- remain minimal and privacy-aware.
+
+### 9.2 Public / self-service events
+
+Examples:
+
+- `identity.user_registered`
+- `identity.verification_requested`
+- `identity.email_verified`
+- `identity.password_reset_requested`
+- `identity.password_changed`
+- `identity.refresh_token_rotated`
+- `identity.user_logged_out`
+
+### 9.3 Admin events
+
+- `identity.admin.user_activated`
+- `identity.admin.user_deactivated`
+- `identity.admin.user_locked`
+- `identity.admin.user_unlocked`
+- `identity.admin.email_marked_verified`
+- `identity.admin.user_sessions_revoked`
+
+### 9.4 Event payload rules
+
+Events should include only the minimum necessary data.
+
+Allowed payload examples:
+
 - `ActorUserId?`
-- `EventType`
-- `AggregateId`
-- `Version` *(where ordered transitions matter)*
-- `Payload`
+- `TargetUserId`
+- `PreviousStatus?`
+- `NewStatus?`
+- `Reason?`
+- `RevokedSessionCount?`
+- `OccurredAtUtc`
+- `CorrelationId?`
+- `RequiredPermission?`
 
-**Rule:** use `MessageId` as the stable async identity name in V1 docs.
+Events must not include:
 
-### 7.2 Event categories
+- password hash
+- raw tokens
+- token hashes
+- unnecessary PII
+- full authorization role/permission snapshots
 
-Identity emits two broad categories of events:
+### 9.5 Downstream posture
 
-#### A) Business/audit timeline events
+Downstream consumers such as Audit, Notifications, cache invalidation handlers, or projections must tolerate:
+
+- at-least-once delivery
+- duplicate Identity events
+- delayed Identity events
+- replayed Identity events
+- stale event arrival
+
+These downstream effects do not define Identity truth.
+
+Audit must dedupe by `MessageId` or equivalent `AuditEventId`.
+
+Notifications must use durable delivery tracking and business-level idempotency where duplicate user-visible delivery is harmful.
+
+---
+
+## 10) Read/write truth contract
+
+### 10.1 Write success means
+
+For Identity-changing operations, success means:
+
+- Identity truth committed successfully.
+- async intent/outbox committed where applicable.
+
+Write success does **not** guarantee that:
+
+- RabbitMQ publish has completed.
+- an audit record is already queryable.
+- an email has already been sent.
+- cache invalidation has already propagated.
+- derived projections already reflect the change.
+- downstream reporting already reflects the change.
+
+### 10.2 Read-after-write requirement
+
+For security-sensitive Identity flows:
+
+- post-write reads must reflect authoritative current truth.
+- immediate reconciliation must use Identity truth, not downstream audit/cache/materialization visibility.
+- successful verify/reset/change-password/revoke-session operations must be visible to subsequent truth-backed reads.
+- stale cache must not misrepresent current security truth.
+
+### 10.3 Timeout ambiguity
+
+A timeout does not prove that an Identity command failed.
+
+After client-side timeout, the caller should reconcile by reading Identity truth where possible.
 
 Examples:
 
-- `Auth.UserRegistered`
-- `Auth.UserEmailVerified`
-- `Auth.UserPasswordChanged`
-- `Auth.UserLoggedIn` *(optional)*
-
-These are useful for:
-
-- audit ingestion
-- business/ops reporting
-- timeline reconstruction
-
-#### B) Delivery-trigger events for Notifications
-
-Examples:
-
-- `Auth.EmailVerificationRequested`
-- `Auth.PasswordResetRequested`
-
-These are the canonical async triggers for Notifications mail delivery flows.
-
-**Rule:** Notifications should consume delivery-trigger events, not infer mail behavior indirectly from unrelated business events unless explicitly documented.
+- after admin deactivate timeout, read `GET /api/v1/admin/identity/users/{userId}`.
+- after admin revoke-sessions timeout, read session/security truth.
+- after self-service verify/reset ambiguity, use truth-backed status or deterministic token outcome.
 
 ---
 
-## 8) Event types (V1)
+## 11) Abuse and safety rules
 
-### 8.1 `Auth.UserRegistered`
+Identity must support safe handling of:
 
-Purpose:
+- repeated client retries.
+- timeout ambiguity.
+- duplicate requests.
+- repeated equivalent admin commands.
+- password reset/resend loops.
+- verification resend abuse.
+- login brute force attempts.
+- refresh-token replay or reuse attempts.
+- protected account mutation attempts.
 
-- business/audit timeline event after registration truth commits
+The model must produce deterministic outcomes for:
 
-Payload (minimal, privacy-aware):
-
-- `UserId`
-- `OccurredAt`
-
-Optional:
-- privacy-safe registration context if truly needed by downstream consumers
-
-### 8.2 `Auth.EmailVerificationRequested`
-
-Purpose:
-
-- canonical delivery-trigger event for verification email
-
-Payload (minimal, delivery-safe):
-
-- `UserId`
-- delivery-safe recipient context where necessary
-- token identifier or equivalent safe verification context if needed
-- `RequestedAt`
-
-Rules:
-
-- do **not** emit raw verification token value
-- do **not** emit more recipient/context data than necessary
-- payload must support safe notification delivery without leaking secret-bearing truth
-
-### 8.3 `Auth.UserEmailVerified`
-
-Purpose:
-
-- business/audit event that verification truth completed
-
-Payload:
-
-- `UserId`
-- `VerifiedAt`
-
-### 8.4 `Auth.PasswordResetRequested`
-
-Purpose:
-
-- canonical delivery-trigger event for reset email
-
-Payload (minimal, delivery-safe):
-
-- `UserId`
-- delivery-safe recipient context where necessary
-- `ResetTokenId` or equivalent identifier only
-- `RequestedAt`
-
-Rules:
-
-- do **not** emit raw reset token value
-- do **not** let notification payload become a carrier of unsafe secret-bearing truth
-
-### 8.5 `Auth.UserPasswordChanged`
-
-Purpose:
-
-- business/audit event that password truth changed
-
-Payload:
-
-- `UserId`
-- `ChangedAt`
-- `Reason` *(for example: `Reset` | `Change`)*
-
-### 8.6 `Auth.UserLoggedIn` *(optional)*
-
-Purpose:
-
-- optional operational/audit event
-
-Payload:
-
-- `UserId`
-- `LoggedInAt`
-- optional privacy-governed metadata such as:
-  - `IPAddress?`
-  - `UserAgent?`
+- duplicate email registration attempts.
+- invalid credentials.
+- invalid/expired/used tokens.
+- revoked refresh tokens.
+- repeated equivalent admin state-setting commands.
+- protected system account mutation attempts.
+- unauthorized admin operations.
 
 ---
 
-## 9) Payload minimization and privacy rules
+## 12) V1 boundaries and exclusions
 
-### 9.1 Minimum necessary principle
+V1 includes:
 
-Identity event payloads must be:
+- account registration
+- email/password login
+- refresh-token rotation
+- logout/session revocation
+- email verification
+- resend verification
+- forgot/reset password
+- self profile/security actions
+- Identity Admin account reads
+- Identity Admin status/security mutations where schema supports them
+- Identity Admin session revocation
+- Identity Admin email verification override
+- outbox-backed async events for important account/security changes
 
-- minimal
-- privacy-aware
-- safe under logging/tracing/transport
-- sufficient for the intended downstream consumer, but no more
+V1 may conditionally include:
 
-### 9.2 Email-related events
+- lock/unlock user if schema supports lock state
+- login-history-backed security summary
+- actor-based throttling for admin security operations
+- `Identity.User.ReadSecurity` permission for sensitive security reads
 
-For delivery-trigger events:
+V1 does not include:
 
-- email/recipient context may be included only when operationally necessary for delivery
-- logs and admin views must still mask/redact recipient data by policy
-- raw secrets/tokens are forbidden in payloads
-- prefer identifiers plus safe delivery context over broad truth snapshots
+- role assignment
+- permission grants
+- effective authorization ownership
+- external identity providers
+- MFA factors
+- password history
+- risk engine as authoritative truth
+- direct synchronous audit insertion
+- direct synchronous email delivery inside Identity write transactions
 
-### 9.3 No notification-owned truth in Identity events
-
-Identity should emit:
-
-- truth changes
-- delivery-trigger intents
-
-Identity should not emit events that imply:
-
-- email already sent
-- provider already accepted delivery
-- notification workflow already succeeded
-
-Those belong to Notifications delivery truth.
-
----
-
-## 10) Cross-module contract with Notifications
-
-### 10.1 What Identity guarantees
-
-For delivery-trigger events such as:
-
-- `Auth.EmailVerificationRequested`
-- `Auth.PasswordResetRequested`
-
-Identity guarantees:
-
-- upstream truth/intended operation committed according to Identity rules
-- async intent committed with stable `MessageId`
-- payload is minimal and safe for downstream processing
-
-### 10.2 What Identity does not guarantee
-
-Identity does **not** guarantee:
-
-- broker publication already completed
-- mail already sent
-- provider accepted the message
-- delivery ambiguity already resolved
-
-### 10.3 What Notifications owns
-
-Notifications owns:
-
-- delivery workflow creation
-- delivery attempt history
-- provider result classification
-- retry/remediation state
-- operational send truth
-
-Identity must not model those concerns as its own truth.
-
----
-
-## 11) ADR hooks (must be explicit)
-
-The following decisions should remain explicit in ADRs or closely related module docs:
-
-- verification gating rules
-- login-before-verify policy
-- refresh-token reuse detection response
-- logout semantics (`Current` vs `All`)
-- register conflict behavior
-- lockout policy
-- minimal payload rules for email-trigger events
-- whether delivery-trigger events include direct email value or only identifier + safe delivery context
+Future ABAC, MFA, external identity, and risk-based flows must compose with — not replace — Identity-owned account/session/security truth.

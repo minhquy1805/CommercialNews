@@ -1,15 +1,24 @@
-﻿namespace Identity.Application.Ports.Persistence
+﻿using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using Identity.Application.Models.QueryModels;
+using Identity.Domain.Entities;
+
+namespace Identity.Application.Ports.Persistence;
+
+public interface ILoginHistoryRepository
 {
-    public interface ILoginHistoryRepository
-    {
-        Task InsertAsync(
-            long? userId,
-            string? emailNormalizedAttempted,
-            bool succeeded,
-            string? failureReason,
-            string? ipAddress,
-            string? userAgent,
-            string? correlationId,
-            CancellationToken cancellationToken = default);
-    }
+    Task<long> InsertAsync(
+        LoginHistory loginHistory,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<LoginHistory>> GetByUserIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<LoginHistory>> GetRecentAsync(
+        int topN = 100,
+        CancellationToken cancellationToken = default);
+
+    Task<PagedQueryResult<LoginHistoryListResultItem>> SelectByUserIdAsync(
+        LoginHistoryByUserQuery query,
+        CancellationToken cancellationToken = default);
 }

@@ -91,7 +91,7 @@ public sealed class VerifyEmailUseCase : IVerifyEmailUseCase
                         IdentityErrors.EmailVerification.TokenAlreadyUsed);
                 }
 
-                bool verified = await _userAccountRepository.MarkEmailVerifiedAsync(
+                bool verified = await _userAccountRepository.SetEmailVerifiedAsync(
                     token.UserId,
                     nowUtc,
                     cancellationToken);

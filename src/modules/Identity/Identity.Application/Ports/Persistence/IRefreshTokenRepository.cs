@@ -16,6 +16,10 @@ public interface IRefreshTokenRepository
         byte[] tokenHash,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<RefreshToken>> GetByUserIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default);
+
     Task<bool> RevokeAsync(
         long refreshTokenId,
         DateTime revokedAtUtc,
@@ -29,7 +33,7 @@ public interface IRefreshTokenRepository
         string? revokedReason,
         CancellationToken cancellationToken = default);
 
-    Task<long?> RotateAsync(
+    Task<RefreshTokenRotateResult?> RotateAsync(
         byte[] currentTokenHash,
         DateTime revokedAtUtc,
         string? revokedReason,

@@ -67,6 +67,19 @@ public static class PermissionKeys
         }
     }
 
+    public static class Identity
+    {
+        public static class Users
+        {
+            public const string Read = "identity:users:read";
+            public const string ReadSecurity = "identity:users:read-security";
+            public const string ManageStatus = "identity:users:manage-status";
+            public const string ManageSecurity = "identity:users:manage-security";
+            public const string VerifyEmail = "identity:users:verify-email";
+            public const string RevokeSessions = "identity:users:revoke-sessions";
+        }
+    }
+
     public static class Authz
     {
         public static class Permissions

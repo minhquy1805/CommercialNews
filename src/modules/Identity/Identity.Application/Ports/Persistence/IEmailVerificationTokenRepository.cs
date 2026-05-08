@@ -12,6 +12,10 @@ public interface IEmailVerificationTokenRepository
         byte[] tokenHash,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<EmailVerificationToken>> GetByUserIdAsync(
+        long userId,
+        CancellationToken cancellationToken = default);
+
     Task<bool> MarkUsedAsync(
         long verificationTokenId,
         DateTime usedAtUtc,

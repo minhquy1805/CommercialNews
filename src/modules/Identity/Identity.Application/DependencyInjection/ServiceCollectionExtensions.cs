@@ -2,6 +2,8 @@ using Identity.Application.Configuration;
 using Identity.Application.UseCases.ChangePassword;
 using Identity.Application.UseCases.ForgotPassword;
 using Identity.Application.UseCases.GetMyProfile;
+using Identity.Application.UseCases.LoginHistory.GetMyLoginHistory;
+using Identity.Application.UseCases.LoginHistory.GetUserLoginHistory;
 using Identity.Application.UseCases.LoginUser;
 using Identity.Application.UseCases.Logout;
 using Identity.Application.UseCases.LogoutAllSessions;
@@ -10,6 +12,16 @@ using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResendVerificationEmail;
 using Identity.Application.UseCases.ResetPassword;
 using Identity.Application.UseCases.UpdateMyProfile;
+using Identity.Application.UseCases.Users.ActivateUser;
+using Identity.Application.UseCases.Users.DisableUser;
+using Identity.Application.UseCases.Users.GetUserDetail;
+using Identity.Application.UseCases.Users.GetUserSecuritySummary;
+using Identity.Application.UseCases.Users.GetUserSessions;
+using Identity.Application.UseCases.Users.ListUsers;
+using Identity.Application.UseCases.Users.LockUser;
+using Identity.Application.UseCases.Users.MarkEmailVerified;
+using Identity.Application.UseCases.Users.RevokeUserSessions;
+using Identity.Application.UseCases.Users.UnlockUser;
 using Identity.Application.UseCases.VerifyEmail;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,6 +52,21 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGetMyProfileUseCase, GetMyProfileUseCase>();
         services.AddScoped<IUpdateMyProfileUseCase, UpdateMyProfileUseCase>();
         services.AddScoped<IResendVerificationEmailUseCase, ResendVerificationEmailUseCase>();
+
+        services.AddScoped<IListUsersUseCase, ListUsersUseCase>();
+        services.AddScoped<IGetUserDetailUseCase, GetUserDetailUseCase>();
+        services.AddScoped<IGetUserSessionsUseCase, GetUserSessionsUseCase>();
+        services.AddScoped<IGetUserSecuritySummaryUseCase, GetUserSecuritySummaryUseCase>();
+
+        services.AddScoped<IGetMyLoginHistoryUseCase, GetMyLoginHistoryUseCase>();
+        services.AddScoped<IGetUserLoginHistoryUseCase, GetUserLoginHistoryUseCase>();
+
+        services.AddScoped<IActivateUserUseCase, ActivateUserUseCase>();
+        services.AddScoped<IDisableUserUseCase, DisableUserUseCase>();
+        services.AddScoped<ILockUserUseCase, LockUserUseCase>();
+        services.AddScoped<IUnlockUserUseCase, UnlockUserUseCase>();
+        services.AddScoped<IMarkEmailVerifiedUseCase, MarkEmailVerifiedUseCase>();
+        services.AddScoped<IRevokeUserSessionsUseCase, RevokeUserSessionsUseCase>();
 
         return services;
     }

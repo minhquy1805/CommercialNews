@@ -7,6 +7,7 @@ using Identity.Application.Errors;
 using Identity.Application.Ports.Persistence;
 using Identity.Application.Ports.Services;
 using Identity.Application.Validation.Logout;
+using Identity.Domain.Enums;
 
 namespace Identity.Application.UseCases.Logout;
 
@@ -66,12 +67,16 @@ public sealed class LogoutUseCase : ILogoutUseCase
                 return Result<LogoutResponseDto>.Failure(IdentityErrors.Logout.Forbidden);
             }
 
-            if (refreshToken.IsRevoked)
-            {
-                return Result<LogoutResponseDto>.Failure(IdentityErrors.Refresh.TokenRevoked);
-            }
-
             DateTime nowUtc = _dateTimeProvider.UtcNow;
+
+            if (refreshToken.IsRevoked || refreshToken.IsExpired(nowUtc))
+            {
+                return Result<LogoutResponseDto>.Success(new LogoutResponseDto
+                {
+                    UserId = currentUserId.Value,
+                    LoggedOut = true
+                });
+            }
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
@@ -80,14 +85,16 @@ public sealed class LogoutUseCase : ILogoutUseCase
                 bool revoked = await _refreshTokenRepository.RevokeAsync(
                     refreshTokenId: refreshToken.RefreshTokenId,
                     revokedAtUtc: nowUtc,
-                    revokedReason: "LoggedOut",
+                    revokedReason: RefreshTokenRevokedReasons.Logout,
                     replacedByTokenHash: null,
                     cancellationToken: cancellationToken);
 
                 if (!revoked)
                 {
                     await _unitOfWork.RollbackAsync(cancellationToken);
-                    return Result<LogoutResponseDto>.Failure(IdentityErrors.Logout.Failed);
+
+                    return Result<LogoutResponseDto>.Failure(
+                        IdentityErrors.Logout.Failed);
                 }
 
                 await _unitOfWork.CommitAsync(cancellationToken);
