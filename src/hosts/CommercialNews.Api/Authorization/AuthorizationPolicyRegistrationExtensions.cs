@@ -264,6 +264,36 @@ public static class AuthorizationPolicyRegistrationExtensions
                 policy => policy.Requirements.Add(
                     new PermissionRequirement(PermissionKeys.Audit.Logs.ReadByEvent)));
 
+            options.AddPolicy(
+                AuthorizationPolicies.IdentityUsersRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Identity.Users.Read)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.IdentityUsersReadSecurity,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Identity.Users.ReadSecurity)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.IdentityUsersManageStatus,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Identity.Users.ManageStatus)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.IdentityUsersManageSecurity,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Identity.Users.ManageSecurity)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.IdentityUsersVerifyEmail,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Identity.Users.VerifyEmail)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.IdentityUsersRevokeSessions,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Identity.Users.RevokeSessions)));
+
         });
 
         return services;
