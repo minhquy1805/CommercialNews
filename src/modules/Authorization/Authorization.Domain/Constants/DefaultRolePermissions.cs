@@ -45,6 +45,13 @@ public static class DefaultRolePermissions
                 PermissionKeys.Audit.Logs.ReadByCorrelation,
                 PermissionKeys.Audit.Logs.ReadByEvent,
 
+                PermissionKeys.Identity.Users.Read,
+                PermissionKeys.Identity.Users.ReadSecurity,
+                PermissionKeys.Identity.Users.ManageStatus,
+                PermissionKeys.Identity.Users.ManageSecurity,
+                PermissionKeys.Identity.Users.VerifyEmail,
+                PermissionKeys.Identity.Users.RevokeSessions,
+
                 PermissionKeys.Authz.Permissions.Read,
                 PermissionKeys.Authz.Permissions.Create,
                 PermissionKeys.Authz.Permissions.Update,
