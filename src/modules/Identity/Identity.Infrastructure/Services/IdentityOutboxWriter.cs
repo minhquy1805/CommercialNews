@@ -30,6 +30,46 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
             ?? throw new ArgumentNullException(nameof(publicIdGenerator));
     }
 
+    public async Task<long> EnqueueUserRegisteredAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long userId,
+        string userPublicId,
+        string email,
+        string? fullName,
+        string status,
+        DateTime registeredAtUtc,
+        string? correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidateUserEnvelope(userId, userPublicId, email, registeredAtUtc);
+        ValidateRequired(status, nameof(status));
+
+        string businessDedupeKey =
+            $"identity:user-registered:{userId}";
+
+        var payload = new UserRegisteredIntegrationEventPayload(
+            UserId: userId,
+            UserPublicId: userPublicId.Trim(),
+            Email: email.Trim(),
+            FullName: NormalizeOptional(fullName),
+            Status: status.Trim(),
+            RegisteredAtUtc: registeredAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.UserRegistered,
+            userId: userId,
+            userPublicId: userPublicId,
+            payload: payload,
+            occurredAtUtc: registeredAtUtc,
+            priority: 1,
+            cancellationToken: cancellationToken,
+            correlationId: correlationId);
+    }
+
     public async Task<long> EnqueueVerificationEmailRequestedAsync(
         IIdentityUnitOfWork unitOfWork,
         long userId,

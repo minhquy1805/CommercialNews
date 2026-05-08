@@ -4,6 +4,17 @@ namespace Identity.Application.Ports.Services;
 
 public interface IIdentityOutboxWriter
 {
+    Task<long> EnqueueUserRegisteredAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long userId,
+        string userPublicId,
+        string email,
+        string? fullName,
+        string status,
+        DateTime registeredAtUtc,
+        string? correlationId,
+        CancellationToken cancellationToken = default);
+
     Task<long> EnqueueVerificationEmailRequestedAsync(
         IIdentityUnitOfWork unitOfWork,
         long userId,
