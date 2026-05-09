@@ -67,12 +67,17 @@ namespace CommercialNews.Api.CompositionRoot
 
             services.AddRouting();
 
+            var allowedOrigins = configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>()
+                ?? Array.Empty<string>();
+
             services.AddCors(options =>
             {
                 options.AddPolicy("FrontendCors", policy =>
                 {
                     policy
-                        .WithOrigins("http://localhost:5173")
+                        .WithOrigins(allowedOrigins)
                         .AllowAnyHeader()
                         .AllowAnyMethod()
                         .AllowCredentials();
