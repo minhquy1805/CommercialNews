@@ -132,6 +132,24 @@ services:
       RabbitMq__NotificationsConsumer__RoutingKeys__2: "identity.password_changed"
       RabbitMq__NotificationsConsumer__RoutingKeys__3: "identity.email_verified"
 
+      RabbitMq__AuthorizationConsumer__HostName: "${RABBITMQ_HOST}"
+      RabbitMq__AuthorizationConsumer__Port: "${RABBITMQ_PORT}"
+      RabbitMq__AuthorizationConsumer__UserName: "${RABBITMQ_USERNAME}"
+      RabbitMq__AuthorizationConsumer__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__AuthorizationConsumer__VirtualHost: "${RABBITMQ_VIRTUAL_HOST}"
+      RabbitMq__AuthorizationConsumer__ExchangeName: "${RABBITMQ_EXCHANGE_NAME}"
+      RabbitMq__AuthorizationConsumer__ExchangeType: "${RABBITMQ_EXCHANGE_TYPE}"
+      RabbitMq__AuthorizationConsumer__QueueName: "${RABBITMQ_AUTHORIZATION_QUEUE_NAME}"
+      RabbitMq__AuthorizationConsumer__DurableQueue: "${RABBITMQ_AUTHORIZATION_DURABLE_QUEUE}"
+      RabbitMq__AuthorizationConsumer__ExclusiveQueue: "${RABBITMQ_AUTHORIZATION_EXCLUSIVE_QUEUE}"
+      RabbitMq__AuthorizationConsumer__AutoDeleteQueue: "${RABBITMQ_AUTHORIZATION_AUTO_DELETE_QUEUE}"
+      RabbitMq__AuthorizationConsumer__PrefetchCount: "${RABBITMQ_AUTHORIZATION_PREFETCH_COUNT}"
+      RabbitMq__AuthorizationConsumer__ConsumerTag: "${RABBITMQ_AUTHORIZATION_CONSUMER_TAG}"
+      RabbitMq__AuthorizationConsumer__ClientProvidedName: "${RABBITMQ_AUTHORIZATION_CLIENT_PROVIDED_NAME}"
+      RabbitMq__AuthorizationConsumer__RequeueOnFailure: "${RABBITMQ_AUTHORIZATION_REQUEUE_ON_FAILURE}"
+
+      RabbitMq__AuthorizationConsumer__RoutingKeys__0: "identity.user_registered"
+
       RabbitMq__AuditConsumer__HostName: "${RABBITMQ_HOST}"
       RabbitMq__AuditConsumer__Port: "${RABBITMQ_PORT}"
       RabbitMq__AuditConsumer__UserName: "${RABBITMQ_USERNAME}"
@@ -160,6 +178,14 @@ services:
       RabbitMq__AuditConsumer__RoutingKeys__9: "authorization.permission_updated"
       RabbitMq__AuditConsumer__RoutingKeys__10: "authorization.permission_activated"
       RabbitMq__AuditConsumer__RoutingKeys__11: "authorization.permission_deactivated"
+      RabbitMq__AuditConsumer__RoutingKeys__12: "identity.email_verified"
+      RabbitMq__AuditConsumer__RoutingKeys__13: "identity.password_changed"
+      RabbitMq__AuditConsumer__RoutingKeys__14: "identity.user_activated"
+      RabbitMq__AuditConsumer__RoutingKeys__15: "identity.user_disabled"
+      RabbitMq__AuditConsumer__RoutingKeys__16: "identity.user_locked"
+      RabbitMq__AuditConsumer__RoutingKeys__17: "identity.user_unlocked"
+      RabbitMq__AuditConsumer__RoutingKeys__18: "identity.email_marked_verified"
+      RabbitMq__AuditConsumer__RoutingKeys__19: "identity.user_sessions_revoked"
     depends_on:
       - cn-mssql
       - rabbitmq
