@@ -4,8 +4,8 @@ Content exposes primarily **Admin APIs**. Public read APIs live in the Reading m
 
 Base path (Admin): `/api/v1/admin/content`
 
-> All endpoints in this module require Bearer auth + explicit authorization policies.  
-> Content write APIs commit Content truth first and emit async intent through the standard post-commit path where required.  
+> All endpoints in this module require Bearer auth + explicit authorization policies.
+> Content write APIs commit Content truth and required `OutboxMessage` rows atomically, then downstream workers publish/process asynchronously.
 > Success of Content write APIs is defined by **Content truth commit**. It does **not** mean downstream audit, SEO, notifications, caches, or projections have already completed.
 
 ---
@@ -14,6 +14,12 @@ Base path (Admin): `/api/v1/admin/content`
 
 Content V1 focuses on the synchronous content-truth lane.
 
+### Identifier posture
+
+- Admin endpoints MAY use internal numeric `articleId` in V1.
+- API responses and cross-module contracts MUST include `articlePublicId`.
+- Outbox events use `AggregateType = Article`, `AggregateId = ArticlePublicId`, and `Version = Article.Version`.
+
 ### Included in V1
 
 - article draft creation and update
@@ -21,24 +27,27 @@ Content V1 focuses on the synchronous content-truth lane.
   - publish
   - unpublish
   - archive
-  - restore
+  - soft-delete
 - edit history reads
 - category management
 - tag management
 
 ### Optional in V1
 
-- archive / restore if lifecycle policy enables them
 - detailed revision diff endpoint
-- soft-delete flows if policy requires them
+- category/tag soft-delete flows if policy requires them
 
 ### Not primary in V1
 
 - public content read APIs
 - synchronous SEO/notification/cache update inside content write request
 - reporting/projection APIs as truth-owning surfaces
+- archived article restore (`Archived -> Draft`) unless a later lifecycle policy explicitly enables it
+- physical purge; V1 delete semantics are soft-delete only
 
 **Rule:** Content owns lifecycle and visibility truth for content objects. Downstream consumers follow committed Content truth; they do not define it.
+
+**Rule:** Reading may serve public read APIs, but public visibility must be validated against Content truth or a truth-safe projection that cannot expose non-public articles.
 
 ---
 
@@ -60,9 +69,9 @@ Create a draft article.
   "title": "string",
   "summary": "string",
   "body": "string",
-  "categoryId": "string",
-  "tagIds": ["string"],
-  "coverMediaId": "string"
+  "categoryId": 1,
+  "tagIds": [1, 2],
+  "coverMediaId": 10
 }
 ```
 
@@ -70,7 +79,8 @@ Create a draft article.
 
 ```json
 {
-  "articleId": "string",
+  "articleId": 123,
+  "articlePublicId": "01HX0000000000000000000000",
   "status": "Draft",
   "version": 1,
   "createdAt": "2026-03-02T10:30:00Z"
@@ -80,6 +90,9 @@ Create a draft article.
 #### Rules
 
 - create success means Content truth committed
+- truth change + `OutboxMessage` must commit atomically in the same local Content transaction
+- must emit `content.article_created`
+- outbox envelope: `AggregateType = Article`, `AggregateId = ArticlePublicId`, `Version = Article.Version`
 - duplicate retries should converge safely by idempotency policy
 - downstream audit, SEO, or notification effects must not block create success
 
@@ -91,8 +104,8 @@ List articles for admin, including non-public states.
 
 - `page`, `pageSize`
 - `status` *(optional; must align with current lifecycle truth)*
-- `categoryId` *(optional)*
-- `tagId` *(optional)*
+- `categoryId` *(optional bigint)*
+- `tagId` *(optional bigint)*
 - `sort` *(optional, allowlist)*: `-updatedAt`, `-publishedAt`, `title`
 
 #### Response (200)
@@ -102,6 +115,7 @@ Standard list envelope.
 #### Rules
 
 - returned lifecycle states must remain aligned with current Content lifecycle policy
+- each article item must include both `articleId` and `articlePublicId`
 - undocumented sort fields must be rejected deterministically
 - admin reads for immediate post-write confirmation should prefer authoritative Content truth
 
@@ -111,6 +125,8 @@ Admin detail view.
 
 #### Rules
 
+- `{articleId}` is the internal numeric Article ID in V1 admin routes
+- response bodies must include `articlePublicId`
 - may include edit metadata and current lifecycle/version state
 - must reflect authoritative Content truth for current lifecycle visibility state
 
@@ -130,9 +146,9 @@ Update article fields.
   "title": "string",
   "summary": "string",
   "body": "string",
-  "categoryId": "string",
-  "tagIds": ["string"],
-  "coverMediaId": "string"
+  "categoryId": 1,
+  "tagIds": [1, 2],
+  "coverMediaId": 10
 }
 ```
 
@@ -141,6 +157,9 @@ Update article fields.
 ```json
 {
   "updated": true,
+  "articleId": 123,
+  "articlePublicId": "01HX0000000000000000000000",
+  "status": "Draft",
   "version": 2
 }
 ```
@@ -151,8 +170,12 @@ Update article fields.
   - draft-only
   - or partially allowed in published state
 - must create edit-history entry by policy
+- truth change + `ArticleRevision` + `OutboxMessage` must commit atomically in the same local Content transaction
+- must emit `content.article_updated`
+- outbox envelope: `AggregateType = Article`, `AggregateId = ArticlePublicId`, `Version = Article.Version`
 - should enforce stale-write protection via version, rowversion, or compare-and-set semantics
 - update success is defined by Content truth commit only
+- for Published articles, `content.article_updated` may require public cache/projection invalidation; consumers must use `articlePublicId` + `version` to prevent stale overwrite
 
 ### `POST /articles/{articleId}:publish`
 
@@ -175,7 +198,8 @@ Publish an article.
 
 ```json
 {
-  "articleId": "string",
+  "articleId": 123,
+  "articlePublicId": "01HX0000000000000000000000",
   "status": "Published",
   "publishedAt": "2026-03-02T10:30:00Z",
   "version": 7
@@ -185,8 +209,9 @@ Publish an article.
 #### Rules
 
 - lifecycle transition must be valid
-- truth change + per-article version advancement + outbox record must commit atomically
-- must emit `Content.ArticlePublished`
+- truth change + `ArticleLifecycleEvent` + `OutboxMessage` must commit atomically in the same local Content transaction
+- must emit `content.article_published`
+- outbox envelope: `AggregateType = Article`, `AggregateId = ArticlePublicId`, `Version = Article.Version`
 - emitted async message should carry stable `MessageId`
 - must not block on downstream async processing
 - repeated equivalent publish requests should converge safely as no-op or documented idempotent success
@@ -214,8 +239,11 @@ Unpublish an article and record a reason.
 
 ```json
 {
-  "articleId": "string",
-  "status": "Unpublished",
+  "articleId": 123,
+  "articlePublicId": "01HX0000000000000000000000",
+  "status": "Draft",
+  "lifecycleAction": "Unpublish",
+  "unpublishedAt": "2026-03-02T10:30:00Z",
   "version": 8
 }
 ```
@@ -223,16 +251,18 @@ Unpublish an article and record a reason.
 #### Rules
 
 - `reason` is mandatory
+- V1 unpublish semantics are `Published -> Draft`; `Unpublished` is not a valid Article status
 - lifecycle semantics must remain aligned with current Content ADR/policy
-- truth change + per-article version advancement + outbox record must commit atomically
-- must emit `Content.ArticleUnpublished`
+- truth change + `ArticleLifecycleEvent` + `OutboxMessage` must commit atomically in the same local Content transaction
+- must emit `content.article_unpublished`
+- outbox envelope: `AggregateType = Article`, `AggregateId = ArticlePublicId`, `Version = Article.Version`
 - emitted async message should carry stable `MessageId`
 - public read must stop showing it immediately based on Content truth, even if downstream derived state lags
 - repeated equivalent unpublish requests should converge safely as no-op or documented idempotent success
 
 ### `POST /articles/{articleId}:archive`
 
-Archive an article *(optional V1)*.
+Archive an article.
 
 #### Headers
 
@@ -243,8 +273,10 @@ Archive an article *(optional V1)*.
 
 ```json
 {
-  "articleId": "string",
+  "articleId": 123,
+  "articlePublicId": "01HX0000000000000000000000",
   "status": "Archived",
+  "archivedAt": "2026-03-02T10:30:00Z",
   "version": 9
 }
 ```
@@ -253,13 +285,16 @@ Archive an article *(optional V1)*.
 
 - archive is a truth-bound lifecycle action
 - if enabled, archive semantics must remain aligned with lifecycle policy
+- truth change + `ArticleLifecycleEvent` + `OutboxMessage` must commit atomically in the same local Content transaction
+- must emit `content.article_archived`
+- outbox envelope: `AggregateType = Article`, `AggregateId = ArticlePublicId`, `Version = Article.Version`
 - if downstream derived state lags, archive truth still wins for visibility correctness
 - repeated equivalent archive requests should converge safely
-- if archive emits an async event, it must remain post-commit and non-blocking
+- archive event publication must remain non-blocking after commit
 
-### `POST /articles/{articleId}:restore`
+### `POST /articles/{articleId}:soft-delete`
 
-Restore an archived article *(optional V1)*.
+Soft-delete an article.
 
 #### Headers
 
@@ -270,30 +305,26 @@ Restore an archived article *(optional V1)*.
 
 ```json
 {
-  "articleId": "string",
-  "status": "Draft",
+  "articleId": 123,
+  "articlePublicId": "01HX0000000000000000000000",
+  "status": "Published",
+  "isDeleted": true,
+  "deletedAt": "2026-03-02T10:30:00Z",
   "version": 10
 }
 ```
 
 #### Rules
 
-- restore semantics must remain aligned with lifecycle policy
-- repeated equivalent restore requests should converge safely as no-op or documented idempotent success
-- if restore emits async events, they remain post-commit and non-blocking
-
-### `DELETE /articles/{articleId}`
-
-Delete article according to policy.
-
-#### Rules
-
-- delete/soft-delete semantics must remain consistent with lifecycle truth
-- V1 should prefer a clearly documented posture:
-  - soft delete
-  - or archive as the normal non-public terminal path
-- downstream lag must not re-expose deleted or non-public content
-- if delete emits async side effects, they remain post-commit and non-blocking
+- V1 soft-delete sets `IsDeleted=1`; it is not physical deletion
+- soft-delete does not have to change `Status`; the response returns the current status after soft-delete
+- public visibility remains blocked by `Status='Published' AND IsDeleted=0`
+- physical purge is out of scope for V1
+- truth change + `ArticleLifecycleEvent` + `OutboxMessage` must commit atomically in the same local Content transaction
+- must emit `content.article_soft_deleted`
+- outbox envelope: `AggregateType = Article`, `AggregateId = ArticlePublicId`, `Version = Article.Version`
+- downstream lag must not re-expose soft-deleted or non-public content
+- repeated equivalent soft-delete requests should converge safely as no-op or documented idempotent success
 
 ---
 
@@ -309,9 +340,9 @@ List edit history for an article.
 {
   "items": [
     {
-      "revisionId": "string",
+      "revisionId": 1,
       "editedAt": "2026-03-02T10:30:00Z",
-      "editedBy": "userId",
+      "editedBy": 123,
       "summary": "string"
     }
   ],
@@ -365,6 +396,8 @@ Delete category according to policy.
 
 - category naming/uniqueness rules must be documented and enforced consistently
 - delete semantics must avoid orphan references or invalid content truth
+- V1 should prefer deactivate/soft-delete semantics when a category is referenced by existing articles
+- physical deletion is allowed only when no references exist or by explicit retention/admin policy
 - if category changes trigger downstream effects, those remain post-commit and non-blocking
 
 ---
@@ -393,6 +426,8 @@ Delete tag according to policy.
 
 - tag naming/uniqueness rules must be documented and enforced consistently
 - delete semantics must avoid orphan references or invalid content truth
+- V1 should prefer deactivate/soft-delete semantics when a tag is referenced by existing articles
+- physical deletion is allowed only when no references exist or by explicit retention/admin policy
 - if tag changes trigger downstream effects, those remain post-commit and non-blocking
 
 ---
