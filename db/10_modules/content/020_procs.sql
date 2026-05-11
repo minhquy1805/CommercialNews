@@ -6,7 +6,7 @@
   - Support:
       * Category CRUD (soft delete / restore)
       * Tag CRUD (soft delete / restore)
-      * Article CRUD + lifecycle transitions
+      * Article CRUD + lifecycle transitions without Article restore in V1
       * ArticleTag attach / detach / query
       * ArticleRevision insert / query
       * ArticleLifecycleEvent insert / query
@@ -703,16 +703,12 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 CREATE OR ALTER PROCEDURE [content].[Content_Article_Insert]
-    @PublicId            CHAR(26),
-    @CategoryId          BIGINT = NULL,
+    @ArticlePublicId     CHAR(26),
+    @CategoryId          BIGINT,
     @AuthorUserId        BIGINT,
     @Title               NVARCHAR(300),
-    @Summary             NVARCHAR(2000) = NULL,
-    @Content             NVARCHAR(MAX),
-    @Status              NVARCHAR(30) = N'Draft',
-    @PublishedAt         DATETIME2(3) = NULL,
-    @UnpublishedAt       DATETIME2(3) = NULL,
-    @ArchivedAt          DATETIME2(3) = NULL,
+    @Summary             NVARCHAR(1000) = NULL,
+    @Body                NVARCHAR(MAX),
     @CoverMediaId        BIGINT = NULL,
     @CreatedByUserId     BIGINT = NULL
 AS
@@ -720,8 +716,8 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF LEN(LTRIM(RTRIM(ISNULL(@PublicId, '')))) = 0
-        THROW 54260, 'Article PublicId is required.', 1;
+    IF LEN(LTRIM(RTRIM(ISNULL(@ArticlePublicId, '')))) <> 26
+        THROW 54260, 'ArticlePublicId must be a 26-character ULID.', 1;
 
     IF @AuthorUserId IS NULL OR @AuthorUserId <= 0
         THROW 54261, 'AuthorUserId must be > 0.', 1;
@@ -729,45 +725,38 @@ BEGIN
     IF LEN(LTRIM(RTRIM(ISNULL(@Title, N'')))) = 0
         THROW 54262, 'Article Title is required.', 1;
 
-    IF LEN(LTRIM(RTRIM(ISNULL(@Content, N'')))) = 0
-        THROW 54263, 'Article Content is required.', 1;
+    IF LEN(LTRIM(RTRIM(ISNULL(@Body, N'')))) = 0
+        THROW 54263, 'Article Body is required.', 1;
 
-    IF @Status NOT IN (N'Draft', N'Published', N'Archived')
-        THROW 54264, 'Article Status must be Draft, Published, or Archived.', 1;
+    IF @CategoryId IS NULL OR @CategoryId <= 0
+        THROW 54264, 'CategoryId must be > 0.', 1;
 
-    IF @CategoryId IS NOT NULL
-       AND NOT EXISTS
-       (
-           SELECT 1
-           FROM [content].[Category]
-           WHERE [CategoryId] = @CategoryId
-             AND [IsDeleted] = 0
-             AND [IsActive] = 1
-       )
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [content].[Category]
+        WHERE [CategoryId] = @CategoryId
+          AND [IsDeleted] = 0
+          AND [IsActive] = 1
+    )
         THROW 54265, 'Category does not exist, is deleted, or inactive.', 1;
 
     IF EXISTS
     (
         SELECT 1
         FROM [content].[Article]
-        WHERE [PublicId] = @PublicId
+        WHERE [ArticlePublicId] = @ArticlePublicId
     )
-        THROW 54266, 'Article PublicId already exists.', 1;
-
-    IF @Status = N'Published' AND @PublishedAt IS NULL
-        SET @PublishedAt = SYSUTCDATETIME();
-
-    IF @Status = N'Archived' AND @ArchivedAt IS NULL
-        SET @ArchivedAt = SYSUTCDATETIME();
+        THROW 54266, 'ArticlePublicId already exists.', 1;
 
     INSERT INTO [content].[Article]
     (
-        [PublicId],
+        [ArticlePublicId],
         [CategoryId],
         [AuthorUserId],
         [Title],
         [Summary],
-        [Content],
+        [Body],
         [Status],
         [PublishedAt],
         [UnpublishedAt],
@@ -778,16 +767,16 @@ BEGIN
     )
     VALUES
     (
-        @PublicId,
+        @ArticlePublicId,
         @CategoryId,
         @AuthorUserId,
         @Title,
         @Summary,
-        @Content,
-        @Status,
-        @PublishedAt,
-        @UnpublishedAt,
-        @ArchivedAt,
+        @Body,
+        N'Draft',
+        NULL,
+        NULL,
+        NULL,
         @CoverMediaId,
         @CreatedByUserId,
         @CreatedByUserId
@@ -806,10 +795,10 @@ GO
 
 CREATE OR ALTER PROCEDURE [content].[Content_Article_Update]
     @ArticleId           BIGINT,
-    @CategoryId          BIGINT = NULL,
+    @CategoryId          BIGINT,
     @Title               NVARCHAR(300),
-    @Summary             NVARCHAR(2000) = NULL,
-    @Content             NVARCHAR(MAX),
+    @Summary             NVARCHAR(1000) = NULL,
+    @Body                NVARCHAR(MAX),
     @CoverMediaId        BIGINT = NULL,
     @UpdatedByUserId     BIGINT = NULL,
     @ExpectedVersion     INT
@@ -824,11 +813,13 @@ BEGIN
     IF LEN(LTRIM(RTRIM(ISNULL(@Title, N'')))) = 0
         THROW 54271, 'Article Title is required.', 1;
 
-    IF LEN(LTRIM(RTRIM(ISNULL(@Content, N'')))) = 0
-        THROW 54272, 'Article Content is required.', 1;
+    IF LEN(LTRIM(RTRIM(ISNULL(@Body, N'')))) = 0
+        THROW 54272, 'Article Body is required.', 1;
 
-    IF @CategoryId IS NOT NULL
-       AND NOT EXISTS
+    IF @CategoryId IS NULL OR @CategoryId <= 0
+        THROW 54273, 'CategoryId must be > 0.', 1;
+
+    IF NOT EXISTS
        (
            SELECT 1
            FROM [content].[Category]
@@ -846,14 +837,14 @@ BEGIN
           AND [IsDeleted] = 0
           AND [Status] = N'Archived'
     )
-        THROW 54274, 'Cannot update archived article. Restore/unarchive first.', 1;
+        THROW 54274, 'Cannot update archived article in V1.', 1;
 
     UPDATE [content].[Article]
     SET
         [CategoryId] = @CategoryId,
         [Title] = @Title,
         [Summary] = @Summary,
-        [Content] = @Content,
+        [Body] = @Body,
         [CoverMediaId] = @CoverMediaId,
         [UpdatedAt] = SYSUTCDATETIME(),
         [UpdatedByUserId] = @UpdatedByUserId,
@@ -894,14 +885,14 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 CREATE OR ALTER PROCEDURE [content].[Content_Article_SelectByPublicId]
-    @PublicId CHAR(26)
+    @ArticlePublicId CHAR(26)
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT TOP (1) *
     FROM [content].[Article]
-    WHERE [PublicId] = @PublicId;
+    WHERE [ArticlePublicId] = @ArticlePublicId;
 END
 GO
 
@@ -938,12 +929,12 @@ BEGIN
     (
         SELECT
             [a].[ArticleId],
-            [a].[PublicId],
+            [a].[ArticlePublicId],
             [a].[CategoryId],
             [a].[AuthorUserId],
             [a].[Title],
             [a].[Summary],
-            [a].[Content],
+            [a].[Body],
             [a].[Status],
             [a].[PublishedAt],
             [a].[UnpublishedAt],
@@ -1025,9 +1016,9 @@ BEGIN
         FROM [content].[Article]
         WHERE [ArticleId] = @ArticleId
           AND [IsDeleted] = 0
-          AND (LEN(LTRIM(RTRIM(ISNULL([Title], N'')))) = 0 OR LEN(LTRIM(RTRIM(ISNULL([Content], N'')))) = 0)
+          AND (LEN(LTRIM(RTRIM(ISNULL([Title], N'')))) = 0 OR LEN(LTRIM(RTRIM(ISNULL([Body], N'')))) = 0)
     )
-        THROW 54282, 'Cannot publish article without title/content.', 1;
+        THROW 54282, 'Cannot publish article without title/body.', 1;
 
     UPDATE [content].[Article]
     SET
@@ -1060,11 +1051,21 @@ GO
 CREATE OR ALTER PROCEDURE [content].[Content_Article_Unpublish]
     @ArticleId           BIGINT,
     @ActorUserId         BIGINT = NULL,
-    @ExpectedVersion     INT
+    @ExpectedVersion     INT,
+    @Reason              NVARCHAR(500)
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    IF @ArticleId IS NULL OR @ArticleId <= 0
+        THROW 54284, 'ArticleId must be > 0.', 1;
+
+    IF @ExpectedVersion IS NULL OR @ExpectedVersion <= 0
+        THROW 54285, 'ExpectedVersion must be > 0.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@Reason, N'')))) = 0
+        THROW 54286, 'Reason is required for Unpublish.', 1;
 
     UPDATE [content].[Article]
     SET
@@ -1079,7 +1080,7 @@ BEGIN
       AND [Status] = N'Published';
 
     IF @@ROWCOUNT = 0
-        THROW 54284, 'Article unpublish failed. Record not found, not published, or version mismatch.', 1;
+        THROW 54287, 'Article unpublish failed. Record not found, not published, deleted, or version mismatch.', 1;
 
     SELECT TOP (1) *
     FROM [content].[Article]
@@ -1127,42 +1128,7 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [content].[Content_Article_Restore]
-    @ArticleId           BIGINT,
-    @ActorUserId         BIGINT = NULL,
-    @ExpectedVersion     INT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-
-    UPDATE [content].[Article]
-    SET
-        [Status] = N'Draft',
-        [ArchivedAt] = NULL,
-        [UpdatedAt] = SYSUTCDATETIME(),
-        [UpdatedByUserId] = @ActorUserId,
-        [Version] = [Version] + 1
-    WHERE [ArticleId] = @ArticleId
-      AND [IsDeleted] = 0
-      AND [Version] = @ExpectedVersion
-      AND [Status] = N'Archived';
-
-    IF @@ROWCOUNT = 0
-        THROW 54286, 'Article restore failed. Record not found, not archived, or version mismatch.', 1;
-
-    SELECT TOP (1) *
-    FROM [content].[Article]
-    WHERE [ArticleId] = @ArticleId;
-END
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-CREATE OR ALTER PROCEDURE [content].[Content_Article_Delete]
+CREATE OR ALTER PROCEDURE [content].[Content_Article_SoftDelete]
     @ArticleId           BIGINT,
     @DeletedByUserId     BIGINT = NULL,
     @ExpectedVersion     INT
@@ -1184,7 +1150,7 @@ BEGIN
       AND [Version] = @ExpectedVersion;
 
     IF @@ROWCOUNT = 0
-        THROW 54287, 'Article delete failed. Record not found, already deleted, or version mismatch.', 1;
+        THROW 54287, 'Article soft-delete failed. Record not found, already soft-deleted, or version mismatch.', 1;
 
     SELECT TOP (1) *
     FROM [content].[Article]
@@ -1210,14 +1176,21 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF @ArticleId IS NULL OR @ArticleId <= 0
+        THROW 54290, 'ArticleId must be > 0.', 1;
+
+    IF @TagId IS NULL OR @TagId <= 0
+        THROW 54291, 'TagId must be > 0.', 1;
+
     IF NOT EXISTS
     (
         SELECT 1
         FROM [content].[Article]
         WHERE [ArticleId] = @ArticleId
           AND [IsDeleted] = 0
+          AND [Status] <> N'Archived'
     )
-        THROW 54290, 'Article does not exist or was deleted.', 1;
+        THROW 54292, 'Article does not exist, was deleted, or is archived.', 1;
 
     IF NOT EXISTS
     (
@@ -1227,7 +1200,7 @@ BEGIN
           AND [IsDeleted] = 0
           AND [IsActive] = 1
     )
-        THROW 54291, 'Tag does not exist, is deleted, or inactive.', 1;
+        THROW 54293, 'Tag does not exist, is deleted, or inactive.', 1;
 
     IF EXISTS
     (
@@ -1236,7 +1209,7 @@ BEGIN
         WHERE [ArticleId] = @ArticleId
           AND [TagId] = @TagId
     )
-        THROW 54292, 'ArticleTag already exists.', 1;
+        THROW 54294, 'ArticleTag already exists.', 1;
 
     INSERT INTO [content].[ArticleTag]
     (
@@ -1271,6 +1244,22 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF @ArticleId IS NULL OR @ArticleId <= 0
+        THROW 54295, 'ArticleId must be > 0.', 1;
+
+    IF @TagId IS NULL OR @TagId <= 0
+        THROW 54296, 'TagId must be > 0.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [content].[Article]
+        WHERE [ArticleId] = @ArticleId
+          AND [IsDeleted] = 0
+          AND [Status] <> N'Archived'
+    )
+        THROW 54297, 'Article does not exist, was deleted, or is archived.', 1;
+
     DELETE FROM [content].[ArticleTag]
     WHERE [ArticleId] = @ArticleId
       AND [TagId] = @TagId;
@@ -1279,17 +1268,25 @@ BEGIN
 END
 GO
 
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
 CREATE OR ALTER PROCEDURE [content].[Content_ArticleTag_DeleteAllByArticleId]
     @ArticleId BIGINT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    IF @ArticleId IS NULL OR @ArticleId <= 0
+        THROW 54298, 'ArticleId must be > 0.', 1;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [content].[Article]
+        WHERE [ArticleId] = @ArticleId
+          AND [IsDeleted] = 0
+          AND [Status] <> N'Archived'
+    )
+        THROW 54299, 'Article does not exist, was deleted, or is archived.', 1;
 
     DELETE FROM [content].[ArticleTag]
     WHERE [ArticleId] = @ArticleId;
@@ -1339,16 +1336,13 @@ GO
 
 CREATE OR ALTER PROCEDURE [content].[Content_ArticleRevision_Insert]
     @ArticleId               BIGINT,
-    @RevisionNumber          INT,
-    @TitleSnapshot           NVARCHAR(300),
-    @SummarySnapshot         NVARCHAR(2000) = NULL,
-    @ContentSnapshot         NVARCHAR(MAX),
-    @CategoryIdSnapshot      BIGINT = NULL,
-    @StatusSnapshot          NVARCHAR(30),
-    @CoverMediaIdSnapshot    BIGINT = NULL,
-    @ChangedByUserId         BIGINT = NULL,
-    @ChangeType              NVARCHAR(30),
-    @ChangeSummary           NVARCHAR(1000) = NULL
+    @EditedByUserId          BIGINT,
+    @CorrelationId           NVARCHAR(100) = NULL,
+    @ChangeSummary           NVARCHAR(300) = NULL,
+    @OldTitle                NVARCHAR(300) = NULL,
+    @OldSummary              NVARCHAR(1000) = NULL,
+    @OldBody                 NVARCHAR(MAX) = NULL,
+    @PatchJson               NVARCHAR(MAX) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1362,57 +1356,36 @@ BEGIN
     )
         THROW 54300, 'Article does not exist for revision.', 1;
 
-    IF @RevisionNumber IS NULL OR @RevisionNumber <= 0
-        THROW 54301, 'RevisionNumber must be > 0.', 1;
+    IF @EditedByUserId IS NULL OR @EditedByUserId <= 0
+        THROW 54301, 'EditedByUserId must be > 0.', 1;
 
-    IF LEN(LTRIM(RTRIM(ISNULL(@TitleSnapshot, N'')))) = 0
-        THROW 54302, 'TitleSnapshot is required.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@ContentSnapshot, N'')))) = 0
-        THROW 54303, 'ContentSnapshot is required.', 1;
-
-    IF @StatusSnapshot NOT IN (N'Draft', N'Published', N'Archived')
-        THROW 54304, 'StatusSnapshot is invalid.', 1;
-
-    IF @ChangeType NOT IN (N'Create', N'Update', N'Publish', N'Unpublish', N'Archive', N'Restore', N'Delete')
-        THROW 54305, 'ChangeType is invalid.', 1;
-
-    IF EXISTS
-    (
-        SELECT 1
-        FROM [content].[ArticleRevision]
-        WHERE [ArticleId] = @ArticleId
-          AND [RevisionNumber] = @RevisionNumber
-    )
-        THROW 54306, 'RevisionNumber already exists for this article.', 1;
+    IF @OldTitle IS NULL
+       AND @OldSummary IS NULL
+       AND @OldBody IS NULL
+       AND @PatchJson IS NULL
+        THROW 54302, 'ArticleRevision requires at least one previous value or PatchJson.', 1;
 
     INSERT INTO [content].[ArticleRevision]
     (
         [ArticleId],
-        [RevisionNumber],
-        [TitleSnapshot],
-        [SummarySnapshot],
-        [ContentSnapshot],
-        [CategoryIdSnapshot],
-        [StatusSnapshot],
-        [CoverMediaIdSnapshot],
-        [ChangedByUserId],
-        [ChangeType],
-        [ChangeSummary]
+        [EditedByUserId],
+        [CorrelationId],
+        [ChangeSummary],
+        [OldTitle],
+        [OldSummary],
+        [OldBody],
+        [PatchJson]
     )
     VALUES
     (
         @ArticleId,
-        @RevisionNumber,
-        @TitleSnapshot,
-        @SummarySnapshot,
-        @ContentSnapshot,
-        @CategoryIdSnapshot,
-        @StatusSnapshot,
-        @CoverMediaIdSnapshot,
-        @ChangedByUserId,
-        @ChangeType,
-        @ChangeSummary
+        @EditedByUserId,
+        @CorrelationId,
+        @ChangeSummary,
+        @OldTitle,
+        @OldSummary,
+        @OldBody,
+        @PatchJson
     );
 
     SELECT TOP (1) *
@@ -1435,7 +1408,7 @@ BEGIN
     SELECT *
     FROM [content].[ArticleRevision]
     WHERE [ArticleId] = @ArticleId
-    ORDER BY [RevisionNumber] DESC, [RevisionId] DESC;
+    ORDER BY [EditedAt] DESC, [RevisionId] DESC;
 END
 GO
 
@@ -1470,11 +1443,14 @@ GO
 
 CREATE OR ALTER PROCEDURE [content].[Content_ArticleLifecycleEvent_Insert]
     @ArticleId           BIGINT,
+    @ArticleVersion      INT,
     @ActionType          NVARCHAR(30),
     @FromStatus          NVARCHAR(30) = NULL,
     @ToStatus            NVARCHAR(30) = NULL,
-    @Reason              NVARCHAR(1000) = NULL,
-    @ActorUserId         BIGINT = NULL
+    @Reason              NVARCHAR(500) = NULL,
+    @ActorUserId         BIGINT,
+    @CorrelationId       NVARCHAR(100) = NULL,
+    @MetadataJson        NVARCHAR(MAX) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1488,7 +1464,13 @@ BEGIN
     )
         THROW 54310, 'Article does not exist for lifecycle event.', 1;
 
-    IF @ActionType NOT IN (N'Create', N'Update', N'Publish', N'Unpublish', N'Archive', N'Restore', N'Delete')
+    IF @ArticleVersion IS NULL OR @ArticleVersion <= 0
+        THROW 54315, 'ArticleVersion must be > 0.', 1;
+
+    IF @ActorUserId IS NULL OR @ActorUserId <= 0
+        THROW 54316, 'ActorUserId must be > 0.', 1;
+
+    IF @ActionType NOT IN (N'Publish', N'Unpublish', N'Archive', N'SoftDelete')
         THROW 54311, 'ActionType is invalid.', 1;
 
     IF @FromStatus IS NOT NULL
@@ -1506,25 +1488,31 @@ BEGIN
     INSERT INTO [content].[ArticleLifecycleEvent]
     (
         [ArticleId],
+        [ArticleVersion],
         [ActionType],
         [FromStatus],
         [ToStatus],
         [Reason],
-        [ActorUserId]
+        [ActorUserId],
+        [CorrelationId],
+        [MetadataJson]
     )
     VALUES
     (
         @ArticleId,
+        @ArticleVersion,
         @ActionType,
         @FromStatus,
         @ToStatus,
         @Reason,
-        @ActorUserId
+        @ActorUserId,
+        @CorrelationId,
+        @MetadataJson
     );
 
     SELECT TOP (1) *
     FROM [content].[ArticleLifecycleEvent]
-    WHERE [ArticleLifecycleEventId] = SCOPE_IDENTITY();
+    WHERE [EventId] = SCOPE_IDENTITY();
 END
 GO
 
@@ -1542,7 +1530,6 @@ BEGIN
     SELECT *
     FROM [content].[ArticleLifecycleEvent]
     WHERE [ArticleId] = @ArticleId
-    ORDER BY [OccurredAt] DESC, [ArticleLifecycleEventId] DESC;
+    ORDER BY [OccurredAt] DESC, [EventId] DESC;
 END
 GO
-
