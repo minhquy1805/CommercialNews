@@ -101,6 +101,9 @@ BEGIN
         CONSTRAINT [UQ_Category_PublicId]
             UNIQUE ([PublicId]),
 
+        CONSTRAINT [CK_Category_PublicId_Length]
+            CHECK (LEN([PublicId]) = 26),
+
         CONSTRAINT [UQ_Category_NameNormalized]
             UNIQUE ([NameNormalized]),
 
@@ -195,6 +198,9 @@ BEGIN
         CONSTRAINT [UQ_Tag_PublicId]
             UNIQUE ([PublicId]),
 
+        CONSTRAINT [CK_Tag_PublicId_Length]
+            CHECK (LEN([PublicId]) = 26),
+
         CONSTRAINT [UQ_Tag_NameNormalized]
             UNIQUE ([NameNormalized]),
 
@@ -248,14 +254,14 @@ BEGIN
     CREATE TABLE [content].[Article]
     (
         [ArticleId]             BIGINT IDENTITY(1,1) NOT NULL,
-        [PublicId]              CHAR(26)             NOT NULL, -- ULID
+        [ArticlePublicId]       CHAR(26)             NOT NULL, -- ULID
 
-        [CategoryId]            BIGINT               NULL,
+        [CategoryId]            BIGINT               NOT NULL,
         [AuthorUserId]          BIGINT               NOT NULL,
 
         [Title]                 NVARCHAR(300)        NOT NULL,
-        [Summary]               NVARCHAR(2000)       NULL,
-        [Content]               NVARCHAR(MAX)        NOT NULL,
+        [Summary]               NVARCHAR(1000)       NULL,
+        [Body]                  NVARCHAR(MAX)        NOT NULL,
 
         [Status]                NVARCHAR(30)         NOT NULL
             CONSTRAINT [DF_Article_Status] DEFAULT (N'Draft'),
@@ -285,8 +291,11 @@ BEGIN
         CONSTRAINT [PK_Article]
             PRIMARY KEY CLUSTERED ([ArticleId] ASC),
 
-        CONSTRAINT [UQ_Article_PublicId]
-            UNIQUE ([PublicId]),
+        CONSTRAINT [UQ_Article_ArticlePublicId]
+            UNIQUE ([ArticlePublicId]),
+
+        CONSTRAINT [CK_Article_ArticlePublicId_Length]
+            CHECK (LEN([ArticlePublicId]) = 26),
 
         CONSTRAINT [FK_Article_Category]
             FOREIGN KEY ([CategoryId])
@@ -311,8 +320,8 @@ BEGIN
         CONSTRAINT [CK_Article_Title_NotBlank]
             CHECK (LEN(LTRIM(RTRIM([Title]))) > 0),
 
-        CONSTRAINT [CK_Article_Content_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([Content]))) > 0),
+        CONSTRAINT [CK_Article_Body_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([Body]))) > 0),
 
         CONSTRAINT [CK_Article_Status]
             CHECK ([Status] IN (N'Draft', N'Published', N'Archived')),
@@ -409,51 +418,37 @@ BEGIN
     (
         [RevisionId]            BIGINT IDENTITY(1,1) NOT NULL,
         [ArticleId]             BIGINT               NOT NULL,
-        [RevisionNumber]        INT                  NOT NULL,
 
-        [TitleSnapshot]         NVARCHAR(300)        NOT NULL,
-        [SummarySnapshot]       NVARCHAR(2000)       NULL,
-        [ContentSnapshot]       NVARCHAR(MAX)        NOT NULL,
+        [EditedAt]              DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_ArticleRevision_EditedAt] DEFAULT (SYSUTCDATETIME()),
+        [EditedByUserId]        BIGINT               NOT NULL,
+        [CorrelationId]         NVARCHAR(100)        NULL,
+        [ChangeSummary]         NVARCHAR(300)        NULL,
 
-        [CategoryIdSnapshot]    BIGINT               NULL,
-        [StatusSnapshot]        NVARCHAR(30)         NOT NULL,
-        [CoverMediaIdSnapshot]  BIGINT               NULL,
+        [OldTitle]              NVARCHAR(300)        NULL,
+        [OldSummary]            NVARCHAR(1000)       NULL,
+        [OldBody]               NVARCHAR(MAX)        NULL,
 
-        [ChangedAt]             DATETIME2(3)         NOT NULL
-            CONSTRAINT [DF_ArticleRevision_ChangedAt] DEFAULT (SYSUTCDATETIME()),
-        [ChangedByUserId]       BIGINT               NULL,
-
-        [ChangeType]            NVARCHAR(30)         NOT NULL,
-        [ChangeSummary]         NVARCHAR(1000)       NULL,
+        [PatchJson]             NVARCHAR(MAX)        NULL,
 
         CONSTRAINT [PK_ArticleRevision]
             PRIMARY KEY CLUSTERED ([RevisionId] ASC),
-
-        CONSTRAINT [UQ_ArticleRevision_Article_RevisionNumber]
-            UNIQUE ([ArticleId], [RevisionNumber]),
 
         CONSTRAINT [FK_ArticleRevision_Article]
             FOREIGN KEY ([ArticleId])
             REFERENCES [content].[Article]([ArticleId]),
 
-        CONSTRAINT [FK_ArticleRevision_ChangedByUser]
-            FOREIGN KEY ([ChangedByUserId])
+        CONSTRAINT [FK_ArticleRevision_EditedByUser]
+            FOREIGN KEY ([EditedByUserId])
             REFERENCES [identity].[UserAccount]([UserId]),
 
-        CONSTRAINT [CK_ArticleRevision_Title_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([TitleSnapshot]))) > 0),
-
-        CONSTRAINT [CK_ArticleRevision_Content_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([ContentSnapshot]))) > 0),
-
-        CONSTRAINT [CK_ArticleRevision_StatusSnapshot]
-            CHECK ([StatusSnapshot] IN (N'Draft', N'Published', N'Archived')),
-
-        CONSTRAINT [CK_ArticleRevision_ChangeType]
-            CHECK ([ChangeType] IN (N'Create', N'Update', N'Publish', N'Unpublish', N'Archive', N'Restore', N'Delete')),
-
-        CONSTRAINT [CK_ArticleRevision_RevisionNumber_Positive]
-            CHECK ([RevisionNumber] > 0)
+        CONSTRAINT [CK_ArticleRevision_HasOldValueOrPatch]
+            CHECK (
+                [OldTitle] IS NOT NULL
+                OR [OldSummary] IS NOT NULL
+                OR [OldBody] IS NOT NULL
+                OR [PatchJson] IS NOT NULL
+            )
     );
 
     PRINT N'Created table: [content].[ArticleRevision]';
@@ -471,21 +466,25 @@ IF OBJECT_ID(N'[content].[ArticleLifecycleEvent]', N'U') IS NULL
 BEGIN
     CREATE TABLE [content].[ArticleLifecycleEvent]
     (
-        [ArticleLifecycleEventId] BIGINT IDENTITY(1,1) NOT NULL,
-        [ArticleId]               BIGINT               NOT NULL,
+        [EventId]                BIGINT IDENTITY(1,1) NOT NULL,
+        [ArticleId]              BIGINT               NOT NULL,
+        [ArticleVersion]         INT                  NOT NULL,
 
-        [ActionType]              NVARCHAR(30)         NOT NULL,
-        [FromStatus]              NVARCHAR(30)         NULL,
-        [ToStatus]                NVARCHAR(30)         NULL,
+        [ActionType]             NVARCHAR(30)         NOT NULL,
+        [FromStatus]             NVARCHAR(30)         NULL,
+        [ToStatus]               NVARCHAR(30)         NULL,
 
-        [Reason]                  NVARCHAR(1000)       NULL,
+        [Reason]                 NVARCHAR(500)        NULL,
+        [ActorUserId]            BIGINT               NOT NULL,
 
-        [OccurredAt]              DATETIME2(3)         NOT NULL
+        [OccurredAt]             DATETIME2(3)         NOT NULL
             CONSTRAINT [DF_ArticleLifecycleEvent_OccurredAt] DEFAULT (SYSUTCDATETIME()),
-        [ActorUserId]             BIGINT               NULL,
+
+        [CorrelationId]          NVARCHAR(100)        NULL,
+        [MetadataJson]           NVARCHAR(MAX)        NULL,
 
         CONSTRAINT [PK_ArticleLifecycleEvent]
-            PRIMARY KEY CLUSTERED ([ArticleLifecycleEventId] ASC),
+            PRIMARY KEY CLUSTERED ([EventId] ASC),
 
         CONSTRAINT [FK_ArticleLifecycleEvent_Article]
             FOREIGN KEY ([ArticleId])
@@ -495,8 +494,11 @@ BEGIN
             FOREIGN KEY ([ActorUserId])
             REFERENCES [identity].[UserAccount]([UserId]),
 
+        CONSTRAINT [CK_ArticleLifecycleEvent_ArticleVersion_Positive]
+            CHECK ([ArticleVersion] > 0),
+
         CONSTRAINT [CK_ArticleLifecycleEvent_ActionType]
-            CHECK ([ActionType] IN (N'Create', N'Update', N'Publish', N'Unpublish', N'Archive', N'Restore', N'Delete')),
+            CHECK ([ActionType] IN (N'Publish', N'Unpublish', N'Archive', N'SoftDelete')),
 
         CONSTRAINT [CK_ArticleLifecycleEvent_FromStatus]
             CHECK ([FromStatus] IS NULL OR [FromStatus] IN (N'Draft', N'Published', N'Archived')),
