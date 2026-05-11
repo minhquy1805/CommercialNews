@@ -10,8 +10,9 @@
 // Notes
 // - Cross-module refs (Identity/Media) are stubs for ERD readability only.
 // - ArticlePublicId is the stable public/cross-module Article identity.
-// - Required Outbox events are documented in system-data-content-v1.md (not modeled here).
+// - Required Outbox events are documented separately and are not modeled here.
 // - Append-only enforcement and CHECK constraints are implemented in SQL Server.
+// - Category Slug is intentionally omitted in Content V1.
 // =====================================================
 
 Enum ArticleStatusEnum {
@@ -20,12 +21,54 @@ Enum ArticleStatusEnum {
   Archived
 }
 
+Enum ArticleLifecycleActionTypeEnum {
+  Publish
+  Unpublish
+  Archive
+  SoftDelete
+}
+
 Table Category {
   CategoryId bigint [pk, increment]
+  PublicId char(26) [not null] // ULID
+
   ParentCategoryId bigint [null]
 
   Name nvarchar(200) [not null]
-  Slug nvarchar(200) [null] // optional V2; only needed if category public routes use slug
+  NameNormalized nvarchar(200) [not null]
+  Description nvarchar(1000) [null]
+
+  IsActive bit [not null, default: 1]
+  DisplayOrder int [not null, default: 0]
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+
+  CreatedByUserId bigint [null]
+  UpdatedByUserId bigint [null]
+
+  IsDeleted bit [not null, default: 0]
+  DeletedAt datetime2(3) [null]
+  DeletedByUserId bigint [null]
+
+  Version bigint [not null, default: 1]
+
+  Indexes {
+    (PublicId) [unique, name: "UQ_Category_PublicId"]
+    (NameNormalized) [unique, name: "UQ_Category_NameNormalized"]
+    (IsDeleted, IsActive, DisplayOrder, Name) [name: "IX_Category_IsDeleted_IsActive_DisplayOrder_Name"]
+    (ParentCategoryId, IsDeleted, DisplayOrder, Name) [name: "IX_Category_ParentCategoryId_IsDeleted_DisplayOrder_Name"]
+  }
+
+  Note: "Category taxonomy truth. Category.Slug is intentionally omitted in Content V1. Soft-delete sets IsDeleted=1 and IsActive=0."
+}
+
+Table Tag {
+  TagId bigint [pk, increment]
+  PublicId char(26) [not null] // ULID
+
+  Name nvarchar(150) [not null]
+  NameNormalized nvarchar(150) [not null]
   Description nvarchar(500) [null]
 
   IsActive bit [not null, default: 1]
@@ -33,11 +76,22 @@ Table Category {
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
   UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
 
+  CreatedByUserId bigint [null]
+  UpdatedByUserId bigint [null]
+
+  IsDeleted bit [not null, default: 0]
+  DeletedAt datetime2(3) [null]
+  DeletedByUserId bigint [null]
+
+  Version bigint [not null, default: 1]
+
   Indexes {
-    (ParentCategoryId) [name: "IX_Category_ParentCategoryId"]
+    (PublicId) [unique, name: "UQ_Tag_PublicId"]
+    (NameNormalized) [unique, name: "UQ_Tag_NameNormalized"]
+    (IsDeleted, IsActive, Name) [name: "IX_Tag_IsDeleted_IsActive_Name"]
   }
 
-  Note: "No self-parenting in DB; no-cycles enforced in app. Category.Slug is optional and not required by V1 Reading public routes."
+  Note: "Tag taxonomy truth. No Tag.Slug in Content V1. Soft-delete sets IsDeleted=1 and IsActive=0."
 }
 
 Table Article {
@@ -48,74 +102,64 @@ Table Article {
   AuthorUserId bigint [not null] // cross-module ref -> Identity.UserAccount
 
   Title nvarchar(300) [not null]
-  Summary nvarchar(1000) [null]
+  Summary nvarchar(1000) [not null]
   Body nvarchar(max) [not null]
 
-  Status varchar(20) [not null, default: "Draft"] // Draft/Published/Archived
+  Status nvarchar(30) [not null, default: "Draft"] // Draft/Published/Archived
+
   PublishedAt datetime2(3) [null]
   UnpublishedAt datetime2(3) [null]
   ArchivedAt datetime2(3) [null]
 
-  CoverMediaId bigint [null] // cross-module hook -> Media.MediaAsset (optional V1)
-
-  Version int [not null, default: 1] // optimistic concurrency + per-aggregate event ordering
+  CoverMediaId bigint [null] // cross-module hook -> Media.MediaAsset, nullable reference only
 
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  CreatedBy bigint [null]
   UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  UpdatedBy bigint [null]
 
-  IsDeleted bit [not null, default: 0] // V1 soft delete flag
+  CreatedByUserId bigint [not null]
+  UpdatedByUserId bigint [null]
+
+  IsDeleted bit [not null, default: 0]
   DeletedAt datetime2(3) [null]
-  DeletedBy bigint [null]
+  DeletedByUserId bigint [null]
+
+  Version bigint [not null, default: 1] // optimistic concurrency + per-aggregate event ordering
 
   Indexes {
     (ArticlePublicId) [unique, name: "UQ_Article_ArticlePublicId"]
 
-    // Public feed
-    (Status, PublishedAt) [name: "IX_Article_Status_PublishedAt"]
+    // Truth-backed published article lookup for Reading/public-serving fallback
+    (PublishedAt, ArticleId) [name: "IX_Article_PublicFeed_PublishedAt"]
 
-    // Filter by category
-    (CategoryId, Status, PublishedAt) [name: "IX_Article_Category_Status_PublishedAt"]
+    // Truth-backed category published article lookup for Reading/public-serving fallback
+    (CategoryId, PublishedAt, ArticleId) [name: "IX_Article_PublicFeed_Category_PublishedAt"]
 
-    // Admin list by author
-    (AuthorUserId, CreatedAt) [name: "IX_Article_Author_CreatedAt"]
-
-    (CoverMediaId) [name: "IX_Article_CoverMediaId"]
+    // Admin listing/filtering
+    (Status, IsDeleted, UpdatedAt, ArticleId) [name: "IX_Article_Admin_Status_IsDeleted_UpdatedAt"]
+    (AuthorUserId, IsDeleted, CreatedAt, ArticleId) [name: "IX_Article_AuthorUserId_IsDeleted_CreatedAt"]
+    (CategoryId, IsDeleted, UpdatedAt, ArticleId) [name: "IX_Article_CategoryId_IsDeleted_UpdatedAt"]
+    (IsDeleted, PublishedAt, ArticleId) [name: "IX_Article_Admin_IsDeleted_PublishedAt"]
+    (ArticlePublicId) [name: "IX_Article_ArticlePublicId"]
+    (IsDeleted, Title) [name: "IX_Article_IsDeleted_Title"]
   }
 
-  Note: "Current state. ArticlePublicId is the public/cross-module identity and Outbox AggregateId. Histories are stored in ArticleRevision and ArticleLifecycleEvent."
-}
-
-Table Tag {
-  TagId bigint [pk, increment]
-
-  Name nvarchar(100) [not null]
-  Slug nvarchar(120) [not null]
-  Description nvarchar(300) [null]
-
-  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-
-  Indexes {
-    (Slug) [unique, name: "UQ_Tag_Slug"]
-  }
-
-  Note: "Slug is a stable key for routes and filtering."
+  Note: "Current Article truth. Public visibility requires Status='Published' AND IsDeleted=0. ArticlePublicId is the public/cross-module identity and Outbox AggregateId."
 }
 
 Table ArticleTag {
   ArticleId bigint [not null]
   TagId bigint [not null]
 
-  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  CreatedBy bigint [null]
+  AttachedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  AttachedByUserId bigint [null]
 
   Indexes {
-    (ArticleId, TagId) [pk] // idempotent attach
+    (ArticleId, TagId) [pk, name: "PK_ArticleTag"]
     (TagId, ArticleId) [name: "IX_ArticleTag_TagId_ArticleId"]
+    (ArticleId, AttachedAt, TagId) [name: "IX_ArticleTag_ArticleId_AttachedAt"]
   }
 
-  Note: "N-N bridge. Composite PK ensures no duplicate attachments."
+  Note: "Content-owned Article-Tag attachment truth. Composite PK prevents duplicate attachments. Attach/detach is draft-only in V1."
 }
 
 Table ArticleRevision {
@@ -123,7 +167,10 @@ Table ArticleRevision {
   ArticleId bigint [not null]
 
   EditedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  EditedBy bigint [not null] // cross-module ref -> Identity.UserAccount
+  EditedByUserId bigint [not null]
+
+  ArticleVersion bigint [null]
+
   CorrelationId nvarchar(100) [null]
   ChangeSummary nvarchar(300) [null]
 
@@ -131,43 +178,42 @@ Table ArticleRevision {
   OldSummary nvarchar(1000) [null]
   OldBody nvarchar(max) [null]
 
-  PatchJson nvarchar(max) [null] // V2 option
-
   Indexes {
-    (ArticleId, EditedAt) [name: "IX_ArticleRevision_ArticleId_EditedAt"]
-    (EditedBy, EditedAt)  [name: "IX_ArticleRevision_EditedBy_EditedAt"]
+    (ArticleId, EditedAt, RevisionId) [name: "IX_ArticleRevision_ArticleId_EditedAt"]
+    (ArticleId, ArticleVersion) [name: "IX_ArticleRevision_ArticleId_ArticleVersion"]
+    (EditedByUserId, EditedAt, RevisionId) [name: "IX_ArticleRevision_EditedByUserId_EditedAt"]
   }
 
-  Note: "Append-only edit history (audit-grade). V1 stores previous snapshot fields before a meaningful edit."
+  Note: "Append-only edit history. V1 stores previous snapshot before a meaningful edit. No PatchJson in V1."
 }
 
 Table ArticleLifecycleEvent {
   EventId bigint [pk, increment]
   ArticleId bigint [not null]
-  ArticleVersion int [not null] // Article.Version after the lifecycle transition
+  ArticleVersion bigint [not null] // Article.Version after lifecycle transition
 
-  ActionType varchar(30) [not null] // Publish/Unpublish/Archive/SoftDelete/...
-  FromStatus varchar(20) [null]
-  ToStatus varchar(20) [null]
+  ActionType nvarchar(30) [not null] // Publish/Unpublish/Archive/SoftDelete
+  FromStatus nvarchar(30) [null]
+  ToStatus nvarchar(30) [null]
 
-  Reason nvarchar(500) [null]       // required for Unpublish by CHECK constraint
-  ActorUserId bigint [not null]     // cross-module ref -> Identity.UserAccount
+  Reason nvarchar(500) [null] // required for Unpublish by CHECK constraint
+  ActorUserId bigint [not null] // cross-module ref -> Identity.UserAccount
 
   OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
   CorrelationId nvarchar(100) [null]
   MetadataJson nvarchar(max) [null]
 
   Indexes {
-    (ArticleId, OccurredAt) [name: "IX_LifecycleEvent_ArticleId_OccurredAt"]
-    (ArticleId, ArticleVersion) [name: "IX_LifecycleEvent_ArticleId_Version"]
-    (ActorUserId, OccurredAt) [name: "IX_LifecycleEvent_Actor_OccurredAt"]
-    (ActionType, OccurredAt) [name: "IX_LifecycleEvent_Action_OccurredAt"]
+    (ArticleId, OccurredAt, EventId) [name: "IX_ArticleLifecycleEvent_ArticleId_OccurredAt"]
+    (ArticleId, ArticleVersion) [name: "IX_ArticleLifecycleEvent_ArticleId_Version"]
+    (ActorUserId, OccurredAt, EventId) [name: "IX_ArticleLifecycleEvent_ActorUserId_OccurredAt"]
+    (ActionType, OccurredAt, EventId) [name: "IX_ArticleLifecycleEvent_ActionType_OccurredAt"]
   }
 
   Note: "Append-only governance log. ArticleVersion aligns with Article.Version and OutboxMessage.Version. Unpublish requires Reason."
 }
 
-// -------------------- Relationships (Content internal) --------------------
+// -------------------- Relationships: Content internal --------------------
 Ref: Article.CategoryId > Category.CategoryId
 Ref: Category.ParentCategoryId > Category.CategoryId
 
@@ -177,33 +223,52 @@ Ref: ArticleTag.TagId > Tag.TagId
 Ref: ArticleRevision.ArticleId > Article.ArticleId
 Ref: ArticleLifecycleEvent.ArticleId > Article.ArticleId
 
-// -------------------- External stubs (optional) --------------------
+// -------------------- External stubs: ERD readability only --------------------
 Table IdentityUserAccount {
   UserId bigint [pk]
-  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+  Note: "EXTERNAL: Identity module. Stub for ERD readability only."
 }
 
 Table MediaAsset {
   MediaId bigint [pk]
-  Note: "EXTERNAL (Media module). Stub for ERD readability only."
+  Note: "EXTERNAL: Media module. Stub for ERD readability only."
 }
 
-// External refs for readability
+// External refs for readability.
+// In SQL Server implementation, Content stores CoverMediaId as nullable reference only.
+// Identity refs may be implemented as FK in shared modular DB depending on deployment policy.
 Ref: Article.AuthorUserId > IdentityUserAccount.UserId
-Ref: ArticleRevision.EditedBy > IdentityUserAccount.UserId
+Ref: Article.CreatedByUserId > IdentityUserAccount.UserId
+Ref: Article.UpdatedByUserId > IdentityUserAccount.UserId
+Ref: Article.DeletedByUserId > IdentityUserAccount.UserId
+
+Ref: Category.CreatedByUserId > IdentityUserAccount.UserId
+Ref: Category.UpdatedByUserId > IdentityUserAccount.UserId
+Ref: Category.DeletedByUserId > IdentityUserAccount.UserId
+
+Ref: Tag.CreatedByUserId > IdentityUserAccount.UserId
+Ref: Tag.UpdatedByUserId > IdentityUserAccount.UserId
+Ref: Tag.DeletedByUserId > IdentityUserAccount.UserId
+
+Ref: ArticleTag.AttachedByUserId > IdentityUserAccount.UserId
+Ref: ArticleRevision.EditedByUserId > IdentityUserAccount.UserId
 Ref: ArticleLifecycleEvent.ActorUserId > IdentityUserAccount.UserId
+
 Ref: Article.CoverMediaId > MediaAsset.MediaId
 
 // -------------------- SQL Server enforcement notes --------------------
-// 1) CHECK Article.Status IN ('Draft','Published','Archived')
-// 2) CHECK LEN(ArticlePublicId)=26 (ULID format may also be validated in app)
-// 3) CHECK PublishedAt required when Status='Published'
-// 4) CHECK Category.ParentCategoryId <> CategoryId (no self-parent)
-// 5) CHECK Unpublish requires Reason in ArticleLifecycleEvent
-// 6) CHECK ArticleLifecycleEvent.ArticleVersion > 0
-// 7) Append-only enforcement for ArticleRevision and ArticleLifecycleEvent via permissions/trigger.
-// 8) V1 Article deletion is soft delete (IsDeleted=1), not physical deletion.
-// 9) Consider SQL Server filtered index for published & not deleted:
-//    IX_Article_Published_NotDeleted WHERE IsDeleted=0 AND Status='Published'
-// 10) Optional debug/replay index:
-//    IX_LifecycleEvent_ArticleId_Version ON (ArticleId, ArticleVersion)
+// 1) CHECK LEN(PublicId)=26 and LEN(ArticlePublicId)=26.
+// 2) CHECK Article.Status IN ('Draft','Published','Archived').
+// 3) CHECK PublishedAt required when Status='Published'.
+// 4) CHECK ArchivedAt required when Status='Archived'.
+// 5) CHECK Category.ParentCategoryId <> CategoryId.
+// 6) CHECK soft-delete consistency:
+//    - IsDeleted=0 requires DeletedAt/DeletedByUserId NULL.
+//    - IsDeleted=1 requires DeletedAt NOT NULL.
+// 7) CHECK ArticleLifecycleEvent.ActionType IN ('Publish','Unpublish','Archive','SoftDelete').
+// 8) CHECK ArticleLifecycleEvent.FromStatus/ToStatus IN ('Draft','Published','Archived') when provided.
+// 9) CHECK Unpublish requires Reason in ArticleLifecycleEvent.
+// 10) CHECK Version / ArticleVersion > 0.
+// 11) Article update and ArticleTag attach/detach are draft-only in V1 via stored procedures.
+// 12) V1 Article deletion is soft-delete only. No Article restore in V1.
+// 13) Content does not model SEO slug registry, Reading projection, Notification delivery, Audit evidence, cache, or search index state.

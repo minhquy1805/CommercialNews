@@ -23,7 +23,7 @@ namespace Content.Domain.Entities
             bool isDeleted,
             DateTime? deletedAt,
             long? deletedByUserId,
-            int version)
+            long version)
         {
             TagId = tagId;
             PublicId = publicId;
@@ -58,7 +58,9 @@ namespace Content.Domain.Entities
         public DateTime? DeletedAt { get; private set; }
         public long? DeletedByUserId { get; private set; }
 
-        public int Version { get; private set; }
+        public bool CanBeAttachedToArticle => IsActive && !IsDeleted;
+
+        public long Version { get; private set; }
 
         public static Tag Create(
             string publicId,
@@ -114,9 +116,7 @@ namespace Content.Domain.Entities
             Version++;
         }
 
-        public void SoftDelete(
-            DateTime nowUtc,
-            long? actorUserId)
+        public void SoftDelete(DateTime nowUtc, long? actorUserId)
         {
             if (IsDeleted)
             {
@@ -126,6 +126,7 @@ namespace Content.Domain.Entities
             }
 
             IsDeleted = true;
+            IsActive = false;
             DeletedAt = nowUtc;
             DeletedByUserId = actorUserId;
             UpdatedAt = nowUtc;
@@ -133,9 +134,7 @@ namespace Content.Domain.Entities
             Version++;
         }
 
-        public void Restore(
-            DateTime nowUtc,
-            long? actorUserId)
+        public void Restore(DateTime nowUtc, long? actorUserId)
         {
             if (!IsDeleted)
             {
@@ -145,6 +144,7 @@ namespace Content.Domain.Entities
             }
 
             IsDeleted = false;
+            IsActive = true;
             DeletedAt = null;
             DeletedByUserId = null;
             UpdatedAt = nowUtc;
@@ -166,7 +166,7 @@ namespace Content.Domain.Entities
             bool isDeleted,
             DateTime? deletedAt,
             long? deletedByUserId,
-            int version)
+            long version)
         {
             if (tagId <= 0)
             {
@@ -216,6 +216,36 @@ namespace Content.Domain.Entities
                 deletedAt: deletedAt,
                 deletedByUserId: deletedByUserId,
                 version: version);
+        }
+
+        public void Activate(DateTime nowUtc, long? actorUserId)
+        {
+            EnsureNotDeleted();
+
+            if (IsActive)
+            {
+                return;
+            }
+
+            IsActive = true;
+            UpdatedAt = nowUtc;
+            UpdatedByUserId = actorUserId;
+            Version++;
+        }
+
+        public void Deactivate(DateTime nowUtc, long? actorUserId)
+        {
+            EnsureNotDeleted();
+
+            if (!IsActive)
+            {
+                return;
+            }
+
+            IsActive = false;
+            UpdatedAt = nowUtc;
+            UpdatedByUserId = actorUserId;
+            Version++;
         }
 
         private void EnsureNotDeleted()
