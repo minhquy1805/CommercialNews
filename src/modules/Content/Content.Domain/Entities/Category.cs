@@ -26,11 +26,13 @@ namespace Content.Domain.Entities
         public DateTime? DeletedAt { get; private set; }
         public long? DeletedByUserId { get; private set; }
 
-        public int Version { get; private set; }
+        public long Version { get; private set; }
 
         private Category()
         {
         }
+
+        public bool CanBeUsedByArticle => IsActive && !IsDeleted;
 
         public static Category Create(
             string publicId,
@@ -44,6 +46,7 @@ namespace Content.Domain.Entities
             long? actorUserId)
         {
             ValidatePublicId(publicId);
+            ValidateParentCategoryId(parentCategoryId);
             ValidateName(name);
             ValidateNameNormalized(nameNormalized);
             ValidateDisplayOrder(displayOrder);
@@ -82,7 +85,7 @@ namespace Content.Domain.Entities
             bool isDeleted,
             DateTime? deletedAt,
             long? deletedByUserId,
-            int version)
+            long version)
         {
             if (categoryId <= 0)
             {
@@ -99,6 +102,7 @@ namespace Content.Domain.Entities
             }
 
             ValidatePublicId(publicId);
+            ValidateParentCategoryId(parentCategoryId);
             ValidateName(name);
             ValidateNameNormalized(nameNormalized);
             ValidateDisplayOrder(displayOrder);
@@ -145,6 +149,7 @@ namespace Content.Domain.Entities
 
             ValidateName(name);
             ValidateNameNormalized(nameNormalized);
+            ValidateParentCategoryId(parentCategoryId);
             ValidateDisplayOrder(displayOrder);
 
             if (CategoryId > 0 && parentCategoryId.HasValue && parentCategoryId.Value == CategoryId)
@@ -171,9 +176,7 @@ namespace Content.Domain.Entities
 
             if (IsActive)
             {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_ALREADY_ACTIVE",
-                    "Category is already active.");
+                return;
             }
 
             IsActive = true;
@@ -188,9 +191,7 @@ namespace Content.Domain.Entities
 
             if (!IsActive)
             {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_ALREADY_INACTIVE",
-                    "Category is already inactive.");
+                return;
             }
 
             IsActive = false;
@@ -209,6 +210,7 @@ namespace Content.Domain.Entities
             }
 
             IsDeleted = true;
+            IsActive = false;
             DeletedAt = nowUtc;
             DeletedByUserId = actorUserId;
             UpdatedAt = nowUtc;
@@ -226,6 +228,7 @@ namespace Content.Domain.Entities
             }
 
             IsDeleted = false;
+            IsActive = true;
             DeletedAt = null;
             DeletedByUserId = null;
             UpdatedAt = nowUtc;
@@ -257,6 +260,16 @@ namespace Content.Domain.Entities
                 throw new ContentDomainException(
                     "CONTENT.CATEGORY_PUBLIC_ID_INVALID",
                     "Category public id must be exactly 26 characters.");
+            }
+        }
+
+        private static void ValidateParentCategoryId(long? parentCategoryId)
+        {
+            if (parentCategoryId.HasValue && parentCategoryId.Value <= 0)
+            {
+                throw new ContentDomainException(
+                    "CONTENT.CATEGORY_PARENT_ID_INVALID",
+                    "Parent category id must be greater than zero.");
             }
         }
 
