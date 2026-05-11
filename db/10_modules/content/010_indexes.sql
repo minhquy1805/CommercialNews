@@ -146,29 +146,6 @@ BEGIN
 END
 GO
 
-/* PublicId lookup if API commonly uses public ids */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = N'IX_Category_PublicId'
-      AND object_id = OBJECT_ID(N'[content].[Category]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_Category_PublicId]
-    ON [content].[Category]
-    (
-        [PublicId] ASC
-    );
-
-    PRINT N'Created index: [IX_Category_PublicId]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_Category_PublicId]';
-END
-GO
-
 /* =========================================================
    2) [content].[Tag]
    ========================================================= */
@@ -204,29 +181,6 @@ BEGIN
 END
 GO
 
-/* PublicId lookup */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = N'IX_Tag_PublicId'
-      AND object_id = OBJECT_ID(N'[content].[Tag]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_Tag_PublicId]
-    ON [content].[Tag]
-    (
-        [PublicId] ASC
-    );
-
-    PRINT N'Created index: [IX_Tag_PublicId]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_Tag_PublicId]';
-END
-GO
-
 /* =========================================================
    3) [content].[Article]
    ========================================================= */
@@ -248,7 +202,7 @@ BEGIN
     )
     INCLUDE
     (
-        [PublicId],
+        [ArticlePublicId],
         [CategoryId],
         [AuthorUserId],
         [Title],
@@ -284,7 +238,7 @@ BEGIN
     )
     INCLUDE
     (
-        [PublicId],
+        [ArticlePublicId],
         [AuthorUserId],
         [Title],
         [Summary],
@@ -320,7 +274,7 @@ BEGIN
     )
     INCLUDE
     (
-        [PublicId],
+        [ArticlePublicId],
         [CategoryId],
         [AuthorUserId],
         [Title],
@@ -357,7 +311,7 @@ BEGIN
     )
     INCLUDE
     (
-        [PublicId],
+        [ArticlePublicId],
         [CategoryId],
         [Status],
         [Title],
@@ -394,7 +348,7 @@ BEGIN
     )
     INCLUDE
     (
-        [PublicId],
+        [ArticlePublicId],
         [AuthorUserId],
         [Status],
         [Title],
@@ -412,19 +366,19 @@ BEGIN
 END
 GO
 
-/* PublicId lookup */
+/* ArticlePublicId lookup */
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_Article_PublicId'
+    WHERE name = N'IX_Article_ArticlePublicId'
       AND object_id = OBJECT_ID(N'[content].[Article]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_Article_PublicId]
+    CREATE NONCLUSTERED INDEX [IX_Article_ArticlePublicId]
     ON [content].[Article]
     (
-        [PublicId] ASC
+        [ArticlePublicId] ASC
     )
     INCLUDE
     (
@@ -434,11 +388,11 @@ BEGIN
         [Version]
     );
 
-    PRINT N'Created index: [IX_Article_PublicId]';
+    PRINT N'Created index: [IX_Article_ArticlePublicId]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_Article_PublicId]';
+    PRINT N'Index exists: [IX_Article_ArticlePublicId]';
 END
 GO
 
@@ -460,7 +414,7 @@ BEGIN
     INCLUDE
     (
         [ArticleId],
-        [PublicId],
+        [ArticlePublicId],
         [Status],
         [UpdatedAt],
         [CategoryId],
@@ -542,61 +496,29 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_ArticleRevision_ArticleId_ChangedAt'
+    WHERE name = N'IX_ArticleRevision_ArticleId_EditedAt'
       AND object_id = OBJECT_ID(N'[content].[ArticleRevision]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_ArticleRevision_ArticleId_ChangedAt]
+    CREATE NONCLUSTERED INDEX [IX_ArticleRevision_ArticleId_EditedAt]
     ON [content].[ArticleRevision]
     (
         [ArticleId] ASC,
-        [ChangedAt] DESC,
+        [EditedAt] DESC,
         [RevisionId] DESC
     )
     INCLUDE
     (
-        [RevisionNumber],
-        [ChangeType],
-        [ChangedByUserId],
-        [StatusSnapshot]
+        [EditedByUserId],
+        [CorrelationId],
+        [ChangeSummary]
     );
 
-    PRINT N'Created index: [IX_ArticleRevision_ArticleId_ChangedAt]';
+    PRINT N'Created index: [IX_ArticleRevision_ArticleId_EditedAt]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_ArticleRevision_ArticleId_ChangedAt]';
-END
-GO
-
-/* Exact revision-number lookup per article */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = N'IX_ArticleRevision_ArticleId_RevisionNumber'
-      AND object_id = OBJECT_ID(N'[content].[ArticleRevision]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_ArticleRevision_ArticleId_RevisionNumber]
-    ON [content].[ArticleRevision]
-    (
-        [ArticleId] ASC,
-        [RevisionNumber] DESC
-    )
-    INCLUDE
-    (
-        [RevisionId],
-        [ChangedAt],
-        [ChangeType],
-        [ChangedByUserId]
-    );
-
-    PRINT N'Created index: [IX_ArticleRevision_ArticleId_RevisionNumber]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_ArticleRevision_ArticleId_RevisionNumber]';
+    PRINT N'Index exists: [IX_ArticleRevision_ArticleId_EditedAt]';
 END
 GO
 
@@ -605,29 +527,29 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_ArticleRevision_ChangedByUserId_ChangedAt'
+    WHERE name = N'IX_ArticleRevision_EditedByUserId_EditedAt'
       AND object_id = OBJECT_ID(N'[content].[ArticleRevision]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_ArticleRevision_ChangedByUserId_ChangedAt]
+    CREATE NONCLUSTERED INDEX [IX_ArticleRevision_EditedByUserId_EditedAt]
     ON [content].[ArticleRevision]
     (
-        [ChangedByUserId] ASC,
-        [ChangedAt] DESC,
+        [EditedByUserId] ASC,
+        [EditedAt] DESC,
         [RevisionId] DESC
     )
     INCLUDE
     (
         [ArticleId],
-        [RevisionNumber],
-        [ChangeType]
+        [CorrelationId],
+        [ChangeSummary]
     );
 
-    PRINT N'Created index: [IX_ArticleRevision_ChangedByUserId_ChangedAt]';
+    PRINT N'Created index: [IX_ArticleRevision_EditedByUserId_EditedAt]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_ArticleRevision_ChangedByUserId_ChangedAt]';
+    PRINT N'Index exists: [IX_ArticleRevision_EditedByUserId_EditedAt]';
 END
 GO
 
@@ -649,10 +571,11 @@ BEGIN
     (
         [ArticleId] ASC,
         [OccurredAt] DESC,
-        [ArticleLifecycleEventId] DESC
+        [EventId] DESC
     )
     INCLUDE
     (
+        [ArticleVersion],
         [ActionType],
         [FromStatus],
         [ToStatus],
@@ -665,6 +588,38 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [IX_ArticleLifecycleEvent_ArticleId_OccurredAt]';
+END
+GO
+
+/* Lifecycle event lookup by aggregate version */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleLifecycleEvent_ArticleId_Version'
+      AND object_id = OBJECT_ID(N'[content].[ArticleLifecycleEvent]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_ArticleLifecycleEvent_ArticleId_Version]
+    ON [content].[ArticleLifecycleEvent]
+    (
+        [ArticleId] ASC,
+        [ArticleVersion] ASC
+    )
+    INCLUDE
+    (
+        [EventId],
+        [ActionType],
+        [OccurredAt],
+        [ActorUserId],
+        [CorrelationId]
+    );
+
+    PRINT N'Created index: [IX_ArticleLifecycleEvent_ArticleId_Version]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_ArticleLifecycleEvent_ArticleId_Version]';
 END
 GO
 
@@ -682,11 +637,12 @@ BEGIN
     (
         [ActorUserId] ASC,
         [OccurredAt] DESC,
-        [ArticleLifecycleEventId] DESC
+        [EventId] DESC
     )
     INCLUDE
     (
         [ArticleId],
+        [ArticleVersion],
         [ActionType],
         [FromStatus],
         [ToStatus]
@@ -714,11 +670,12 @@ BEGIN
     (
         [ActionType] ASC,
         [OccurredAt] DESC,
-        [ArticleLifecycleEventId] DESC
+        [EventId] DESC
     )
     INCLUDE
     (
         [ArticleId],
+        [ArticleVersion],
         [ActorUserId],
         [FromStatus],
         [ToStatus]
