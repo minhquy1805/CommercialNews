@@ -15,10 +15,13 @@ Related:
 
 - create draft, update draft
 - publish/unpublish (highest impact)
-- archive/restore (if enabled)
+- archive
+- soft-delete
 - slug/title/seo-related edits (if they affect routing/indexability)
 - stale-write / optimistic-concurrency rejects on editorial actions
 - replay/reconciliation-triggering lifecycle anomalies
+
+Archived article restore is out of scope for V1 unless a later lifecycle policy explicitly enables it.
 
 ---
 
@@ -33,21 +36,24 @@ Related:
   - 5xx/timeouts (system instability)
 
 ### Correctness & safety signals (must-have)
-- visibility correctness incidents:
-  - draft/unpublished leak signals = **0** (release blocker)
+- non-public content leak signals = **0** (release blocker):
+  - `Draft`
+  - `Archived`
+  - soft-deleted
+  - articles unpublished back to `Draft`
 - "published but not readable" anomaly rate (if detectable):
   - publish succeeded but public detail returns 404/empty due to stale derived paths
 - truth-vs-derived disagreement signals:
   - derived route/projection says visible, Content truth says not visible
   - derived route/projection missing while Content truth says published
-- content state distribution drift:
-  - sudden spikes in unpublished/archived transitions (possible abuse/automation bug)
+- content lifecycle distribution drift:
+  - sudden spikes in unpublish/archive/soft-delete transitions (possible abuse/automation bug)
 - stale-write protection signals:
   - edit conflict rate
   - stale lifecycle command reject/no-op rate
 
 ### Ordering & replay safety signals
-- stale-event rejection count by downstream consumer where measurable
+- stale-event rejection count by downstream consumer where measurable, using `ArticlePublicId + Version` / `AggregateId + Version`
 - version-gap / resync-trigger count where downstream consumers detect missing or out-of-order versions
 - duplicate publish/unpublish effect attempts detected by downstream dedupe logic
 
@@ -57,6 +63,13 @@ Related:
 
 ### Replication freshness for content events
 - outbox pending count (content events)
+- outbox pending count by content event type:
+  - `content.article_created`
+  - `content.article_updated`
+  - `content.article_published`
+  - `content.article_unpublished`
+  - `content.article_archived`
+  - `content.article_soft_deleted`
 - outbox oldest pending age (seconds)
 - publish attempts / failures for content outbox events
 - broker queue depth (ready/unacked) for:
@@ -128,16 +141,26 @@ Operators should be able to see whether:
 ## 5) Correlation requirements
 
 Propagate `correlationId` across:
-- publish/unpublish request logs
-- outbox records / emitted events (`messageId`, `eventType`, `articleId`, `version`)
-- worker consumer logs (audit/seo/notifications/projections)
+- publish/unpublish/archive/soft-delete request logs
+- outbox records / emitted events:
+  - `messageId`
+  - `eventType`
+  - `aggregateType`
+  - `aggregateId`
+  - `articleId`
+  - `articlePublicId`
+  - `version`
+- worker consumer logs (Audit/SEO/Notifications/Reading/search projections)
 
 Required logging fields for investigations:
 - actorUserId (no PII)
-- articleId/publicId
+- articleId
+- articlePublicId
 - action and state transition (from -> to)
 - reason (for unpublish)
-- correlationId + messageId + version
+- correlationId
+- messageId
+- version
 - consumer/apply decision where relevant:
   - applied
   - duplicate ignored
@@ -160,6 +183,7 @@ Audit entries for content governance must include:
 - actorUserId
 - action
 - articleId
+- articlePublicId
 - timestamps (`occurredAt`, `storedAt`)
 - reason (for unpublish)
 - correlationId
@@ -179,7 +203,7 @@ Operational expectations:
 ### Investigation-ready questions
 Content observability should make it possible to answer:
 - what truth version is authoritative right now?
-- which version was emitted to outbox?
+- which `ArticlePublicId + Version` was emitted to outbox?
 - which downstream consumers have applied that version?
 - was an older version rejected or did it incorrectly win somewhere?
 - was a missing derived effect later recovered by replay/rebuild?
@@ -200,8 +224,12 @@ During rollout, gate on:
 
 ### Strong stop conditions
 Immediate pause/rollback is recommended if any of the following is observed:
-- draft/unpublished content leak
-- repeated publish/unpublish disagreement between truth and serving path
+- non-public content leak:
+  - `Draft`
+  - `Archived`
+  - soft-deleted
+  - articles unpublished back to `Draft`
+- repeated publish/unpublish/archive/soft-delete disagreement between truth and serving path
 - rebuild/cutover publishing older visibility assumptions over newer Content truth
 - runaway duplicate downstream side effects from Content events
 
@@ -211,11 +239,11 @@ Immediate pause/rollback is recommended if any of the following is observed:
 
 Content observability should help answer:
 
-1. Did Content truth commit successfully?  
-2. Was the correct version emitted to Outbox?  
-3. Are downstream systems simply lagging, or is a replay/reconciliation workflow failing?  
-4. Is public invisibility caused by Content truth, or by stale/missing derived state?  
-5. Are rebuild/reconciliation workflows preserving truth-first behavior correctly?  
-6. Are downstream consumers rejecting stale versions and duplicates correctly?  
-7. Is truth fallback being used because derived state is behind, or because a serving artifact is broken?  
+1. Did Content truth commit successfully?
+2. Was the correct `ArticlePublicId + Version` emitted to Outbox?
+3. Are downstream systems simply lagging, or is a replay/reconciliation workflow failing?
+4. Is public invisibility caused by Content truth, or by stale/missing derived state?
+5. Are rebuild/reconciliation workflows preserving truth-first behavior correctly?
+6. Are downstream consumers rejecting stale versions and duplicates correctly?
+7. Is truth fallback being used because derived state is behind, or because a serving artifact is broken?
 8. Has a bounded rebuild/replay recovered the intended derived output safely?
