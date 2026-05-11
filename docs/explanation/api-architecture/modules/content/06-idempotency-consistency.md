@@ -38,8 +38,9 @@ Content owns the source of truth for:
 - article lifecycle state
   - `Draft`
   - `Published`
-  - `Unpublished`
   - `Archived`
+- unpublish action in V1, represented by `Published -> Draft`
+- soft-delete state, represented by `IsDeleted=1`, not by a lifecycle status
 - publication and lifecycle timestamps
 - unpublish reason and other lifecycle metadata where required
 - revision history *(append-only by intent)*
@@ -86,7 +87,7 @@ Derived systems may answer:
 - what counters/enrichments are shown
 - whether summaries/reports are available
 
-Derived convenience may lag.  
+Derived convenience may lag.
 Content truth may not.
 
 ### 0.4 Consistency class for Content
@@ -109,7 +110,7 @@ Required for:
 
 - lifecycle transitions per article
 - downstream consumers that apply article-derived state
-- stale-event rejection by `(ArticleId, Version)`
+- stale-event rejection by `ArticlePublicId + Version` / `AggregateId + Version`
 - effect ordering where publish truth must exist before downstream meaning
 - bounded rebuild/publication workflows where a derived output must not overtake newer Content truth
 
@@ -135,16 +136,17 @@ Examples:
 - calling `:publish` on an already published article returns stable success/no-op semantics if that is the chosen V1 rule
 - calling `:unpublish` on an already non-public article returns stable success/no-op semantics if that is the chosen V1 rule
 - calling `:archive` on an already archived article returns stable success/no-op semantics if that is the chosen V1 rule
-- calling `:restore` on an article already restored or not currently archivable/restorable returns stable success/no-op or documented conflict according to policy
+- calling `:soft-delete` on an already soft-deleted article returns stable success/no-op semantics if that is the chosen V1 rule
+- `:restore` is out of scope for V1 unless a later lifecycle policy explicitly enables `Archived -> Draft`
 
-If strict conflict semantics are preferred, they must be documented consistently  
+If strict conflict semantics are preferred, they must be documented consistently
 (for example `409 CONTENT.INVALID_STATE_TRANSITION`).
 
 **Non-negotiable rule:** idempotent semantics must not emit duplicate harmful downstream side effects.
 
 This means:
 
-- repeated equivalent commands must not create duplicate `Content.ArticlePublished`, `Content.ArticleUnpublished`, `Content.ArticleArchived`, or `Content.ArticleRestored` effects
+- repeated equivalent commands must not create duplicate `content.article_published`, `content.article_unpublished`, `content.article_archived`, or `content.article_soft_deleted` effects
 - no duplicate emails, duplicate audit evidence, or duplicate projection work should be caused by a logically unchanged action result
 - if the truth state is unchanged, downstream side effects must either not be re-emitted or must be safely deduplicated downstream
 
@@ -174,7 +176,7 @@ For high-impact commands such as:
 - `:publish`
 - `:unpublish`
 - `:archive`
-- `:restore`
+- `:soft-delete`
 
 the system should support an idempotent interpretation based on:
 
@@ -254,7 +256,7 @@ Typical truth changes include:
 - draft creation
 - article update
 - publish / unpublish
-- archive / restore
+- archive / soft-delete
 - revision/history append
 - publication reason / timestamp updates
 - version increment for ordered state changes
@@ -372,7 +374,7 @@ It must **not** be driven primarily by:
 
 A caller saying “I edited the latest version” is not sufficient.
 
-The Content truth boundary must verify freshness using authoritative state  
+The Content truth boundary must verify freshness using authoritative state
 (for example expected version / rowversion / compare-and-set semantics).
 
 ### 4.5 State machine legality and versioning are complementary
@@ -383,7 +385,7 @@ Content must also enforce lifecycle legality, such as:
 
 - what may transition from `Draft`
 - what may transition from `Published`
-- whether `Archived` content may be restored
+- `Archived` has no transitions in V1 unless a later lifecycle policy explicitly enables restore
 - whether a repeated command is a safe no-op or an invalid transition
 
 **Rule:** versioning prevents stale overwrite; lifecycle rules prevent illegal transition.
@@ -398,7 +400,7 @@ It also exists when:
 - a rebuild job computes from an older snapshot while newer truth already exists
 - a replay job republishes old derived assumptions into an active store
 
-**Rule:** `(ArticleId, Version)` freshness rules apply to downstream derived-state maintenance as well as to sync truth mutations.
+**Rule:** `ArticlePublicId + Version` / `AggregateId + Version` freshness rules apply to downstream derived-state maintenance as well as to sync truth mutations.
 
 ---
 
@@ -414,34 +416,50 @@ For lifecycle transitions and other changes that trigger side effects, Content M
 
 ### 5.2 Events emitted by Content (V1)
 
-Typical events:
+Article events emitted by V1 Phase 1:
 
-- `Content.ArticleCreated`
-- `Content.ArticleUpdated` *(optional; use with care to avoid noisy streams)*
-- `Content.ArticlePublished`
-- `Content.ArticleUnpublished`
-- `Content.ArticleArchived`
-- `Content.ArticleRestored`
-- `Content.ArticleDeleted` or `Content.ArticleSoftDeleted` *(only if such lifecycle exists)*
-- `Content.CategoryCreated` / `Content.CategoryUpdated` / `Content.CategoryDeleted` *(optional)*
-- `Content.TagCreated` / `Content.TagUpdated` / `Content.TagDeleted` *(optional)*
+- `content.article_created`
+- `content.article_updated`
+- `content.article_published`
+- `content.article_unpublished`
+- `content.article_archived`
+- `content.article_soft_deleted`
+
+Reserved for future retention/purge workflows:
+
+- `content.article_purged`
+
+Reserved for later category/tag phases:
+
+- `content.category_created`
+- `content.category_updated`
+- `content.category_soft_deleted`
+- `content.tag_created`
+- `content.tag_updated`
+- `content.tag_soft_deleted`
 
 ### 5.3 Envelope requirements
 
-Every emitted event must include at least:
+Every emitted Article event must include at least:
 
 - `MessageId`
-- `ArticleId` *(or relevant aggregate id)*
-- `Version`
+- `EventType`
+- `AggregateType = Article`
+- `AggregateId = ArticlePublicId`
+- `ArticleId` in payload for internal SQL reference
+- `ArticlePublicId` in payload for public/cross-module reference
+- `Version = Article.Version`
 - `OccurredAt`
-- `CorrelationId`
+- `CorrelationId` where available
 
-No global ordering is assumed.  
-Ordering is per article.
+No global ordering is assumed.
+Ordering is per Article aggregate.
+
+`ArticleId` may appear in payloads for internal SQL convenience, but cross-module ordering/freshness must use `ArticlePublicId + Version` from the event envelope.
 
 ### 5.4 Outbox is the causal boundary
 
-For Content, Outbox is not only a delivery mechanism.  
+For Content, Outbox is not only a delivery mechanism.
 It is the durable boundary that preserves:
 
 - truth mutation first
@@ -474,12 +492,13 @@ Therefore:
 
 Content lifecycle is ordered per article. Therefore:
 
-- Content maintains `Version` as a monotonic counter per `ArticleId`
+- Content maintains `Version` as a monotonic counter per `ArticlePublicId` / Article aggregate
 - each emitted event includes the new `Version`
+- Article event envelopes use `AggregateType = Article` and `AggregateId = ArticlePublicId`
 
 ### 6.1 Consumer expectations
 
-Consumers SHOULD enforce ordering using `(ArticleId, Version)`.
+Consumers SHOULD enforce ordering using `ArticlePublicId + Version` / `AggregateId + Version`.
 
 Depending on consumer type:
 
@@ -504,11 +523,13 @@ Consumers must distinguish:
 Protection required:
 
 - dedupe by `MessageId`
-- stale rejection by `(ArticleId, Version)` freshness rules
+- stale rejection by `ArticlePublicId + Version` / `AggregateId + Version` freshness rules
+
+`ArticleId` may appear in payloads for internal SQL convenience, but cross-module ordering/freshness must use `ArticlePublicId + Version` from the event envelope.
 
 ### 6.4 No cross-article ordering guarantee
 
-Content ordering guarantees apply per article.  
+Content ordering guarantees apply per article.
 They do **not** imply any guaranteed total order between:
 
 - two different articles
@@ -539,7 +560,7 @@ Recommended:
   - `:publish`
   - `:unpublish`
   - `:archive`
-  - `:restore`
+  - `:soft-delete`
 
 - treat repeated equivalent requests as the same logical outcome where feasible
 
@@ -558,7 +579,7 @@ Therefore the safe recovery path is:
 Async consumers must be idempotent because delivery is at-least-once:
 
 - dedupe by `MessageId`
-- reject stale apply by `(ArticleId, Version)` where ordering matters
+- reject stale apply by `ArticlePublicId + Version` / `AggregateId + Version` where ordering matters
 
 ### 7.4 Publishing resilience
 
@@ -600,7 +621,7 @@ Content-supported recovery workflows may:
 Even if SEO, notifications, route caches, or read projections lag:
 
 - the public read path MUST filter out non-public articles from Content truth or a truth-backed visibility check
-- derived stores must never re-expose unpublished content
+- derived stores must never re-expose articles no longer public after unpublish
 
 ### 8.2 Cause → effect ordering
 
@@ -625,7 +646,7 @@ Even if a slug or route resolves through a cache or derived path, the final publ
 
 ### 8.5 Derived freshness is an optimization, not a correctness boundary
 
-Fast route resolution, search/index visibility, or cache freshness are valuable.  
+Fast route resolution, search/index visibility, or cache freshness are valuable.
 They do not become authority for:
 
 - “is this article public?”
@@ -647,7 +668,7 @@ Retention:
 - retention/purge policy is defined at policy level
 - any purge must preserve auditability and governance requirements
 
-Revision history must not be rewritten to simulate “latest truth.”  
+Revision history must not be rewritten to simulate “latest truth.”
 Current truth and historical revision trail are separate concerns.
 
 ### 9.1 History and truth serve different purposes
@@ -746,7 +767,7 @@ Content correctness should instead be achieved through:
 
 ### 11.2 If future exclusive ownership is introduced
 
-If a future Content workflow truly requires one current owner for a task  
+If a future Content workflow truly requires one current owner for a task
 (for example strict scheduled publication ownership or one-current rebuild owner),
 that workflow must define:
 
@@ -777,7 +798,7 @@ Minimum signals:
   - `publish`
   - `unpublish`
   - `archive`
-  - `restore`
+  - `soft-delete`
   - `update`
 - outbox backlog/age for Content events
 - downstream consumer lag
@@ -800,7 +821,8 @@ Minimum signals:
 Log requirements:
 
 - propagate `correlationId` across sync action → Outbox event → consumers
-- include `ArticleId` and `Version` in key logs
+- include `ArticleId`, `ArticlePublicId`, and `Version` in key logs
+- include `MessageId` where async/outbox processing is involved
 - log replay/rebuild scope when bounded recovery runs are triggered
 - do not log sensitive content payloads unnecessarily
 
@@ -810,16 +832,16 @@ Log requirements:
 
 Content correctness in V1 rests on the following rules:
 
-1. Content truth owns visibility and lifecycle legality.  
-2. Lifecycle changes commit atomically with version + Outbox intent.  
-3. Side effects are eventual and must be idempotent.  
-4. Ordering is per article and protected by explicit versioning, not timestamps.  
-5. Stale confidence is rejected at the truth/resource boundary; safe fallback beats incorrect exposure.  
-6. Cause must be durable before effect becomes externally meaningful.  
-7. No global ordering or heterogeneous distributed transaction is assumed for Content workflows.  
-8. Content history is append-only by intent.  
-9. Content truth is the authoritative rebuild source for downstream derived systems.  
-10. Candidate derived output must be validated before publication when output correctness matters.  
-11. Replay, rerun, and duplicate delivery are normal and must remain safe under version-aware or deduplicated handling.  
-12. Singleton/ownership semantics are not relied on unless explicitly protected by authoritative generation/fencing rules.  
+1. Content truth owns visibility and lifecycle legality.
+2. Lifecycle changes commit atomically with version + Outbox intent.
+3. Side effects are eventual and must be idempotent.
+4. Ordering is per Article aggregate and protected by `ArticlePublicId + Version` / `AggregateId + Version`, not timestamps.
+5. Stale confidence is rejected at the truth/resource boundary; safe fallback beats incorrect exposure.
+6. Cause must be durable before effect becomes externally meaningful.
+7. No global ordering or heterogeneous distributed transaction is assumed for Content workflows.
+8. Content history is append-only by intent.
+9. Content truth is the authoritative rebuild source for downstream derived systems.
+10. Candidate derived output must be validated before publication when output correctness matters.
+11. Replay, rerun, and duplicate delivery are normal and must remain safe under version-aware or deduplicated handling.
+12. Singleton/ownership semantics are not relied on unless explicitly protected by authoritative generation/fencing rules.
 13. Derived freshness is useful, but never the authority for public visibility correctness.
