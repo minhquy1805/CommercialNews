@@ -18,6 +18,8 @@ Related:
 Content is the single source of truth for:
 
 - article lifecycle state
+- article public/cross-module identity (`ArticlePublicId`)
+- article soft-delete truth (`IsDeleted`)
 - public visibility truth
 - publish/unpublish reasons and timestamps
 - article body/metadata truth
@@ -28,7 +30,7 @@ Content is the single source of truth for:
 
 Content does **not** own:
 
-- routing truth outside Content-owned lifecycle/visibility truth
+- SEO slug registry / canonical routing truth
 - notification delivery truth
 - audit evidence truth
 - interaction aggregate truth
@@ -36,8 +38,10 @@ Content does **not** own:
 - search/index/projection truth in downstream modules
 - downstream cache/materialization truth
 
-**Rule:** Content owns whether an article is public.  
+**Rule:** Content owns whether an article is public.
 It does not automatically own every derived representation of that article.
+
+**Rule:** SEO may own slug/routing metadata, but slug resolution success does not override Content visibility truth.
 
 ---
 
@@ -74,7 +78,8 @@ Not approved:
 
 ### 2.2 Authorization boundary
 
-Authorization may enforce create/update/publish/unpublish/archive/restore policy synchronously.
+Authorization may enforce create/update/publish/unpublish/archive/soft-delete policy synchronously.
+Archived restore is out of scope for V1 unless a later lifecycle policy explicitly enables it.
 
 Authorization does **not** own Content lifecycle or visibility truth.
 
@@ -88,7 +93,7 @@ Content does **not** own media-object truth and must not widen its transaction b
 
 Reading may perform read-only access by explicit policy in V1.
 
-Reading does **not** own lifecycle truth or visibility legality.  
+Reading does **not** own lifecycle truth or visibility legality.
 Reading may serve or project public content, but its outputs remain subordinate to Content truth.
 
 ---
@@ -113,6 +118,8 @@ Reading may serve or project public content, but its outputs remain subordinate 
 Content owns:
 
 - lifecycle state
+- public/cross-module identity (`ArticlePublicId`)
+- soft-delete truth (`IsDeleted`)
 - visibility legality
 - lifecycle metadata
 - article body/metadata
@@ -174,16 +181,18 @@ Content does **not** own:
 
 Events such as:
 
-- `Content.ArticleCreated`
-- `Content.ArticleUpdated`
-- `Content.ArticlePublished`
-- `Content.ArticleUnpublished`
-- `Content.ArticleArchived`
-- `Content.ArticleRestored`
+- `content.article_created`
+- `content.article_updated`
+- `content.article_published`
+- `content.article_unpublished`
+- `content.article_archived`
+- `content.article_soft_deleted`
 
 exist to propagate committed truth.
 
 They do not become a competing source of truth against Content tables.
+
+`content.article_purged` is reserved for future physical retention/purge workflows and is out of scope for V1.
 
 ### 5.3 Event identity and ordering
 
@@ -192,15 +201,21 @@ Content owns the authoritative monotonic lifecycle version per article.
 Content-derived events should carry at minimum:
 
 - `MessageId`
-- `ArticleId` *(or aggregate id)*
-- `Version`
+- `EventType`
+- `AggregateType = Article`
+- `AggregateId = ArticlePublicId`
+- `ArticleId` in payload for internal SQL reference
+- `ArticlePublicId` in payload for public/cross-module reference
+- `Version = Article.Version`
 - `CorrelationId`
 - `OccurredAt`
 
 Downstream modules that consume Content-derived events must respect:
 
 - `MessageId` for dedupe
-- `(ArticleId, Version)` for stale-event rejection and ordering-sensitive apply logic
+- `ArticlePublicId + Version` / `AggregateId + Version` for stale-event rejection and ordering-sensitive apply logic
+
+`ArticleId` may appear in payloads for internal SQL convenience, but cross-module ordering/freshness must use `ArticlePublicId + Version` from the event envelope.
 
 But those downstream modules own their own:
 
@@ -298,7 +313,7 @@ over exposing possibly invalid derived visibility.
 
 ### 8.2 Truth-safe serving consequence
 
-A derived route, slug, cache entry, or search hit is never sufficient by itself to prove current public visibility.  
+A derived route, slug, cache entry, or search hit is never sufficient by itself to prove current public visibility.
 Final public visibility must remain consistent with Content truth.
 
 ---
@@ -351,9 +366,11 @@ Content may expect:
 Other modules may expect:
 
 - authoritative lifecycle/visibility truth
+- stable `ArticlePublicId` for public/cross-module identity
 - stable per-article version for ordering-sensitive downstream logic
 - bounded truth input for replay/rebuild/reconciliation
 - Outbox-emitted lifecycle events after truth commit
+- Article event envelope using `AggregateType = Article`, `AggregateId = ArticlePublicId`, and `Version = Article.Version`
 - stable `MessageId` on emitted Content events
 
 ### 10.3 What nobody may assume
@@ -363,6 +380,8 @@ No module may assume:
 - Content will synchronously finish downstream work
 - Content events arrive exactly once
 - Content events arrive globally ordered
+- slug/routing success means current public visibility
+- `ArticleId` is the public/cross-module identity
 - a derived serving artifact is safer than Content truth
 - replay/rebuild output can silently replace truth-owned decisions
 
