@@ -24,6 +24,7 @@
   - Index-heavy tuning belongs in 010_indexes.sql.
   - Stored procedures belong in 020_procs.sql.
   - Media remains cross-module; CoverMediaId is stored as nullable reference only.
+  - Category Slug is intentionally omitted in Content V1.
 */
 
 SET NOCOUNT ON;
@@ -92,7 +93,7 @@ BEGIN
         [DeletedAt]             DATETIME2(3)         NULL,
         [DeletedByUserId]       BIGINT               NULL,
 
-        [Version]               INT                  NOT NULL
+        [Version]               BIGINT               NOT NULL
             CONSTRAINT [DF_Category_Version] DEFAULT (1),
 
         CONSTRAINT [PK_Category]
@@ -189,7 +190,7 @@ BEGIN
         [DeletedAt]             DATETIME2(3)         NULL,
         [DeletedByUserId]       BIGINT               NULL,
 
-        [Version]               INT                  NOT NULL
+        [Version]               BIGINT               NOT NULL
             CONSTRAINT [DF_Tag_Version] DEFAULT (1),
 
         CONSTRAINT [PK_Tag]
@@ -260,7 +261,7 @@ BEGIN
         [AuthorUserId]          BIGINT               NOT NULL,
 
         [Title]                 NVARCHAR(300)        NOT NULL,
-        [Summary]               NVARCHAR(1000)       NULL,
+        [Summary]               NVARCHAR(1000)       NOT NULL,
         [Body]                  NVARCHAR(MAX)        NOT NULL,
 
         [Status]                NVARCHAR(30)         NOT NULL
@@ -277,7 +278,7 @@ BEGIN
         [UpdatedAt]             DATETIME2(3)         NOT NULL
             CONSTRAINT [DF_Article_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
 
-        [CreatedByUserId]       BIGINT               NULL,
+        [CreatedByUserId]       BIGINT               NOT NULL,
         [UpdatedByUserId]       BIGINT               NULL,
 
         [IsDeleted]             BIT                  NOT NULL
@@ -285,7 +286,7 @@ BEGIN
         [DeletedAt]             DATETIME2(3)         NULL,
         [DeletedByUserId]       BIGINT               NULL,
 
-        [Version]               INT                  NOT NULL
+        [Version]               BIGINT               NOT NULL
             CONSTRAINT [DF_Article_Version] DEFAULT (1),
 
         CONSTRAINT [PK_Article]
@@ -319,6 +320,9 @@ BEGIN
 
         CONSTRAINT [CK_Article_Title_NotBlank]
             CHECK (LEN(LTRIM(RTRIM([Title]))) > 0),
+
+        CONSTRAINT [CK_Article_Summary_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([Summary]))) > 0),
 
         CONSTRAINT [CK_Article_Body_NotBlank]
             CHECK (LEN(LTRIM(RTRIM([Body]))) > 0),
@@ -381,9 +385,9 @@ BEGIN
         [ArticleId]             BIGINT               NOT NULL,
         [TagId]                 BIGINT               NOT NULL,
 
-        [CreatedAt]             DATETIME2(3)         NOT NULL
-            CONSTRAINT [DF_ArticleTag_CreatedAt] DEFAULT (SYSUTCDATETIME()),
-        [CreatedByUserId]       BIGINT               NULL,
+        [AttachedAt]            DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_ArticleTag_AttachedAt] DEFAULT (SYSUTCDATETIME()),
+        [AttachedByUserId]      BIGINT               NULL,
 
         CONSTRAINT [PK_ArticleTag]
             PRIMARY KEY CLUSTERED ([ArticleId] ASC, [TagId] ASC),
@@ -396,8 +400,8 @@ BEGIN
             FOREIGN KEY ([TagId])
             REFERENCES [content].[Tag]([TagId]),
 
-        CONSTRAINT [FK_ArticleTag_CreatedByUser]
-            FOREIGN KEY ([CreatedByUserId])
+        CONSTRAINT [FK_ArticleTag_AttachedByUser]
+            FOREIGN KEY ([AttachedByUserId])
             REFERENCES [identity].[UserAccount]([UserId])
     );
 
@@ -422,14 +426,15 @@ BEGIN
         [EditedAt]              DATETIME2(3)         NOT NULL
             CONSTRAINT [DF_ArticleRevision_EditedAt] DEFAULT (SYSUTCDATETIME()),
         [EditedByUserId]        BIGINT               NOT NULL,
+
+        [ArticleVersion]        BIGINT               NULL,
+
         [CorrelationId]         NVARCHAR(100)        NULL,
         [ChangeSummary]         NVARCHAR(300)        NULL,
 
         [OldTitle]              NVARCHAR(300)        NULL,
         [OldSummary]            NVARCHAR(1000)       NULL,
         [OldBody]               NVARCHAR(MAX)        NULL,
-
-        [PatchJson]             NVARCHAR(MAX)        NULL,
 
         CONSTRAINT [PK_ArticleRevision]
             PRIMARY KEY CLUSTERED ([RevisionId] ASC),
@@ -442,12 +447,14 @@ BEGIN
             FOREIGN KEY ([EditedByUserId])
             REFERENCES [identity].[UserAccount]([UserId]),
 
-        CONSTRAINT [CK_ArticleRevision_HasOldValueOrPatch]
+        CONSTRAINT [CK_ArticleRevision_ArticleVersion_Positive]
+            CHECK ([ArticleVersion] IS NULL OR [ArticleVersion] > 0),
+
+        CONSTRAINT [CK_ArticleRevision_HasOldValue]
             CHECK (
                 [OldTitle] IS NOT NULL
                 OR [OldSummary] IS NOT NULL
                 OR [OldBody] IS NOT NULL
-                OR [PatchJson] IS NOT NULL
             )
     );
 
@@ -468,7 +475,7 @@ BEGIN
     (
         [EventId]                BIGINT IDENTITY(1,1) NOT NULL,
         [ArticleId]              BIGINT               NOT NULL,
-        [ArticleVersion]         INT                  NOT NULL,
+        [ArticleVersion]         BIGINT               NOT NULL,
 
         [ActionType]             NVARCHAR(30)         NOT NULL,
         [FromStatus]             NVARCHAR(30)         NULL,

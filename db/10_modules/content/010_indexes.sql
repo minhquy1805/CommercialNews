@@ -185,7 +185,7 @@ GO
    3) [content].[Article]
    ========================================================= */
 
-/* Public feed: latest published non-deleted articles */
+/* Truth-backed published article lookup for Reading/public-serving fallback */
 IF NOT EXISTS
 (
     SELECT 1
@@ -220,7 +220,7 @@ BEGIN
 END
 GO
 
-/* Category-specific public feed */
+/* Truth-backed category published article lookup for Reading/public-serving fallback */
 IF NOT EXISTS
 (
     SELECT 1
@@ -366,6 +366,43 @@ BEGIN
 END
 GO
 
+/* Admin list: publishedAt sorting across admin states */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_Article_Admin_IsDeleted_PublishedAt'
+      AND object_id = OBJECT_ID(N'[content].[Article]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_Article_Admin_IsDeleted_PublishedAt]
+    ON [content].[Article]
+    (
+        [IsDeleted] ASC,
+        [PublishedAt] DESC,
+        [ArticleId] DESC
+    )
+    INCLUDE
+    (
+        [ArticlePublicId],
+        [CategoryId],
+        [AuthorUserId],
+        [Status],
+        [Title],
+        [Summary],
+        [UpdatedAt],
+        [ArchivedAt],
+        [Version]
+    );
+
+    PRINT N'Created index: [IX_Article_Admin_IsDeleted_PublishedAt]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_Article_Admin_IsDeleted_PublishedAt]';
+END
+GO
+
 /* ArticlePublicId lookup */
 IF NOT EXISTS
 (
@@ -450,8 +487,8 @@ BEGIN
     )
     INCLUDE
     (
-        [CreatedAt],
-        [CreatedByUserId]
+        [AttachedAt],
+        [AttachedByUserId]
     );
 
     PRINT N'Created index: [IX_ArticleTag_TagId_ArticleId]';
@@ -467,23 +504,23 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_ArticleTag_ArticleId_CreatedAt'
+    WHERE name = N'IX_ArticleTag_ArticleId_AttachedAt'
       AND object_id = OBJECT_ID(N'[content].[ArticleTag]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_ArticleTag_ArticleId_CreatedAt]
+    CREATE NONCLUSTERED INDEX [IX_ArticleTag_ArticleId_AttachedAt]
     ON [content].[ArticleTag]
     (
         [ArticleId] ASC,
-        [CreatedAt] DESC,
+        [AttachedAt] DESC,
         [TagId] ASC
     );
 
-    PRINT N'Created index: [IX_ArticleTag_ArticleId_CreatedAt]';
+    PRINT N'Created index: [IX_ArticleTag_ArticleId_AttachedAt]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_ArticleTag_ArticleId_CreatedAt]';
+    PRINT N'Index exists: [IX_ArticleTag_ArticleId_AttachedAt]';
 END
 GO
 
@@ -519,6 +556,38 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [IX_ArticleRevision_ArticleId_EditedAt]';
+END
+GO
+
+/* Revision lookup by article version */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleRevision_ArticleId_ArticleVersion'
+      AND object_id = OBJECT_ID(N'[content].[ArticleRevision]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_ArticleRevision_ArticleId_ArticleVersion]
+    ON [content].[ArticleRevision]
+    (
+        [ArticleId] ASC,
+        [ArticleVersion] ASC
+    )
+    INCLUDE
+    (
+        [RevisionId],
+        [EditedAt],
+        [EditedByUserId],
+        [CorrelationId],
+        [ChangeSummary]
+    );
+
+    PRINT N'Created index: [IX_ArticleRevision_ArticleId_ArticleVersion]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_ArticleRevision_ArticleId_ArticleVersion]';
 END
 GO
 
