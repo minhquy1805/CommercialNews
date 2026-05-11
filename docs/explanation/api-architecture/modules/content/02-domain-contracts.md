@@ -13,7 +13,9 @@ Content is the source of truth for:
 
 Content is the canonical source of truth for:
 
-- whether an article is `Draft`, `Published`, `Unpublished`, or `Archived` according to current lifecycle policy
+- whether an article is `Draft`, `Published`, or `Archived` according to current lifecycle policy
+- whether an article is soft-deleted through `IsDeleted`
+- what the stable `ArticlePublicId` is
 - whether an article is publicly visible
 - which category an article belongs to
 - which tags are attached to an article
@@ -37,6 +39,8 @@ Content owns lifecycle and visibility truth for content objects.
 Other modules may react to committed Content truth, but they must not override it.
 Downstream projections, SEO, notifications, caches, or public-read models do not define article lifecycle or visibility truth.
 
+`ArticleId` is the internal SQL identity. `ArticlePublicId` is the stable public/cross-module identity and must be used where Content truth crosses module or public API boundaries.
+
 ---
 
 ## 2) Core entities (conceptual contract)
@@ -48,10 +52,12 @@ An `Article` represents the canonical content object managed by Content.
 **Fields**
 
 - `ArticleId`
+- `ArticlePublicId`
 - `Title`
 - `Summary`
 - `Body`
 - `Status`
+- `IsDeleted`
 - `AuthorUserId`
 - `CategoryId`
 - `CoverMediaId?`
@@ -61,12 +67,17 @@ An `Article` represents the canonical content object managed by Content.
 - `PublishedAt?`
 - `UnpublishedAt?`
 - `ArchivedAt?`
+- `DeletedAt?`
+- `DeletedBy?`
 
 **Notes**
 
+- `ArticleId` is internal storage identity.
+- `ArticlePublicId` is stable public/cross-module identity and should be used in event aggregate identity.
 - `Status` must remain aligned with the current lifecycle policy.
 - `CoverMediaId` is only a reference; Media owns media-object truth.
-- `Version` is the authoritative freshness/version marker for article truth where implemented.
+- `Version` is the authoritative freshness/version marker for article truth and per-aggregate event ordering.
+- public visibility requires `Status='Published' AND IsDeleted=0`.
 - public visibility is derived from current Content lifecycle truth, not from downstream read-model freshness.
 
 ### 2.2 Category
@@ -143,9 +154,35 @@ A `Tag` represents article tagging taxonomy owned by Content.
 
 **Notes**
 
-- revision storage may be snapshot-based, diff-based, or hybrid by ADR/policy
+- V1 stores the previous snapshot before a meaningful edit (`OldTitle`, `OldSummary`, `OldBody`)
+- revision storage may later become diff-based or hybrid by ADR/policy
 - revision history is historical evidence/content history
 - revision history does not replace current live article truth
+
+### 2.6 ArticleLifecycleEvent
+
+`ArticleLifecycleEvent` represents append-only governance history for publish, unpublish, archive, and soft-delete actions.
+
+**Fields**
+
+- `EventId`
+- `ArticleId`
+- `ArticleVersion`
+- `ActionType`
+- `FromStatus?`
+- `ToStatus?`
+- `Reason?`
+- `ActorUserId`
+- `OccurredAt`
+- `CorrelationId?`
+- `MetadataJson?`
+
+**Notes**
+
+- `ArticleLifecycleEvent` is append-only.
+- `ArticleVersion` must align with `Article.Version` and `OutboxMessage.Version`.
+- Unpublish requires `Reason`.
+- Soft-delete is recorded as an action; it is not a separate Article status.
 
 ---
 
@@ -153,37 +190,40 @@ A `Tag` represents article tagging taxonomy owned by Content.
 
 ### 3.1 Baseline lifecycle model
 
-Content V1 should use a clearly documented lifecycle model.
+Content V1 uses a small lifecycle model. Unpublish is an action, not a separate Article status.
 
-Recommended baseline states:
+V1 states:
 
 - `Draft`
 - `Published`
-- `Unpublished`
 - `Archived`
 
-If a simpler or alternate model is chosen by ADR, all API/status/event docs must remain aligned with that chosen truth model.
+Soft-delete is modeled separately with `IsDeleted=1`; it is not a status.
 
-### 3.2 Allowed transitions (baseline)
+### 3.2 Allowed transitions (V1)
 
-Recommended baseline transitions:
+Allowed V1 transitions:
 
 - `Draft -> Published`
-- `Published -> Unpublished`
-- `Unpublished -> Draft` or `Unpublished -> Published` according to policy
+- `Published -> Draft` *(Unpublish action)*
 - `Published -> Archived`
-- `Unpublished -> Archived`
-- `Archived -> Draft` *(recommended baseline restore posture)*
+- `Draft -> Archived` *(optional policy)*
+- `Archived -> no transitions in V1`
 
-If restore-to-published is allowed, that rule must be explicitly documented and version-safe.
+Archived restore is out of scope for V1 unless a later lifecycle policy explicitly enables `Archived -> Draft`.
 
 ### 3.3 Visibility invariant
 
+Public reads only expose:
+
+- `Status='Published' AND IsDeleted=0`
+
 Public read must never expose:
 
-- `Draft`
-- `Unpublished`
-- `Archived`
+- `Draft` articles
+- `Archived` articles
+- soft-deleted articles
+- any article whose Content visibility truth is uncertain
 
 Public visibility truth is determined by current Content truth, not by downstream public-read projection freshness.
 
@@ -199,13 +239,22 @@ Public visibility truth is determined by current Content truth, not by downstrea
 
 - archive must be a truth-bound lifecycle action
 - archive must remove public visibility immediately according to Content truth
-- restore semantics must remain aligned with the chosen lifecycle policy
+- restore is out of scope for V1 unless a later lifecycle policy explicitly enables `Archived -> Draft`
 - downstream lag must not re-expose archived content incorrectly
 
-### 3.6 Version / freshness invariant
+### 3.6 Soft-delete invariants
+
+- soft-delete sets `IsDeleted=1`; it is not physical deletion
+- soft-delete does not have to change `Status`
+- public visibility must stop immediately for soft-deleted articles
+- physical purge is out of scope for V1 and requires an explicit retention/admin policy
+
+### 3.7 Version / freshness invariant
 
 - article truth must advance version deterministically on meaningful content/lifecycle changes
 - stale writes must be rejected or resolved by documented optimistic concurrency policy
+- lifecycle events must store `ArticleVersion = Article.Version`
+- Outbox messages for Article events must carry `Version = Article.Version`
 - `UpdatedAt` alone must not be the sole freshness authority where version-based protection exists
 
 ---
@@ -249,7 +298,7 @@ Public visibility truth is determined by current Content truth, not by downstrea
 
 ## 6) Authorization and policy invariants
 
-- publish/unpublish/archive/restore actions must be protected by authorization policies
+- publish/unpublish/archive/soft-delete actions must be protected by authorization policies
 - category and tag mutation must be protected by authorization policies
 - edit/update rules must follow documented content policy:
   - draft-only updates
@@ -266,10 +315,13 @@ Content owns:
 
 - article lifecycle truth
 - article visibility truth
+- article public identity truth (`ArticlePublicId`)
+- article soft-delete truth (`IsDeleted`)
 - article body/metadata truth
 - article taxonomy references
 - article-tag attachment truth
 - revision history truth
+- lifecycle event truth
 
 ### 7.2 Derived outputs not owned as truth
 
@@ -288,8 +340,9 @@ These may lag, be rebuilt, or be replayed, but they do not become Content truth.
 
 Downstream lag must not:
 
-- make unpublished content appear public
+- make draft, archived, or soft-deleted content appear public
 - keep archived content visible
+- keep soft-deleted content visible
 - hide already-published content on a truth-critical admin confirmation path
 - redefine current lifecycle truth
 
@@ -297,46 +350,60 @@ Downstream lag must not:
 
 ## 8) Domain events (for async side effects)
 
-Content emits minimal, privacy-aware events through the standard post-commit async path.
+Content records minimal, privacy-aware events through the required Outbox path for async side effects.
 
 ### 8.1 Event identity and posture
 
 Async Content events must:
 
-- be emitted only after Content truth commits
+- be represented by an `OutboxMessage` committed atomically with Content truth
 - carry stable `MessageId`
 - include `CorrelationId` where available
+- use `AggregateType = Article`, `AggregateId = ArticlePublicId`, and `Version = Article.Version` for Article events
 - be safe under duplicate delivery, replay, and delay
 - remain minimal and privacy-aware
 
 ### 8.2 Typical V1 events
 
-- `Content.ArticleCreated`
-- `Content.ArticleUpdated`
-- `Content.ArticlePublished`
-- `Content.ArticleUnpublished`
-- `Content.ArticleArchived` *(optional if lifecycle enables it)*
-- `Content.ArticleRestored` *(optional if lifecycle enables it)*
-- `Content.ArticleDeleted` or `Content.ArticleSoftDeleted` *(only if such lifecycle exists)*
-- `Content.CategoryCreated` *(optional)*
-- `Content.CategoryUpdated` *(optional)*
-- `Content.CategoryDeleted` *(optional)*
-- `Content.TagCreated` *(optional)*
-- `Content.TagUpdated` *(optional)*
-- `Content.TagDeleted` *(optional)*
+Article events emitted by V1 Phase 1:
+
+- `content.article_created`
+- `content.article_updated`
+- `content.article_published`
+- `content.article_unpublished`
+- `content.article_archived`
+- `content.article_soft_deleted`
+
+Reserved event names for later phases:
+
+- `content.article_purged`
+- `content.category_created`
+- `content.category_updated`
+- `content.category_soft_deleted`
+- `content.tag_created`
+- `content.tag_updated`
+- `content.tag_soft_deleted`
 
 ### 8.3 Event payload rules
 
 Payloads must be minimal and privacy-aware.
 
+Article event envelope:
+
+- `AggregateType = Article`
+- `AggregateId = ArticlePublicId`
+- `Version = Article.Version`
+
 Typical payload examples:
 
-- `Content.ArticlePublished`
-  - `{ ArticleId, PublishedAt, Version }`
-- `Content.ArticleUnpublished`
-  - `{ ArticleId, Reason, UnpublishedAt, Version }`
-- `Content.ArticleArchived`
-  - `{ ArticleId, ArchivedAt, Version }`
+- `content.article_published`
+  - `{ ArticleId, ArticlePublicId, PublishedAt, Version }`
+- `content.article_unpublished`
+  - `{ ArticleId, ArticlePublicId, Reason, UnpublishedAt, Version }`
+- `content.article_archived`
+  - `{ ArticleId, ArticlePublicId, ArchivedAt, Version }`
+- `content.article_soft_deleted`
+  - `{ ArticleId, ArticlePublicId, IsDeleted, DeletedAt, Version }`
 
 Payloads should include only the minimum necessary data needed by downstream consumers.
 
@@ -369,7 +436,7 @@ Content truth remains the authoritative rebuild source.
 For content-changing operations, success means:
 
 - Content truth committed successfully
-- async intent/outbox committed where applicable
+- required async intent/outbox committed for operations that emit Article integration events
 
 Write success does **not** guarantee that:
 
@@ -399,9 +466,8 @@ V1 includes:
 
 V1 may optionally include:
 
-- archive / restore
 - detailed revision diff views
-- soft delete flows
+- category/tag soft-delete flows
 - richer taxonomy lifecycle
 
 V1 does not require:
@@ -410,5 +476,7 @@ V1 does not require:
 - synchronous notification delivery
 - synchronous search indexing
 - public read APIs inside Content
+- archived article restore
+- physical purge
 
-Public read remains owned by Reading, but must follow committed Content truth.
+Public read remains owned by Reading, but must follow committed Content truth or a truth-safe projection that cannot expose non-public articles.
