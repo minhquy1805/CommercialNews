@@ -3,50 +3,47 @@ using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Models.QueryModels;
 using Content.Application.Ports.Persistence;
 
-namespace Content.Application.UseCases.Tags.GetTags
+namespace Content.Application.UseCases.Tags.GetTags;
+
+public sealed class GetTagsUseCase : IGetTagsUseCase
 {
-    public sealed class GetTagsUseCase : IGetTagsUseCase
+    private const int DefaultPage = 1;
+    private const int DefaultPageSize = 20;
+    private const int MaxPageSize = 100;
+
+    private readonly ITagRepository _tagRepository;
+
+    public GetTagsUseCase(ITagRepository tagRepository)
     {
-        private readonly ITagRepository _tagRepository;
+        _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
+    }
 
-        public GetTagsUseCase(ITagRepository tagRepository)
+    public async Task<Result<PagedQueryResult<TagListResultItem>>> ExecuteAsync(
+        TagListQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var safeQuery = new TagListQuery
         {
-            _tagRepository = tagRepository;
-        }
+            Page = query.Page <= 0 ? DefaultPage : query.Page,
+            PageSize = query.PageSize <= 0
+                ? DefaultPageSize
+                : Math.Min(query.PageSize, MaxPageSize),
+            Keyword = string.IsNullOrWhiteSpace(query.Keyword)
+                ? null
+                : query.Keyword.Trim(),
+            IsActive = query.IsActive,
+            IsDeleted = query.IsDeleted,
+            Sort = string.IsNullOrWhiteSpace(query.Sort)
+                ? "name"
+                : query.Sort.Trim()
+        };
 
-        public async Task<Result<PagedQueryResult<TagListResultItem>>> ExecuteAsync(
-            TagListQuery query,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(query);
+        var result = await _tagRepository.GetPagedAsync(
+            safeQuery,
+            cancellationToken);
 
-            int safePage = query.Page <= 0 ? 1 : query.Page;
-            int safePageSize = query.PageSize <= 0 ? 20 : query.PageSize;
-
-            if (safePageSize > 200)
-            {
-                safePageSize = 200;
-            }
-
-            var safeQuery = new TagListQuery
-            {
-                Page = safePage,
-                PageSize = safePageSize,
-                Keyword = string.IsNullOrWhiteSpace(query.Keyword)
-                    ? null
-                    : query.Keyword.Trim(),
-                IsActive = query.IsActive,
-                IsDeleted = query.IsDeleted,
-                Sort = string.IsNullOrWhiteSpace(query.Sort)
-                    ? "name"
-                    : query.Sort.Trim()
-            };
-
-            var result = await _tagRepository.SelectSkipAndTakeAsync(
-                safeQuery,
-                cancellationToken);
-
-            return Result<PagedQueryResult<TagListResultItem>>.Success(result);
-        }
+        return Result<PagedQueryResult<TagListResultItem>>.Success(result);
     }
 }

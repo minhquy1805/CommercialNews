@@ -2,11 +2,11 @@ using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 
-namespace Content.Application.UseCases.Tags.GetTagById;
+namespace Content.Application.UseCases.Tags.SoftDeleteTag;
 
-public interface IGetTagByIdUseCase
+public interface ISoftDeleteTagUseCase
 {
-    Task<Result<GetTagByIdResponseDto>> ExecuteAsync(
-        GetTagByIdRequestDto request,
+    Task<Result<SoftDeleteTagResponseDto>> ExecuteAsync(
+        SoftDeleteTagRequestDto request,
         CancellationToken cancellationToken = default);
 }
