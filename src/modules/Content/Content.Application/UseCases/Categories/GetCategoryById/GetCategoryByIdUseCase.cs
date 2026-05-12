@@ -4,38 +4,39 @@ using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
 
-namespace Content.Application.UseCases.Categories.GetCategoryById
-{
-    public sealed class GetCategoryByIdUseCase : IGetCategoryByIdUseCase
-    {
-        private readonly ICategoryRepository _categoryRepository;
+namespace Content.Application.UseCases.Categories.GetCategoryById;
 
-        public GetCategoryByIdUseCase(ICategoryRepository categoryRepository)
+public sealed class GetCategoryByIdUseCase : IGetCategoryByIdUseCase
+{
+    private readonly ICategoryRepository _categoryRepository;
+
+    public GetCategoryByIdUseCase(ICategoryRepository categoryRepository)
+    {
+        _categoryRepository = categoryRepository ?? throw new ArgumentNullException(nameof(categoryRepository));
+    }
+
+    public async Task<Result<GetCategoryByIdResponseDto>> ExecuteAsync(
+        GetCategoryByIdRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.CategoryId <= 0)
         {
-            _categoryRepository = categoryRepository;
+            return Result<GetCategoryByIdResponseDto>.Failure(
+                ContentErrors.Category.InvalidCategoryId);
         }
 
-        public async Task<Result<GetCategoryByIdResponseDto>> ExecuteAsync(
-            GetCategoryByIdRequestDto request,
-            CancellationToken cancellationToken = default)
+        var category = await _categoryRepository.GetByIdAsync(
+            request.CategoryId,
+            cancellationToken);
+
+        if (category is null)
         {
-            if (request.CategoryId <= 0)
-            {
-                return Result<GetCategoryByIdResponseDto>.Failure(
-                    ContentErrors.Category.InvalidCategoryId);
-            }
+            return Result<GetCategoryByIdResponseDto>.Failure(
+                ContentErrors.Category.NotFound);
+        }
 
-            var category = await _categoryRepository.GetByIdAsync(
-                request.CategoryId,
-                cancellationToken);
-
-            if (category is null)
-            {
-                return Result<GetCategoryByIdResponseDto>.Failure(
-                    ContentErrors.Category.NotFound);
-            }
-
-            var response = new GetCategoryByIdResponseDto
+        return Result<GetCategoryByIdResponseDto>.Success(
+            new GetCategoryByIdResponseDto
             {
                 CategoryId = category.CategoryId,
                 PublicId = category.PublicId,
@@ -50,9 +51,6 @@ namespace Content.Application.UseCases.Categories.GetCategoryById
                 CreatedAt = category.CreatedAt,
                 UpdatedAt = category.UpdatedAt,
                 DeletedAt = category.DeletedAt
-            };
-
-            return Result<GetCategoryByIdResponseDto>.Success(response);
-        }
+            });
     }
 }
