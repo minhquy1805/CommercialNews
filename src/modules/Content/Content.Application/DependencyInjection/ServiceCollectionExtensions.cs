@@ -10,10 +10,10 @@ using Content.Application.UseCases.Articles.RestoreArticle;
 using Content.Application.UseCases.Articles.UnpublishArticle;
 using Content.Application.UseCases.Articles.UpdateArticle;
 using Content.Application.UseCases.Categories.CreateCategory;
-using Content.Application.UseCases.Categories.DeleteCategory;
 using Content.Application.UseCases.Categories.GetCategories;
 using Content.Application.UseCases.Categories.GetCategoryById;
 using Content.Application.UseCases.Categories.RestoreCategory;
+using Content.Application.UseCases.Categories.SoftDeleteCategory;
 using Content.Application.UseCases.Categories.UpdateCategory;
 using Content.Application.UseCases.Tags.CreateTag;
 using Content.Application.UseCases.Tags.DeleteTag;
@@ -47,7 +47,7 @@ namespace Content.Application.DependencyInjection
             services.AddScoped<IGetCategoryByIdUseCase, GetCategoryByIdUseCase>();
             services.AddScoped<IGetCategoriesUseCase, GetCategoriesUseCase>();
             services.AddScoped<IUpdateCategoryUseCase, UpdateCategoryUseCase>();
-            services.AddScoped<IDeleteCategoryUseCase, DeleteCategoryUseCase>();
+            services.AddScoped<ISoftDeleteCategoryUseCase, SoftDeleteCategoryUseCase>();
             services.AddScoped<IRestoreCategoryUseCase, RestoreCategoryUseCase>();
 
             services.AddScoped<ICreateTagUseCase, CreateTagUseCase>();

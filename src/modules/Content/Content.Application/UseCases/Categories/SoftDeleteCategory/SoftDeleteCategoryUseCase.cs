@@ -8,15 +8,15 @@ using Content.Application.Ports.Persistence;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
 
-namespace Content.Application.UseCases.Categories.RestoreCategory;
+namespace Content.Application.UseCases.Categories.SoftDeleteCategory;
 
-public sealed class RestoreCategoryUseCase : IRestoreCategoryUseCase
+public sealed class SoftDeleteCategoryUseCase : ISoftDeleteCategoryUseCase
 {
     private readonly ICategoryRepository _categoryRepository;
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
 
-    public RestoreCategoryUseCase(
+    public SoftDeleteCategoryUseCase(
         ICategoryRepository categoryRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider)
@@ -26,19 +26,19 @@ public sealed class RestoreCategoryUseCase : IRestoreCategoryUseCase
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
     }
 
-    public async Task<Result<RestoreCategoryResponseDto>> ExecuteAsync(
-        RestoreCategoryRequestDto request,
+    public async Task<Result<SoftDeleteCategoryResponseDto>> ExecuteAsync(
+        SoftDeleteCategoryRequestDto request,
         CancellationToken cancellationToken = default)
     {
         if (request.CategoryId <= 0)
         {
-            return Result<RestoreCategoryResponseDto>.Failure(
+            return Result<SoftDeleteCategoryResponseDto>.Failure(
                 ContentErrors.Category.InvalidCategoryId);
         }
 
         if (request.ExpectedVersion <= 0)
         {
-            return Result<RestoreCategoryResponseDto>.Failure(
+            return Result<SoftDeleteCategoryResponseDto>.Failure(
                 ContentErrors.Category.InvalidVersion);
         }
 
@@ -48,60 +48,61 @@ public sealed class RestoreCategoryUseCase : IRestoreCategoryUseCase
 
         if (category is null)
         {
-            return Result<RestoreCategoryResponseDto>.Failure(
+            return Result<SoftDeleteCategoryResponseDto>.Failure(
                 ContentErrors.Category.NotFound);
         }
 
         if (category.Version != request.ExpectedVersion)
         {
-            return Result<RestoreCategoryResponseDto>.Failure(
+            return Result<SoftDeleteCategoryResponseDto>.Failure(
                 ContentErrors.ConcurrencyConflict);
         }
 
         try
         {
-            category.Restore(
+            category.SoftDelete(
                 nowUtc: _dateTimeProvider.UtcNow,
                 actorUserId: request.ActorUserId);
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            Category? restoredCategory = await _categoryRepository.RestoreAsync(
+            Category? softDeletedCategory = await _categoryRepository.SoftDeleteAsync(
                 categoryId: request.CategoryId,
-                updatedByUserId: request.ActorUserId,
+                deletedByUserId: request.ActorUserId,
                 expectedVersion: request.ExpectedVersion,
                 cancellationToken: cancellationToken);
 
-            if (restoredCategory is null)
+            if (softDeletedCategory is null)
             {
                 await _unitOfWork.RollbackAsync(cancellationToken);
 
-                return Result<RestoreCategoryResponseDto>.Failure(
+                return Result<SoftDeleteCategoryResponseDto>.Failure(
                     ContentErrors.ConcurrencyConflict);
             }
 
             await _unitOfWork.CommitAsync(cancellationToken);
 
-            return Result<RestoreCategoryResponseDto>.Success(
-                new RestoreCategoryResponseDto
+            return Result<SoftDeleteCategoryResponseDto>.Success(
+                new SoftDeleteCategoryResponseDto
                 {
-                    CategoryId = restoredCategory.CategoryId,
-                    IsDeleted = restoredCategory.IsDeleted,
-                    IsActive = restoredCategory.IsActive,
-                    Version = restoredCategory.Version,
-                    UpdatedAt = restoredCategory.UpdatedAt
+                    CategoryId = softDeletedCategory.CategoryId,
+                    IsDeleted = softDeletedCategory.IsDeleted,
+                    IsActive = softDeletedCategory.IsActive,
+                    Version = softDeletedCategory.Version,
+                    UpdatedAt = softDeletedCategory.UpdatedAt,
+                    DeletedAt = softDeletedCategory.DeletedAt
                 });
         }
         catch (PersistenceException exception)
         {
             await RollbackIfNeededAsync(cancellationToken);
 
-            return Result<RestoreCategoryResponseDto>.Failure(
+            return Result<SoftDeleteCategoryResponseDto>.Failure(
                 MapPersistenceException(exception));
         }
         catch (ContentDomainException exception)
         {
-            return Result<RestoreCategoryResponseDto>.Failure(
+            return Result<SoftDeleteCategoryResponseDto>.Failure(
                 MapDomainException(exception));
         }
     }
@@ -118,7 +119,7 @@ public sealed class RestoreCategoryUseCase : IRestoreCategoryUseCase
     {
         return exception.Code switch
         {
-            "CONTENT.CATEGORY_NOT_DELETED" => ContentErrors.Category.NotDeleted,
+            "CONTENT.CATEGORY_ALREADY_DELETED" => ContentErrors.Category.AlreadyDeleted,
             _ => ContentErrors.ValidationFailed
         };
     }
@@ -128,6 +129,7 @@ public sealed class RestoreCategoryUseCase : IRestoreCategoryUseCase
         return exception.Code switch
         {
             "CONTENT.CONCURRENCY_CONFLICT" => ContentErrors.ConcurrencyConflict,
+            "CONTENT.CATEGORY_DELETE_BLOCKED_BY_ARTICLES" => ContentErrors.Category.DeleteBlockedByArticles,
             _ => ContentErrors.WriteCommitFailed
         };
     }

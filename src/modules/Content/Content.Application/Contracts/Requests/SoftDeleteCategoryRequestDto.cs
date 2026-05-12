@@ -1,6 +1,6 @@
 namespace Content.Application.Contracts.Requests;
 
-public sealed class RestoreCategoryRequestDto
+public sealed class SoftDeleteCategoryRequestDto
 {
     public long CategoryId { get; init; }
 
