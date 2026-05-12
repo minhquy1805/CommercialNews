@@ -1,3 +1,5 @@
+using Content.Domain.Exceptions;
+
 namespace Content.Domain.Constants;
 
 public static class ArticleStatuses
@@ -20,6 +22,37 @@ public static class ArticleStatuses
             return false;
         }
 
-        return All.Contains(value);
+        return All.Contains(value.Trim());
+    }
+
+    public static string Normalize(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ContentDomainException(
+                "CONTENT.ARTICLE_INVALID_STATUS",
+                "Article status is invalid.");
+        }
+
+        string trimmed = value.Trim();
+
+        if (string.Equals(trimmed, Draft, StringComparison.OrdinalIgnoreCase))
+        {
+            return Draft;
+        }
+
+        if (string.Equals(trimmed, Published, StringComparison.OrdinalIgnoreCase))
+        {
+            return Published;
+        }
+
+        if (string.Equals(trimmed, Archived, StringComparison.OrdinalIgnoreCase))
+        {
+            return Archived;
+        }
+
+        throw new ContentDomainException(
+            "CONTENT.ARTICLE_INVALID_STATUS",
+            "Article status is invalid.");
     }
 }

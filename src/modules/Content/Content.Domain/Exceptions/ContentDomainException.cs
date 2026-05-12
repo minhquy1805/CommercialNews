@@ -7,22 +7,22 @@ public sealed class ContentDomainException : Exception
     public ContentDomainException(string code, string message)
         : base(message)
     {
-        if (string.IsNullOrWhiteSpace(code))
-        {
-            throw new ArgumentException("Exception code is required.", nameof(code));
-        }
-
-        Code = code;
+        Code = ValidateCode(code);
     }
 
     public ContentDomainException(string code, string message, Exception innerException)
         : base(message, innerException)
+    {
+        Code = ValidateCode(code);
+    }
+
+    private static string ValidateCode(string code)
     {
         if (string.IsNullOrWhiteSpace(code))
         {
             throw new ArgumentException("Exception code is required.", nameof(code));
         }
 
-        Code = code;
+        return code;
     }
 }

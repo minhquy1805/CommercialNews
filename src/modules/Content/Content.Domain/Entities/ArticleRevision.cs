@@ -1,14 +1,11 @@
+using Content.Domain.Common;
+using Content.Domain.Constants;
 using Content.Domain.Exceptions;
 
 namespace Content.Domain.Entities
 {
     public sealed class ArticleRevision
     {
-        private const int CorrelationIdMaxLength = 100;
-        private const int ChangeSummaryMaxLength = 300;
-        private const int TitleMaxLength = 300;
-        private const int SummaryMaxLength = 1000;
-
         private ArticleRevision(
             long revisionId,
             long articleId,
@@ -72,11 +69,22 @@ namespace Content.Domain.Entities
             ValidateArticleId(articleId);
             ValidateEditedByUserId(editedByUserId);
             ValidateArticleVersion(articleVersion);
-            ValidateCorrelationId(correlationId);
-            ValidateChangeSummary(changeSummary);
-            ValidateOldTitle(oldTitle);
-            ValidateOldSummary(oldSummary);
-            ValidatePreviousSnapshot(oldTitle, oldSummary, oldBody);
+            ValidateEditedAt(nowUtc);
+
+            string? normalizedCorrelationId = ContentText.NormalizeOptional(correlationId);
+            string? normalizedChangeSummary = ContentText.NormalizeOptional(changeSummary);
+            string? normalizedOldTitle = ContentText.NormalizeOptional(oldTitle);
+            string? normalizedOldSummary = ContentText.NormalizeOptional(oldSummary);
+            string? normalizedOldBody = ContentText.NormalizeOptional(oldBody);
+
+            ValidateCorrelationId(normalizedCorrelationId);
+            ValidateChangeSummary(normalizedChangeSummary);
+            ValidateOldTitle(normalizedOldTitle);
+            ValidateOldSummary(normalizedOldSummary);
+            ValidatePreviousSnapshot(
+                normalizedOldTitle,
+                normalizedOldSummary,
+                normalizedOldBody);
 
             return new ArticleRevision(
                 revisionId: 0,
@@ -84,11 +92,11 @@ namespace Content.Domain.Entities
                 editedAt: nowUtc,
                 editedByUserId: editedByUserId,
                 articleVersion: articleVersion,
-                correlationId: NormalizeOptional(correlationId),
-                changeSummary: NormalizeOptional(changeSummary),
-                oldTitle: NormalizeOptional(oldTitle),
-                oldSummary: NormalizeOptional(oldSummary),
-                oldBody: NormalizeOptional(oldBody));
+                correlationId: normalizedCorrelationId,
+                changeSummary: normalizedChangeSummary,
+                oldTitle: normalizedOldTitle,
+                oldSummary: normalizedOldSummary,
+                oldBody: normalizedOldBody);
         }
 
         public static ArticleRevision Rehydrate(
@@ -103,21 +111,30 @@ namespace Content.Domain.Entities
             string? oldSummary,
             string? oldBody)
         {
-            if (revisionId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_REVISION_INVALID_REVISION_ID",
-                    "Revision id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                revisionId,
+                "CONTENT.ARTICLE_REVISION_INVALID_REVISION_ID",
+                "Revision id must be greater than zero.");
 
             ValidateArticleId(articleId);
             ValidateEditedByUserId(editedByUserId);
             ValidateArticleVersion(articleVersion);
-            ValidateCorrelationId(correlationId);
-            ValidateChangeSummary(changeSummary);
-            ValidateOldTitle(oldTitle);
-            ValidateOldSummary(oldSummary);
-            ValidatePreviousSnapshot(oldTitle, oldSummary, oldBody);
+            ValidateEditedAt(editedAt);
+
+            string? normalizedCorrelationId = ContentText.NormalizeOptional(correlationId);
+            string? normalizedChangeSummary = ContentText.NormalizeOptional(changeSummary);
+            string? normalizedOldTitle = ContentText.NormalizeOptional(oldTitle);
+            string? normalizedOldSummary = ContentText.NormalizeOptional(oldSummary);
+            string? normalizedOldBody = ContentText.NormalizeOptional(oldBody);
+
+            ValidateCorrelationId(normalizedCorrelationId);
+            ValidateChangeSummary(normalizedChangeSummary);
+            ValidateOldTitle(normalizedOldTitle);
+            ValidateOldSummary(normalizedOldSummary);
+            ValidatePreviousSnapshot(
+                normalizedOldTitle,
+                normalizedOldSummary,
+                normalizedOldBody);
 
             return new ArticleRevision(
                 revisionId: revisionId,
@@ -125,85 +142,79 @@ namespace Content.Domain.Entities
                 editedAt: editedAt,
                 editedByUserId: editedByUserId,
                 articleVersion: articleVersion,
-                correlationId: NormalizeOptional(correlationId),
-                changeSummary: NormalizeOptional(changeSummary),
-                oldTitle: NormalizeOptional(oldTitle),
-                oldSummary: NormalizeOptional(oldSummary),
-                oldBody: NormalizeOptional(oldBody));
+                correlationId: normalizedCorrelationId,
+                changeSummary: normalizedChangeSummary,
+                oldTitle: normalizedOldTitle,
+                oldSummary: normalizedOldSummary,
+                oldBody: normalizedOldBody);
         }
 
         private static void ValidateArticleId(long articleId)
         {
-            if (articleId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_REVISION_INVALID_ARTICLE_ID",
-                    "Article id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                articleId,
+                "CONTENT.ARTICLE_REVISION_INVALID_ARTICLE_ID",
+                "Article id must be greater than zero.");
         }
 
         private static void ValidateEditedByUserId(long editedByUserId)
         {
-            if (editedByUserId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_REVISION_INVALID_EDITOR_USER_ID",
-                    "Edited by user id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                editedByUserId,
+                "CONTENT.ARTICLE_REVISION_INVALID_EDITOR_USER_ID",
+                "Edited by user id must be greater than zero.");
         }
 
         private static void ValidateArticleVersion(long? articleVersion)
         {
-            if (articleVersion.HasValue && articleVersion.Value <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_REVISION_INVALID_ARTICLE_VERSION",
-                    "Article version must be greater than zero when provided.");
-            }
+            ContentGuard.AgainstInvalidOptionalVersion(
+                articleVersion,
+                "CONTENT.ARTICLE_REVISION_INVALID_ARTICLE_VERSION",
+                "Article version must be greater than zero when provided.");
+        }
+
+        private static void ValidateEditedAt(DateTime editedAt)
+        {
+            ContentGuard.AgainstDefaultDateTime(
+                editedAt,
+                "CONTENT.ARTICLE_REVISION_INVALID_EDITED_AT",
+                "Edited time is required.");
         }
 
         private static void ValidateCorrelationId(string? correlationId)
         {
-            if (correlationId is not null &&
-                correlationId.Trim().Length > CorrelationIdMaxLength)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_REVISION_CORRELATION_ID_TOO_LONG",
-                    $"Correlation id must not exceed {CorrelationIdMaxLength} characters.");
-            }
+            ContentGuard.AgainstTooLong(
+                correlationId,
+                ContentFieldLimits.CorrelationIdMaxLength,
+                "CONTENT.ARTICLE_REVISION_CORRELATION_ID_TOO_LONG",
+                $"Correlation id must not exceed {ContentFieldLimits.CorrelationIdMaxLength} characters.");
         }
 
         private static void ValidateChangeSummary(string? changeSummary)
         {
-            if (changeSummary is not null &&
-                changeSummary.Trim().Length > ChangeSummaryMaxLength)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_REVISION_CHANGE_SUMMARY_TOO_LONG",
-                    $"Change summary must not exceed {ChangeSummaryMaxLength} characters.");
-            }
+            ContentGuard.AgainstTooLong(
+                changeSummary,
+                ContentFieldLimits.ChangeSummaryMaxLength,
+                "CONTENT.ARTICLE_REVISION_CHANGE_SUMMARY_TOO_LONG",
+                $"Change summary must not exceed {ContentFieldLimits.ChangeSummaryMaxLength} characters.");
         }
 
         private static void ValidateOldTitle(string? oldTitle)
         {
-            if (oldTitle is not null &&
-                oldTitle.Trim().Length > TitleMaxLength)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_REVISION_OLD_TITLE_TOO_LONG",
-                    $"Old title must not exceed {TitleMaxLength} characters.");
-            }
+            ContentGuard.AgainstTooLong(
+                oldTitle,
+                ContentFieldLimits.ArticleTitleMaxLength,
+                "CONTENT.ARTICLE_REVISION_OLD_TITLE_TOO_LONG",
+                $"Old title must not exceed {ContentFieldLimits.ArticleTitleMaxLength} characters.");
         }
 
         private static void ValidateOldSummary(string? oldSummary)
         {
-            if (oldSummary is not null &&
-                oldSummary.Trim().Length > SummaryMaxLength)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_REVISION_OLD_SUMMARY_TOO_LONG",
-                    $"Old summary must not exceed {SummaryMaxLength} characters.");
-            }
+            ContentGuard.AgainstTooLong(
+                oldSummary,
+                ContentFieldLimits.ArticleSummaryMaxLength,
+                "CONTENT.ARTICLE_REVISION_OLD_SUMMARY_TOO_LONG",
+                $"Old summary must not exceed {ContentFieldLimits.ArticleSummaryMaxLength} characters.");
         }
 
         private static void ValidatePreviousSnapshot(
@@ -219,13 +230,6 @@ namespace Content.Domain.Entities
                     "CONTENT.ARTICLE_REVISION_PREVIOUS_SNAPSHOT_REQUIRED",
                     "Article revision requires at least one previous value.");
             }
-        }
-
-        private static string? NormalizeOptional(string? value)
-        {
-            return string.IsNullOrWhiteSpace(value)
-                ? null
-                : value.Trim();
         }
     }
 }
