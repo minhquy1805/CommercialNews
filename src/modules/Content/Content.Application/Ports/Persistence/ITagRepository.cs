@@ -6,11 +6,28 @@ namespace Content.Application.Ports.Persistence
 {
     public interface ITagRepository
     {
+        Task<bool> ExistsByIdAsync(
+            long tagId,
+            CancellationToken cancellationToken = default);
+
+        Task<bool> ExistsActiveByIdAsync(
+            long tagId,
+            CancellationToken cancellationToken = default);
+
+        Task<bool> ExistsByNameNormalizedAsync(
+            string nameNormalized,
+            long? excludingTagId = null,
+            CancellationToken cancellationToken = default);
+
         Task<Tag?> GetByIdAsync(
             long tagId,
             CancellationToken cancellationToken = default);
 
-        Task<PagedQueryResult<TagListResultItem>> SelectSkipAndTakeAsync(
+        Task<IReadOnlyList<Tag>> GetAllAsync(
+            bool includeDeleted = false,
+            CancellationToken cancellationToken = default);
+
+        Task<PagedQueryResult<TagListResultItem>> GetPagedAsync(
             TagListQuery query,
             CancellationToken cancellationToken = default);
 
@@ -20,19 +37,19 @@ namespace Content.Application.Ports.Persistence
 
         Task<Tag?> UpdateAsync(
             Tag tag,
-            int expectedVersion,
+            long expectedVersion,
             CancellationToken cancellationToken = default);
 
         Task<Tag?> SoftDeleteAsync(
             long tagId,
             long? deletedByUserId,
-            int expectedVersion,
+            long expectedVersion,
             CancellationToken cancellationToken = default);
 
         Task<Tag?> RestoreAsync(
             long tagId,
             long? updatedByUserId,
-            int expectedVersion,
+            long expectedVersion,
             CancellationToken cancellationToken = default);
     }
 }
