@@ -1,9 +1,10 @@
+using Content.Domain.Common;
 using Content.Domain.Constants;
 using Content.Domain.Exceptions;
 
 namespace Content.Domain.Entities;
 
-public sealed class Article
+public sealed class Article : ContentSoftDeletableEntity
 {
     public long ArticleId { get; private set; }
 
@@ -29,22 +30,6 @@ public sealed class Article
 
     public long? CoverMediaId { get; private set; }
 
-    public DateTime CreatedAt { get; private set; }
-
-    public DateTime UpdatedAt { get; private set; }
-
-    public long CreatedByUserId { get; private set; }
-
-    public long? UpdatedByUserId { get; private set; }
-
-    public bool IsDeleted { get; private set; }
-
-    public DateTime? DeletedAt { get; private set; }
-
-    public long? DeletedByUserId { get; private set; }
-
-    public long Version { get; private set; }
-
     private Article()
     {
     }
@@ -55,7 +40,27 @@ public sealed class Article
 
     public bool IsArchived => Status == ArticleStatuses.Archived;
 
-    public bool IsPubliclyVisible => Status == ArticleStatuses.Published && !IsDeleted;
+    public bool IsPubliclyVisible => IsPublished && !IsDeleted;
+
+    public bool CanUpdate()
+    {
+        return !IsDeleted && IsDraft;
+    }
+
+    public bool CanPublish()
+    {
+        return !IsDeleted && IsDraft;
+    }
+
+    public bool CanUnpublish()
+    {
+        return !IsDeleted && IsPublished;
+    }
+
+    public bool CanArchive()
+    {
+        return !IsDeleted && (IsDraft || IsPublished);
+    }
 
     public static Article CreateDraft(
         string articlePublicId,
@@ -68,36 +73,34 @@ public sealed class Article
         DateTime nowUtc,
         long actorUserId)
     {
-        ValidateArticlePublicId(articlePublicId);
+        string normalizedPublicId = ValidateArticlePublicId(articlePublicId);
         ValidateCategoryId(categoryId);
         ValidateAuthorUserId(authorUserId);
         ValidateActorUserId(actorUserId);
         ValidateTitle(title);
         ValidateSummary(summary);
         ValidateBody(body);
+        ValidateCoverMediaId(coverMediaId);
 
-        return new Article
+        var article = new Article
         {
-            ArticlePublicId = articlePublicId.Trim(),
+            ArticlePublicId = normalizedPublicId,
             CategoryId = categoryId,
             AuthorUserId = authorUserId,
-            Title = title.Trim(),
-            Summary = summary.Trim(),
-            Body = body.Trim(),
+            Title = ContentText.NormalizeRequired(title),
+            Summary = ContentText.NormalizeRequired(summary),
+            Body = ContentText.NormalizeRequired(body),
             Status = ArticleStatuses.Draft,
             PublishedAt = null,
             UnpublishedAt = null,
             ArchivedAt = null,
-            CoverMediaId = coverMediaId,
-            CreatedAt = nowUtc,
-            UpdatedAt = nowUtc,
-            CreatedByUserId = actorUserId,
-            UpdatedByUserId = actorUserId,
-            IsDeleted = false,
-            DeletedAt = null,
-            DeletedByUserId = null,
-            Version = 1
+            CoverMediaId = coverMediaId
         };
+
+        article.InitializeTracking(nowUtc, actorUserId);
+        article.InitializeDeletion();
+
+        return article;
     }
 
     public static Article Rehydrate(
@@ -122,80 +125,63 @@ public sealed class Article
         long? deletedByUserId,
         long version)
     {
-        if (articleId <= 0)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_INVALID_ARTICLE_ID",
-                "Article id must be greater than zero.");
-        }
+        ContentGuard.AgainstInvalidId(
+            articleId,
+            "CONTENT.ARTICLE_INVALID_ARTICLE_ID",
+            "Article id must be greater than zero.");
 
-        ValidateArticlePublicId(articlePublicId);
+        string normalizedPublicId = ValidateArticlePublicId(articlePublicId);
+        string normalizedStatus = ArticleStatuses.Normalize(status);
         ValidateCategoryId(categoryId);
         ValidateAuthorUserId(authorUserId);
         ValidateActorUserId(createdByUserId);
         ValidateTitle(title);
         ValidateSummary(summary);
         ValidateBody(body);
+        ValidateCoverMediaId(coverMediaId);
 
-        if (!ArticleStatuses.IsValid(status))
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_INVALID_STATUS",
-                "Article status is invalid.");
-        }
+        ContentGuard.AgainstInvalidVersion(
+            version,
+            "CONTENT.ARTICLE_INVALID_VERSION",
+            "Article version must be greater than zero.");
 
-        if (version <= 0)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_INVALID_VERSION",
-                "Article version must be greater than zero.");
-        }
+        ContentGuard.AgainstUpdatedBeforeCreated(
+            updatedAt,
+            createdAt,
+            "CONTENT.ARTICLE_INVALID_UPDATED_AT",
+            "UpdatedAt cannot be earlier than CreatedAt.");
 
-        return new Article
+        ContentGuard.AgainstDeletedBeforeCreated(
+            deletedAt,
+            createdAt,
+            "CONTENT.ARTICLE_INVALID_DELETED_AT",
+            "DeletedAt cannot be earlier than CreatedAt.");
+
+        var article = new Article
         {
             ArticleId = articleId,
-            ArticlePublicId = articlePublicId.Trim(),
+            ArticlePublicId = normalizedPublicId,
             CategoryId = categoryId,
             AuthorUserId = authorUserId,
-            Title = title.Trim(),
-            Summary = summary.Trim(),
-            Body = body.Trim(),
-            Status = status,
+            Title = ContentText.NormalizeRequired(title),
+            Summary = ContentText.NormalizeRequired(summary),
+            Body = ContentText.NormalizeRequired(body),
+            Status = normalizedStatus,
             PublishedAt = publishedAt,
             UnpublishedAt = unpublishedAt,
             ArchivedAt = archivedAt,
-            CoverMediaId = coverMediaId,
-            CreatedAt = createdAt,
-            UpdatedAt = updatedAt,
-            CreatedByUserId = createdByUserId,
-            UpdatedByUserId = updatedByUserId,
-            IsDeleted = isDeleted,
-            DeletedAt = deletedAt,
-            DeletedByUserId = deletedByUserId,
-            Version = version
+            CoverMediaId = coverMediaId
         };
-    }
 
-    public bool CanUpdate()
-    {
-        return !IsDeleted && Status == ArticleStatuses.Draft;
-    }
+        article.RehydrateTracking(
+            createdAt,
+            updatedAt,
+            createdByUserId,
+            updatedByUserId,
+            version);
+        article.RehydrateDeletion(isDeleted, deletedAt, deletedByUserId);
 
-    public bool CanPublish()
-    {
-        return !IsDeleted && Status == ArticleStatuses.Draft;
-    }
-
-    public bool CanUnpublish()
-    {
-        return !IsDeleted && Status == ArticleStatuses.Published;
-    }
-
-    public bool CanArchive()
-    {
-        return !IsDeleted &&
-               (Status == ArticleStatuses.Draft ||
-                Status == ArticleStatuses.Published);
+        return article;
     }
 
     public bool CanSoftDelete()
@@ -212,7 +198,7 @@ public sealed class Article
         DateTime nowUtc,
         long actorUserId)
     {
-        EnsureNotDeleted();
+        EnsureArticleNotDeleted();
 
         if (Status != ArticleStatuses.Draft)
         {
@@ -225,21 +211,20 @@ public sealed class Article
         ValidateTitle(title);
         ValidateSummary(summary);
         ValidateBody(body);
+        ValidateCoverMediaId(coverMediaId);
         ValidateActorUserId(actorUserId);
 
         CategoryId = categoryId;
-        Title = title.Trim();
-        Summary = summary.Trim();
-        Body = body.Trim();
+        Title = ContentText.NormalizeRequired(title);
+        Summary = ContentText.NormalizeRequired(summary);
+        Body = ContentText.NormalizeRequired(body);
         CoverMediaId = coverMediaId;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        MarkUpdated(nowUtc, actorUserId);
     }
 
     public void Publish(DateTime nowUtc, long actorUserId)
     {
-        EnsureNotDeleted();
+        EnsureArticleNotDeleted();
         ValidateActorUserId(actorUserId);
 
         if (Status == ArticleStatuses.Published)
@@ -264,14 +249,12 @@ public sealed class Article
         PublishedAt = nowUtc;
         ArchivedAt = null;
         UnpublishedAt = null;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        MarkUpdated(nowUtc, actorUserId);
     }
 
     public void Unpublish(string reason, DateTime nowUtc, long actorUserId)
     {
-        EnsureNotDeleted();
+        EnsureArticleNotDeleted();
         ValidateActorUserId(actorUserId);
 
         if (Status != ArticleStatuses.Published)
@@ -290,14 +273,12 @@ public sealed class Article
 
         Status = ArticleStatuses.Draft;
         UnpublishedAt = nowUtc;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        MarkUpdated(nowUtc, actorUserId);
     }
 
     public void Archive(DateTime nowUtc, long actorUserId)
     {
-        EnsureNotDeleted();
+        EnsureArticleNotDeleted();
         ValidateActorUserId(actorUserId);
 
         if (Status == ArticleStatuses.Archived)
@@ -317,9 +298,7 @@ public sealed class Article
 
         Status = ArticleStatuses.Archived;
         ArchivedAt = nowUtc;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        MarkUpdated(nowUtc, actorUserId);
     }
 
     public void SoftDelete(DateTime nowUtc, long actorUserId)
@@ -333,112 +312,88 @@ public sealed class Article
                 "Article is already deleted.");
         }
 
-        IsDeleted = true;
-        DeletedAt = nowUtc;
-        DeletedByUserId = actorUserId;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        MarkDeleted(nowUtc, actorUserId);
     }
 
-    private void EnsureNotDeleted()
+    private void EnsureArticleNotDeleted()
     {
-        if (IsDeleted)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_ALREADY_DELETED",
-                "Article is already deleted.");
-        }
+        EnsureNotDeleted(
+            "CONTENT.ARTICLE_ALREADY_DELETED",
+            "Article is already deleted.");
     }
 
-    private static void ValidateArticlePublicId(string articlePublicId)
+    private static string ValidateArticlePublicId(string articlePublicId)
     {
-        if (string.IsNullOrWhiteSpace(articlePublicId))
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_PUBLIC_ID_REQUIRED",
-                "Article public id is required.");
-        }
-
-        if (articlePublicId.Trim().Length != 26)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_PUBLIC_ID_INVALID",
-                "Article public id must be a 26-character ULID.");
-        }
+        return PublicIdRules.ValidateAndNormalize(
+            articlePublicId,
+            "CONTENT.ARTICLE_PUBLIC_ID_REQUIRED",
+            "CONTENT.ARTICLE_PUBLIC_ID_INVALID",
+            "Article public id");
     }
 
     private static void ValidateCategoryId(long categoryId)
     {
-        if (categoryId <= 0)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_CATEGORY_ID_INVALID",
-                "Category id must be greater than zero.");
-        }
+        ContentGuard.AgainstInvalidId(
+            categoryId,
+            "CONTENT.ARTICLE_CATEGORY_ID_INVALID",
+            "Category id must be greater than zero.");
     }
 
     private static void ValidateAuthorUserId(long authorUserId)
     {
-        if (authorUserId <= 0)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_AUTHOR_USER_ID_INVALID",
-                "Author user id must be greater than zero.");
-        }
+        ContentGuard.AgainstInvalidId(
+            authorUserId,
+            "CONTENT.ARTICLE_AUTHOR_USER_ID_INVALID",
+            "Author user id must be greater than zero.");
     }
 
     private static void ValidateActorUserId(long actorUserId)
     {
-        if (actorUserId <= 0)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_ACTOR_USER_ID_INVALID",
-                "Actor user id must be greater than zero.");
-        }
+        ContentGuard.AgainstInvalidId(
+            actorUserId,
+            "CONTENT.ARTICLE_ACTOR_USER_ID_INVALID",
+            "Actor user id must be greater than zero.");
     }
 
     private static void ValidateTitle(string title)
     {
-        if (string.IsNullOrWhiteSpace(title))
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_TITLE_REQUIRED",
-                "Article title is required.");
-        }
-
-        if (title.Trim().Length > 300)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_TITLE_TOO_LONG",
-                "Article title must not exceed 300 characters.");
-        }
+        ContentGuard.AgainstRequiredText(
+            title,
+            "CONTENT.ARTICLE_TITLE_REQUIRED",
+            "Article title is required.");
+        ContentGuard.AgainstTooLong(
+            title,
+            ContentFieldLimits.ArticleTitleMaxLength,
+            "CONTENT.ARTICLE_TITLE_TOO_LONG",
+            $"Article title must not exceed {ContentFieldLimits.ArticleTitleMaxLength} characters.");
     }
 
     private static void ValidateSummary(string summary)
     {
-        if (string.IsNullOrWhiteSpace(summary))
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_SUMMARY_REQUIRED",
-                "Article summary is required.");
-        }
-
-        if (summary.Trim().Length > 1000)
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_SUMMARY_TOO_LONG",
-                "Article summary must not exceed 1000 characters.");
-        }
+        ContentGuard.AgainstRequiredText(
+            summary,
+            "CONTENT.ARTICLE_SUMMARY_REQUIRED",
+            "Article summary is required.");
+        ContentGuard.AgainstTooLong(
+            summary,
+            ContentFieldLimits.ArticleSummaryMaxLength,
+            "CONTENT.ARTICLE_SUMMARY_TOO_LONG",
+            $"Article summary must not exceed {ContentFieldLimits.ArticleSummaryMaxLength} characters.");
     }
 
     private static void ValidateBody(string body)
     {
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            throw new ContentDomainException(
-                "CONTENT.ARTICLE_BODY_REQUIRED",
-                "Article body is required.");
-        }
+        ContentGuard.AgainstRequiredText(
+            body,
+            "CONTENT.ARTICLE_BODY_REQUIRED",
+            "Article body is required.");
+    }
+
+    private static void ValidateCoverMediaId(long? coverMediaId)
+    {
+        ContentGuard.AgainstInvalidOptionalId(
+            coverMediaId,
+            "CONTENT.ARTICLE_COVER_MEDIA_ID_INVALID",
+            "Cover media id must be greater than zero.");
     }
 }

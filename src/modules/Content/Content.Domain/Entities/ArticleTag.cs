@@ -1,4 +1,4 @@
-using Content.Domain.Exceptions;
+using Content.Domain.Common;
 
 namespace Content.Domain.Entities
 {
@@ -58,22 +58,18 @@ namespace Content.Domain.Entities
 
         private static void ValidateArticleId(long articleId)
         {
-            if (articleId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_TAG_INVALID_ARTICLE_ID",
-                    "Article id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                articleId,
+                "CONTENT.ARTICLE_TAG_INVALID_ARTICLE_ID",
+                "Article id must be greater than zero.");
         }
 
         private static void ValidateTagId(long tagId)
         {
-            if (tagId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_TAG_INVALID_TAG_ID",
-                    "Tag id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                tagId,
+                "CONTENT.ARTICLE_TAG_INVALID_TAG_ID",
+                "Tag id must be greater than zero.");
         }
     }
 }

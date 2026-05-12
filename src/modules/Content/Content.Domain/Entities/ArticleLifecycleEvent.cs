@@ -1,3 +1,4 @@
+using Content.Domain.Common;
 using Content.Domain.Constants;
 using Content.Domain.Exceptions;
 
@@ -5,11 +6,6 @@ namespace Content.Domain.Entities
 {
     public sealed class ArticleLifecycleEvent
     {
-        private const int ActionTypeMaxLength = 30;
-        private const int StatusMaxLength = 30;
-        private const int ReasonMaxLength = 500;
-        private const int CorrelationIdMaxLength = 100;
-
         private ArticleLifecycleEvent(
             long eventId,
             long articleId,
@@ -72,10 +68,12 @@ namespace Content.Domain.Entities
         {
             ValidateArticleId(articleId);
             ValidateArticleVersion(articleVersion);
-            ValidateActionType(actionType);
-            ValidateStatus(fromStatus, nameof(fromStatus));
-            ValidateStatus(toStatus, nameof(toStatus));
-            ValidateReason(actionType, reason);
+
+            string normalizedActionType = ValidateAndNormalizeActionType(actionType);
+            string? normalizedFromStatus = ValidateAndNormalizeStatus(fromStatus, nameof(fromStatus));
+            string? normalizedToStatus = ValidateAndNormalizeStatus(toStatus, nameof(toStatus));
+
+            ValidateReason(normalizedActionType, reason);
             ValidateActorUserId(actorUserId);
             ValidateCorrelationId(correlationId);
 
@@ -83,14 +81,14 @@ namespace Content.Domain.Entities
                 eventId: 0,
                 articleId: articleId,
                 articleVersion: articleVersion,
-                actionType: actionType.Trim(),
-                fromStatus: NormalizeOptional(fromStatus),
-                toStatus: NormalizeOptional(toStatus),
-                reason: NormalizeOptional(reason),
+                actionType: normalizedActionType,
+                fromStatus: normalizedFromStatus,
+                toStatus: normalizedToStatus,
+                reason: ContentText.NormalizeOptional(reason),
                 actorUserId: actorUserId,
                 occurredAt: occurredAt,
-                correlationId: NormalizeOptional(correlationId),
-                metadataJson: NormalizeOptional(metadataJson));
+                correlationId: ContentText.NormalizeOptional(correlationId),
+                metadataJson: ContentText.NormalizeOptional(metadataJson));
         }
 
         public static ArticleLifecycleEvent Rehydrate(
@@ -106,19 +104,19 @@ namespace Content.Domain.Entities
             string? correlationId,
             string? metadataJson)
         {
-            if (eventId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_EVENT_ID",
-                    "Lifecycle event id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                eventId,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_EVENT_ID",
+                "Lifecycle event id must be greater than zero.");
 
             ValidateArticleId(articleId);
             ValidateArticleVersion(articleVersion);
-            ValidateActionType(actionType);
-            ValidateStatus(fromStatus, nameof(fromStatus));
-            ValidateStatus(toStatus, nameof(toStatus));
-            ValidateReason(actionType, reason);
+
+            string normalizedActionType = ValidateAndNormalizeActionType(actionType);
+            string? normalizedFromStatus = ValidateAndNormalizeStatus(fromStatus, nameof(fromStatus));
+            string? normalizedToStatus = ValidateAndNormalizeStatus(toStatus, nameof(toStatus));
+
+            ValidateReason(normalizedActionType, reason);
             ValidateActorUserId(actorUserId);
             ValidateCorrelationId(correlationId);
 
@@ -126,83 +124,72 @@ namespace Content.Domain.Entities
                 eventId: eventId,
                 articleId: articleId,
                 articleVersion: articleVersion,
-                actionType: actionType.Trim(),
-                fromStatus: NormalizeOptional(fromStatus),
-                toStatus: NormalizeOptional(toStatus),
-                reason: NormalizeOptional(reason),
+                actionType: normalizedActionType,
+                fromStatus: normalizedFromStatus,
+                toStatus: normalizedToStatus,
+                reason: ContentText.NormalizeOptional(reason),
                 actorUserId: actorUserId,
                 occurredAt: occurredAt,
-                correlationId: NormalizeOptional(correlationId),
-                metadataJson: NormalizeOptional(metadataJson));
+                correlationId: ContentText.NormalizeOptional(correlationId),
+                metadataJson: ContentText.NormalizeOptional(metadataJson));
         }
 
         public bool IsPublish()
         {
-            return ActionType.Equals(
-                ArticleLifecycleActionTypes.Publish,
-                StringComparison.OrdinalIgnoreCase);
+            return ActionType == ArticleLifecycleActionTypes.Publish;
         }
 
         public bool IsUnpublish()
         {
-            return ActionType.Equals(
-                ArticleLifecycleActionTypes.Unpublish,
-                StringComparison.OrdinalIgnoreCase);
+            return ActionType == ArticleLifecycleActionTypes.Unpublish;
         }
 
         public bool IsArchive()
         {
-            return ActionType.Equals(
-                ArticleLifecycleActionTypes.Archive,
-                StringComparison.OrdinalIgnoreCase);
+            return ActionType == ArticleLifecycleActionTypes.Archive;
         }
 
         public bool IsSoftDelete()
         {
-            return ActionType.Equals(
-                ArticleLifecycleActionTypes.SoftDelete,
-                StringComparison.OrdinalIgnoreCase);
+            return ActionType == ArticleLifecycleActionTypes.SoftDelete;
         }
 
         private static void ValidateArticleId(long articleId)
         {
-            if (articleId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ARTICLE_ID",
-                    "Article id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                articleId,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ARTICLE_ID",
+                "Article id must be greater than zero.");
         }
 
         private static void ValidateArticleVersion(long articleVersion)
         {
-            if (articleVersion <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ARTICLE_VERSION",
-                    "Article version must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidVersion(
+                articleVersion,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ARTICLE_VERSION",
+                "Article version must be greater than zero.");
         }
 
-        private static void ValidateActionType(string actionType)
+        private static string ValidateAndNormalizeActionType(string actionType)
         {
-            if (string.IsNullOrWhiteSpace(actionType))
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_ACTION_TYPE_REQUIRED",
-                    "Lifecycle action type is required.");
-            }
+            ContentGuard.AgainstRequiredText(
+                actionType,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_ACTION_TYPE_REQUIRED",
+                "Lifecycle action type is required.");
 
             string trimmed = actionType.Trim();
 
-            if (trimmed.Length > ActionTypeMaxLength)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_ACTION_TYPE_TOO_LONG",
-                    $"Lifecycle action type must not exceed {ActionTypeMaxLength} characters.");
-            }
+            ContentGuard.AgainstTooLong(
+                trimmed,
+                ContentFieldLimits.LifecycleActionTypeMaxLength,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_ACTION_TYPE_TOO_LONG",
+                $"Lifecycle action type must not exceed {ContentFieldLimits.LifecycleActionTypeMaxLength} characters.");
 
-            if (!ArticleLifecycleActionTypes.IsValid(trimmed))
+            try
+            {
+                return ArticleLifecycleActionTypes.Normalize(trimmed);
+            }
+            catch (ContentDomainException)
             {
                 throw new ContentDomainException(
                     "CONTENT.ARTICLE_LIFECYCLE_EVENT_ACTION_TYPE_INVALID",
@@ -210,28 +197,28 @@ namespace Content.Domain.Entities
             }
         }
 
-        private static void ValidateStatus(string? status, string fieldName)
+        private static string? ValidateAndNormalizeStatus(
+            string? status,
+            string fieldName)
         {
-            if (status is null)
+            if (string.IsNullOrWhiteSpace(status))
             {
-                return;
+                return null;
             }
 
             string trimmed = status.Trim();
 
-            if (trimmed.Length == 0)
-            {
-                return;
-            }
+            ContentGuard.AgainstTooLong(
+                trimmed,
+                ContentFieldLimits.LifecycleStatusMaxLength,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_STATUS_TOO_LONG",
+                $"{fieldName} must not exceed {ContentFieldLimits.LifecycleStatusMaxLength} characters.");
 
-            if (trimmed.Length > StatusMaxLength)
+            try
             {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_STATUS_TOO_LONG",
-                    $"{fieldName} must not exceed {StatusMaxLength} characters.");
+                return ArticleStatuses.Normalize(trimmed);
             }
-
-            if (!ArticleStatuses.IsValid(trimmed))
+            catch (ContentDomainException)
             {
                 throw new ContentDomainException(
                     "CONTENT.ARTICLE_LIFECYCLE_EVENT_STATUS_INVALID",
@@ -239,19 +226,18 @@ namespace Content.Domain.Entities
             }
         }
 
-        private static void ValidateReason(string actionType, string? reason)
+        private static void ValidateReason(
+            string actionType,
+            string? reason)
         {
-            if (reason is not null && reason.Trim().Length > ReasonMaxLength)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_REASON_TOO_LONG",
-                    $"Reason must not exceed {ReasonMaxLength} characters.");
-            }
+            ContentGuard.AgainstTooLong(
+                reason,
+                ContentFieldLimits.LifecycleReasonMaxLength,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_REASON_TOO_LONG",
+                $"Reason must not exceed {ContentFieldLimits.LifecycleReasonMaxLength} characters.");
 
-            if (actionType.Equals(
-                    ArticleLifecycleActionTypes.Unpublish,
-                    StringComparison.OrdinalIgnoreCase)
-                && string.IsNullOrWhiteSpace(reason))
+            if (actionType == ArticleLifecycleActionTypes.Unpublish &&
+                string.IsNullOrWhiteSpace(reason))
             {
                 throw new ContentDomainException(
                     "CONTENT.ARTICLE_LIFECYCLE_EVENT_UNPUBLISH_REASON_REQUIRED",
@@ -261,30 +247,19 @@ namespace Content.Domain.Entities
 
         private static void ValidateActorUserId(long actorUserId)
         {
-            if (actorUserId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ACTOR_USER_ID",
-                    "Actor user id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                actorUserId,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ACTOR_USER_ID",
+                "Actor user id must be greater than zero.");
         }
 
         private static void ValidateCorrelationId(string? correlationId)
         {
-            if (correlationId is not null &&
-                correlationId.Trim().Length > CorrelationIdMaxLength)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.ARTICLE_LIFECYCLE_EVENT_CORRELATION_ID_TOO_LONG",
-                    $"Correlation id must not exceed {CorrelationIdMaxLength} characters.");
-            }
-        }
-
-        private static string? NormalizeOptional(string? value)
-        {
-            return string.IsNullOrWhiteSpace(value)
-                ? null
-                : value.Trim();
+            ContentGuard.AgainstTooLong(
+                correlationId,
+                ContentFieldLimits.CorrelationIdMaxLength,
+                "CONTENT.ARTICLE_LIFECYCLE_EVENT_CORRELATION_ID_TOO_LONG",
+                $"Correlation id must not exceed {ContentFieldLimits.CorrelationIdMaxLength} characters.");
         }
     }
 }
