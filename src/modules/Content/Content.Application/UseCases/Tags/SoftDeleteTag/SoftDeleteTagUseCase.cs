@@ -8,15 +8,15 @@ using Content.Application.Ports.Persistence;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
 
-namespace Content.Application.UseCases.Tags.UpdateTag;
+namespace Content.Application.UseCases.Tags.SoftDeleteTag;
 
-public sealed class UpdateTagUseCase : IUpdateTagUseCase
+public sealed class SoftDeleteTagUseCase : ISoftDeleteTagUseCase
 {
     private readonly ITagRepository _tagRepository;
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
 
-    public UpdateTagUseCase(
+    public SoftDeleteTagUseCase(
         ITagRepository tagRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider)
@@ -26,19 +26,19 @@ public sealed class UpdateTagUseCase : IUpdateTagUseCase
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
     }
 
-    public async Task<Result<UpdateTagResponseDto>> ExecuteAsync(
-        UpdateTagRequestDto request,
+    public async Task<Result<SoftDeleteTagResponseDto>> ExecuteAsync(
+        SoftDeleteTagRequestDto request,
         CancellationToken cancellationToken = default)
     {
         if (request.TagId <= 0)
         {
-            return Result<UpdateTagResponseDto>.Failure(
+            return Result<SoftDeleteTagResponseDto>.Failure(
                 ContentErrors.Tag.InvalidTagId);
         }
 
         if (request.ExpectedVersion <= 0)
         {
-            return Result<UpdateTagResponseDto>.Failure(
+            return Result<SoftDeleteTagResponseDto>.Failure(
                 ContentErrors.Tag.InvalidVersion);
         }
 
@@ -48,78 +48,61 @@ public sealed class UpdateTagUseCase : IUpdateTagUseCase
 
         if (tag is null)
         {
-            return Result<UpdateTagResponseDto>.Failure(
+            return Result<SoftDeleteTagResponseDto>.Failure(
                 ContentErrors.Tag.NotFound);
         }
 
         if (tag.Version != request.ExpectedVersion)
         {
-            return Result<UpdateTagResponseDto>.Failure(
+            return Result<SoftDeleteTagResponseDto>.Failure(
                 ContentErrors.ConcurrencyConflict);
-        }
-
-        string nameNormalized = NormalizeName(request.Name);
-
-        bool nameExists = await _tagRepository.ExistsByNameNormalizedAsync(
-            nameNormalized,
-            excludingTagId: request.TagId,
-            cancellationToken);
-
-        if (nameExists)
-        {
-            return Result<UpdateTagResponseDto>.Failure(
-                ContentErrors.Tag.NameNormalizedAlreadyExists);
         }
 
         try
         {
-            tag.Update(
-                name: request.Name,
-                nameNormalized: nameNormalized,
-                description: request.Description,
-                isActive: request.IsActive,
+            tag.SoftDelete(
                 nowUtc: _dateTimeProvider.UtcNow,
                 actorUserId: request.ActorUserId);
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            Tag? updatedTag = await _tagRepository.UpdateAsync(
-                tag,
-                request.ExpectedVersion,
-                cancellationToken);
+            Tag? softDeletedTag = await _tagRepository.SoftDeleteAsync(
+                tagId: request.TagId,
+                deletedByUserId: request.ActorUserId,
+                expectedVersion: request.ExpectedVersion,
+                cancellationToken: cancellationToken);
 
-            if (updatedTag is null)
+            if (softDeletedTag is null)
             {
                 await _unitOfWork.RollbackAsync(cancellationToken);
 
-                return Result<UpdateTagResponseDto>.Failure(
+                return Result<SoftDeleteTagResponseDto>.Failure(
                     ContentErrors.ConcurrencyConflict);
             }
 
             await _unitOfWork.CommitAsync(cancellationToken);
 
-            return Result<UpdateTagResponseDto>.Success(
-                new UpdateTagResponseDto
+            return Result<SoftDeleteTagResponseDto>.Success(
+                new SoftDeleteTagResponseDto
                 {
-                    TagId = updatedTag.TagId,
-                    Name = updatedTag.Name,
-                    NameNormalized = updatedTag.NameNormalized,
-                    Description = updatedTag.Description,
-                    IsActive = updatedTag.IsActive,
-                    Version = updatedTag.Version,
-                    UpdatedAt = updatedTag.UpdatedAt
+                    TagId = softDeletedTag.TagId,
+                    IsDeleted = softDeletedTag.IsDeleted,
+                    IsActive = softDeletedTag.IsActive,
+                    Version = softDeletedTag.Version,
+                    UpdatedAt = softDeletedTag.UpdatedAt,
+                    DeletedAt = softDeletedTag.DeletedAt
                 });
         }
         catch (PersistenceException exception)
         {
             await RollbackIfNeededAsync(cancellationToken);
 
-            return Result<UpdateTagResponseDto>.Failure(
+            return Result<SoftDeleteTagResponseDto>.Failure(
                 MapPersistenceException(exception));
         }
         catch (ContentDomainException exception)
         {
-            return Result<UpdateTagResponseDto>.Failure(
+            return Result<SoftDeleteTagResponseDto>.Failure(
                 MapDomainException(exception));
         }
     }
@@ -132,22 +115,10 @@ public sealed class UpdateTagUseCase : IUpdateTagUseCase
         }
     }
 
-    private static string NormalizeName(string value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? string.Empty
-            : value.Trim().ToUpperInvariant();
-    }
-
     private static Error MapDomainException(ContentDomainException exception)
     {
         return exception.Code switch
         {
-            "CONTENT.TAG_NAME_REQUIRED" => ContentErrors.Tag.NameRequired,
-            "CONTENT.TAG_NAME_TOO_LONG" => ContentErrors.Tag.NameTooLong,
-            "CONTENT.TAG_NAME_NORMALIZED_REQUIRED" => ContentErrors.Tag.NameNormalizedRequired,
-            "CONTENT.TAG_NAME_NORMALIZED_TOO_LONG" => ContentErrors.Tag.NameNormalizedTooLong,
-            "CONTENT.TAG_DESCRIPTION_TOO_LONG" => ContentErrors.Tag.DescriptionTooLong,
             "CONTENT.TAG_ALREADY_DELETED" => ContentErrors.Tag.AlreadyDeleted,
             _ => ContentErrors.ValidationFailed
         };
@@ -158,8 +129,6 @@ public sealed class UpdateTagUseCase : IUpdateTagUseCase
         return exception.Code switch
         {
             "CONTENT.CONCURRENCY_CONFLICT" => ContentErrors.ConcurrencyConflict,
-            "CONTENT.TAG_NAME_NORMALIZED_ALREADY_EXISTS" => ContentErrors.Tag.NameNormalizedAlreadyExists,
-            "CONTENT.TAG_CONFLICT" => ContentErrors.Tag.Conflict,
             _ => ContentErrors.WriteCommitFailed
         };
     }
