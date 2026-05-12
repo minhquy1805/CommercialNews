@@ -16,6 +16,7 @@ namespace Content.Infrastructure.DependencyInjection
             services.AddScoped<IContentUnitOfWork>(sp => sp.GetRequiredService<ContentUnitOfWork>());
 
             services.AddScoped<IArticleRepository, ArticleRepository>();
+            services.AddScoped<IArticleTagRepository, ArticleTagRepository>();
             services.AddScoped<IArticleLifecycleEventRepository, ArticleLifecycleEventRepository>();
             services.AddScoped<ITagRepository, TagRepository>();
 
