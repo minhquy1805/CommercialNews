@@ -1,6 +1,6 @@
 namespace CommercialNews.Api.Api.Admin.Contracts.Content.Categories.Requests
 {
-    public sealed class RestoreCategoryRequest
+    public sealed class SoftDeleteCategoryRequest
     {
         public long ExpectedVersion { get; init; }
     }

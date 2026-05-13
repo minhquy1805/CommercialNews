@@ -5,20 +5,22 @@ using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
 using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
+using Content.Application.UseCases.ArticleLifecycleEvents.GetArticleLifecycleEvents;
+using Content.Application.UseCases.ArticleRevisions.GetArticleRevisionById;
+using Content.Application.UseCases.ArticleRevisions.GetArticleRevisions;
 using Content.Application.UseCases.Articles.ArchiveArticle;
 using Content.Application.UseCases.Articles.CreateArticle;
-using Content.Application.UseCases.Articles.DeleteArticle;
 using Content.Application.UseCases.Articles.GetArticleById;
-using Content.Application.UseCases.Articles.GetArticleRevisionById;
-using Content.Application.UseCases.Articles.GetArticleRevisions;
 using Content.Application.UseCases.Articles.GetArticles;
 using Content.Application.UseCases.Articles.PublishArticle;
-using Content.Application.UseCases.Articles.RestoreArticle;
+using Content.Application.UseCases.Articles.SoftDeleteArticle;
 using Content.Application.UseCases.Articles.UnpublishArticle;
 using Content.Application.UseCases.Articles.UpdateArticle;
+using Content.Application.UseCases.ArticleTags.GetArticleTags;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -40,8 +42,10 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
         private readonly IPublishArticleUseCase _publishArticleUseCase;
         private readonly IUnpublishArticleUseCase _unpublishArticleUseCase;
         private readonly IArchiveArticleUseCase _archiveArticleUseCase;
-        private readonly IRestoreArticleUseCase _restoreArticleUseCase;
-        private readonly IDeleteArticleUseCase _deleteArticleUseCase;
+        private readonly ISoftDeleteArticleUseCase _softDeleteArticleUseCase;
+        private readonly IRequestContext _requestContext;
+        private readonly IGetArticleLifecycleEventsUseCase _getArticleLifecycleEventsUseCase;
+        private readonly IGetArticleTagsUseCase _getArticleTagsUseCase;
 
         public ArticlesAdminController(
             ICreateArticleUseCase createArticleUseCase,
@@ -53,8 +57,10 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             IPublishArticleUseCase publishArticleUseCase,
             IUnpublishArticleUseCase unpublishArticleUseCase,
             IArchiveArticleUseCase archiveArticleUseCase,
-            IRestoreArticleUseCase restoreArticleUseCase,
-            IDeleteArticleUseCase deleteArticleUseCase)
+            ISoftDeleteArticleUseCase softDeleteArticleUseCase,
+            IRequestContext requestContext,
+            IGetArticleLifecycleEventsUseCase getArticleLifecycleEventsUseCase,
+            IGetArticleTagsUseCase getArticleTagsUseCase)
         {
             _createArticleUseCase = createArticleUseCase;
             _getArticleByIdUseCase = getArticleByIdUseCase;
@@ -65,8 +71,10 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             _publishArticleUseCase = publishArticleUseCase;
             _unpublishArticleUseCase = unpublishArticleUseCase;
             _archiveArticleUseCase = archiveArticleUseCase;
-            _restoreArticleUseCase = restoreArticleUseCase;
-            _deleteArticleUseCase = deleteArticleUseCase;
+            _softDeleteArticleUseCase = softDeleteArticleUseCase;
+            _requestContext = requestContext;
+            _getArticleLifecycleEventsUseCase = getArticleLifecycleEventsUseCase;
+            _getArticleTagsUseCase = getArticleTagsUseCase;
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentArticlesCreate)]
@@ -81,12 +89,13 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
         {
             var useCaseRequest = new CreateArticleRequestDto
             {
+                CategoryId = request.CategoryId,
+                AuthorUserId = request.AuthorUserId,
                 Title = request.Title,
                 Summary = request.Summary,
                 Body = request.Body,
-                AuthorUserId = request.AuthorUserId,
-                CategoryId = request.CategoryId,
-                CoverMediaId = request.CoverMediaId
+                CoverMediaId = request.CoverMediaId,
+                TagIds = request.TagIds
             };
 
             Result<CreateArticleResponseDto> result =
@@ -99,9 +108,15 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             var response = new CreateArticleResponse
             {
-                ArticleId = result.Value!.ArticleId,
-                PublicId = result.Value.PublicId,
+                ArticleId = result.Value.ArticleId,
+                ArticlePublicId = result.Value.ArticlePublicId,
+                CategoryId = result.Value.CategoryId,
+                AuthorUserId = result.Value.AuthorUserId,
+                Title = result.Value.Title,
+                Summary = result.Value.Summary,
                 Status = result.Value.Status,
+                CoverMediaId = result.Value.CoverMediaId,
+                TagIds = result.Value.TagIds,
                 Version = result.Value.Version,
                 CreatedAt = result.Value.CreatedAt
             };
@@ -136,8 +151,8 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             var response = new GetArticleByIdResponse
             {
-                ArticleId = result.Value!.ArticleId,
-                PublicId = result.Value.PublicId,
+                ArticleId = result.Value.ArticleId,
+                ArticlePublicId = result.Value.ArticlePublicId,
                 Title = result.Value.Title,
                 Summary = result.Value.Summary,
                 Body = result.Value.Body,
@@ -168,9 +183,11 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
         public async Task<IActionResult> GetPagedAsync(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20,
+            [FromQuery] string? keyword = null,
             [FromQuery] string? status = null,
             [FromQuery] long? categoryId = null,
-            [FromQuery] long? tagId = null,
+            [FromQuery] long? authorUserId = null,
+            [FromQuery] bool isDeleted = false,
             [FromQuery] string? sort = "-updatedAt",
             CancellationToken cancellationToken = default)
         {
@@ -178,9 +195,11 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             {
                 Page = page,
                 PageSize = pageSize,
+                Keyword = keyword,
                 Status = status,
                 CategoryId = categoryId,
-                TagId = tagId,
+                AuthorUserId = authorUserId,
+                IsDeleted = isDeleted,
                 Sort = sort
             };
 
@@ -193,7 +212,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                     Result<PagedResponse<ArticleListItemResponse>>.Failure(result.Error!));
             }
 
-            int totalPages = result.Value!.TotalItems == 0
+            int totalPages = result.Value.TotalItems == 0
                 ? 0
                 : (int)Math.Ceiling(result.Value.TotalItems / (double)result.Value.PageSize);
 
@@ -202,7 +221,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 Items = result.Value.Items.Select(static item => new ArticleListItemResponse
                 {
                     ArticleId = item.ArticleId,
-                    PublicId = item.PublicId,
+                    ArticlePublicId = item.ArticlePublicId,
                     Title = item.Title,
                     Summary = item.Summary,
                     Status = item.Status,
@@ -212,6 +231,9 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                     CreatedAt = item.CreatedAt,
                     UpdatedAt = item.UpdatedAt,
                     PublishedAt = item.PublishedAt,
+                    UnpublishedAt = item.UnpublishedAt,
+                    ArchivedAt = item.ArchivedAt,
+                    IsDeleted = item.IsDeleted,
                     Version = item.Version
                 }).ToArray(),
                 PageInfo = new PageInfo
@@ -242,11 +264,12 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             {
                 ArticleId = articleId,
                 ExpectedVersion = request.ExpectedVersion,
+                CategoryId = request.CategoryId,
                 Title = request.Title,
                 Summary = request.Summary,
                 Body = request.Body,
-                CategoryId = request.CategoryId,
                 CoverMediaId = request.CoverMediaId,
+                TagIds = request.TagIds,
                 ChangeSummary = request.ChangeSummary
             };
 
@@ -260,14 +283,16 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             var response = new UpdateArticleResponse
             {
-                ArticleId = result.Value!.ArticleId,
-                PublicId = result.Value.PublicId,
+                ArticleId = result.Value.ArticleId,
+                ArticlePublicId = result.Value.ArticlePublicId,
+                CategoryId = result.Value.CategoryId,
+                AuthorUserId = result.Value.AuthorUserId,
                 Title = result.Value.Title,
                 Summary = result.Value.Summary,
                 Body = result.Value.Body,
                 Status = result.Value.Status,
-                CategoryId = result.Value.CategoryId,
                 CoverMediaId = result.Value.CoverMediaId,
+                TagIds = result.Value.TagIds,
                 Version = result.Value.Version,
                 UpdatedAt = result.Value.UpdatedAt
             };
@@ -277,62 +302,45 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
         [Authorize(Policy = AuthorizationPolicies.ContentArticlesReadRevisions)]
         [HttpGet("{articleId:long}/revisions")]
-        [ProducesResponseType(typeof(PagedResponse<ArticleRevisionItemResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(IReadOnlyList<ArticleRevisionItemResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
         public async Task<IActionResult> GetRevisionsAsync(
             [FromRoute] long articleId,
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 20,
             CancellationToken cancellationToken = default)
         {
             var useCaseRequest = new GetArticleRevisionsRequestDto
             {
-                ArticleId = articleId,
-                Page = page,
-                PageSize = pageSize
+                ArticleId = articleId
             };
 
-            Result<PagedQueryResult<ArticleRevisionListItemDto>> result =
+            Result<IReadOnlyList<ArticleRevisionItemDto>> result =
                 await _getArticleRevisionsUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
 
             if (result.IsFailure)
             {
                 return this.ToActionResult(
-                    Result<PagedResponse<ArticleRevisionItemResponse>>.Failure(result.Error!));
+                    Result<IReadOnlyList<ArticleRevisionItemResponse>>.Failure(result.Error!));
             }
 
-            int totalPages = result.Value!.TotalItems == 0
-                ? 0
-                : (int)Math.Ceiling(result.Value.TotalItems / (double)result.Value.PageSize);
-
-            var response = new PagedResponse<ArticleRevisionItemResponse>
-            {
-                Items = result.Value.Items.Select(static item => new ArticleRevisionItemResponse
+            IReadOnlyList<ArticleRevisionItemResponse> response = result.Value
+                .Select(static item => new ArticleRevisionItemResponse
                 {
                     RevisionId = item.RevisionId,
-                    RevisionNumber = item.RevisionNumber,
-                    TitleSnapshot = item.TitleSnapshot,
-                    SummarySnapshot = item.SummarySnapshot,
-                    BodySnapshot = item.BodySnapshot,
-                    CategoryIdSnapshot = item.CategoryIdSnapshot,
-                    StatusSnapshot = item.StatusSnapshot,
-                    CoverMediaIdSnapshot = item.CoverMediaIdSnapshot,
-                    ChangedAt = item.ChangedAt,
-                    ChangedByUserId = item.ChangedByUserId,
-                    ChangeType = item.ChangeType,
-                    ChangeSummary = item.ChangeSummary
-                }).ToArray(),
-                PageInfo = new PageInfo
-                {
-                    Page = result.Value.Page,
-                    PageSize = result.Value.PageSize,
-                    TotalItems = result.Value.TotalItems,
-                    TotalPages = totalPages
-                }
-            };
+                    ArticleId = item.ArticleId,
+                    EditedAt = item.EditedAt,
+                    EditedByUserId = item.EditedByUserId,
+                    ArticleVersion = item.ArticleVersion,
+                    CorrelationId = item.CorrelationId,
+                    ChangeSummary = item.ChangeSummary,
+                    OldTitle = item.OldTitle,
+                    OldSummary = item.OldSummary,
+                    OldBody = item.OldBody
+                })
+                .ToArray();
 
-            return this.ToActionResult(Result<PagedResponse<ArticleRevisionItemResponse>>.Success(response));
+            return this.ToActionResult(
+                Result<IReadOnlyList<ArticleRevisionItemResponse>>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentArticlesReadRevisions)]
@@ -356,27 +364,26 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<GetArticleRevisionByIdResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<GetArticleRevisionByIdResponse>.Failure(result.Error!));
             }
 
             var response = new GetArticleRevisionByIdResponse
             {
-                RevisionId = result.Value!.RevisionId,
+                RevisionId = result.Value.RevisionId,
                 ArticleId = result.Value.ArticleId,
-                RevisionNumber = result.Value.RevisionNumber,
-                TitleSnapshot = result.Value.TitleSnapshot,
-                SummarySnapshot = result.Value.SummarySnapshot,
-                BodySnapshot = result.Value.BodySnapshot,
-                CategoryIdSnapshot = result.Value.CategoryIdSnapshot,
-                StatusSnapshot = result.Value.StatusSnapshot,
-                CoverMediaIdSnapshot = result.Value.CoverMediaIdSnapshot,
-                ChangedAt = result.Value.ChangedAt,
-                ChangedByUserId = result.Value.ChangedByUserId,
-                ChangeType = result.Value.ChangeType,
-                ChangeSummary = result.Value.ChangeSummary
+                EditedAt = result.Value.EditedAt,
+                EditedByUserId = result.Value.EditedByUserId,
+                ArticleVersion = result.Value.ArticleVersion,
+                CorrelationId = result.Value.CorrelationId,
+                ChangeSummary = result.Value.ChangeSummary,
+                OldTitle = result.Value.OldTitle,
+                OldSummary = result.Value.OldSummary,
+                OldBody = result.Value.OldBody
             };
 
-            return this.ToActionResult(Result<GetArticleRevisionByIdResponse>.Success(response));
+            return this.ToActionResult(
+                Result<GetArticleRevisionByIdResponse>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentArticlesPublish)]
@@ -401,20 +408,22 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<PublishArticleResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<PublishArticleResponse>.Failure(result.Error!));
             }
 
             var response = new PublishArticleResponse
             {
-                ArticleId = result.Value!.ArticleId,
-                PublicId = result.Value.PublicId,
+                ArticleId = result.Value.ArticleId,
+                ArticlePublicId = result.Value.ArticlePublicId,
                 Status = result.Value.Status,
                 PublishedAt = result.Value.PublishedAt,
                 Version = result.Value.Version,
                 UpdatedAt = result.Value.UpdatedAt
             };
 
-            return this.ToActionResult(Result<PublishArticleResponse>.Success(response));
+            return this.ToActionResult(
+                Result<PublishArticleResponse>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentArticlesUnpublish)]
@@ -440,20 +449,22 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<UnpublishArticleResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<UnpublishArticleResponse>.Failure(result.Error!));
             }
 
             var response = new UnpublishArticleResponse
             {
-                ArticleId = result.Value!.ArticleId,
-                PublicId = result.Value.PublicId,
+                ArticleId = result.Value.ArticleId,
+                ArticlePublicId = result.Value.ArticlePublicId,
                 Status = result.Value.Status,
                 UnpublishedAt = result.Value.UnpublishedAt,
                 Version = result.Value.Version,
                 UpdatedAt = result.Value.UpdatedAt
             };
 
-            return this.ToActionResult(Result<UnpublishArticleResponse>.Success(response));
+            return this.ToActionResult(
+                Result<UnpublishArticleResponse>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentArticlesArchive)]
@@ -478,95 +489,147 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<ArchiveArticleResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<ArchiveArticleResponse>.Failure(result.Error!));
             }
 
             var response = new ArchiveArticleResponse
             {
-                ArticleId = result.Value!.ArticleId,
-                PublicId = result.Value.PublicId,
+                ArticleId = result.Value.ArticleId,
+                ArticlePublicId = result.Value.ArticlePublicId,
                 Status = result.Value.Status,
                 ArchivedAt = result.Value.ArchivedAt,
                 Version = result.Value.Version,
                 UpdatedAt = result.Value.UpdatedAt
             };
 
-            return this.ToActionResult(Result<ArchiveArticleResponse>.Success(response));
-        }
-
-        [Authorize(Policy = AuthorizationPolicies.ContentArticlesRestore)]
-        [HttpPost("{articleId:long}:restore")]
-        [ProducesResponseType(typeof(RestoreArticleResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> RestoreAsync(
-            [FromRoute] long articleId,
-            [FromBody] RestoreArticleRequest request,
-            CancellationToken cancellationToken)
-        {
-            var useCaseRequest = new RestoreArticleRequestDto
-            {
-                ArticleId = articleId,
-                ExpectedVersion = request.ExpectedVersion
-            };
-
-            Result<RestoreArticleResponseDto> result =
-                await _restoreArticleUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
-
-            if (result.IsFailure)
-            {
-                return this.ToActionResult(Result<RestoreArticleResponse>.Failure(result.Error!));
-            }
-
-            var response = new RestoreArticleResponse
-            {
-                ArticleId = result.Value!.ArticleId,
-                PublicId = result.Value.PublicId,
-                Status = result.Value.Status,
-                Version = result.Value.Version,
-                UpdatedAt = result.Value.UpdatedAt
-            };
-
-            return this.ToActionResult(Result<RestoreArticleResponse>.Success(response));
+            return this.ToActionResult(
+                Result<ArchiveArticleResponse>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentArticlesDelete)]
         [HttpDelete("{articleId:long}")]
-        [ProducesResponseType(typeof(DeleteArticleResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(SoftDeleteArticleResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> DeleteAsync(
+        public async Task<IActionResult> SoftDeleteAsync(
             [FromRoute] long articleId,
-            [FromBody] DeleteArticleRequest request,
+            [FromBody] SoftDeleteArticleRequest request,
             CancellationToken cancellationToken)
         {
-            var useCaseRequest = new DeleteArticleRequestDto
+            var useCaseRequest = new SoftDeleteArticleRequestDto
             {
                 ArticleId = articleId,
-                ExpectedVersion = request.ExpectedVersion
+                ExpectedVersion = request.ExpectedVersion,
+                ActorUserId = _requestContext.CurrentUserId
             };
 
-            Result<DeleteArticleResponseDto> result =
-                await _deleteArticleUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+            Result<SoftDeleteArticleResponseDto> result =
+                await _softDeleteArticleUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<DeleteArticleResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<SoftDeleteArticleResponse>.Failure(result.Error!));
             }
 
-            var response = new DeleteArticleResponse
+            var response = new SoftDeleteArticleResponse
             {
-                ArticleId = result.Value!.ArticleId,
-                PublicId = result.Value.PublicId,
+                ArticleId = result.Value.ArticleId,
+                ArticlePublicId = result.Value.ArticlePublicId,
                 IsDeleted = result.Value.IsDeleted,
-                DeletedAt = result.Value.DeletedAt,
                 Version = result.Value.Version,
-                UpdatedAt = result.Value.UpdatedAt
+                UpdatedAt = result.Value.UpdatedAt,
+                DeletedAt = result.Value.DeletedAt,
+                DeletedByUserId = result.Value.DeletedByUserId
             };
 
-            return this.ToActionResult(Result<DeleteArticleResponse>.Success(response));
+            return this.ToActionResult(
+                Result<SoftDeleteArticleResponse>.Success(response));
+        }
+
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesRead)]
+        [HttpGet("{articleId:long}/lifecycle-events")]
+        [ProducesResponseType(typeof(IReadOnlyList<ArticleLifecycleEventItemResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> GetLifecycleEventsAsync(
+            [FromRoute] long articleId,
+            CancellationToken cancellationToken = default)
+        {
+            var useCaseRequest = new GetArticleLifecycleEventsRequestDto
+            {
+                ArticleId = articleId
+            };
+
+            Result<IReadOnlyList<ArticleLifecycleEventItemDto>> result =
+                await _getArticleLifecycleEventsUseCase.ExecuteAsync(
+                    useCaseRequest,
+                    cancellationToken);
+
+            if (result.IsFailure)
+            {
+                return this.ToActionResult(
+                    Result<IReadOnlyList<ArticleLifecycleEventItemResponse>>.Failure(result.Error!));
+            }
+
+            IReadOnlyList<ArticleLifecycleEventItemResponse> response = result.Value
+                .Select(static item => new ArticleLifecycleEventItemResponse
+                {
+                    EventId = item.EventId,
+                    ArticleId = item.ArticleId,
+                    ArticleVersion = item.ArticleVersion,
+                    ActionType = item.ActionType,
+                    FromStatus = item.FromStatus,
+                    ToStatus = item.ToStatus,
+                    Reason = item.Reason,
+                    ActorUserId = item.ActorUserId,
+                    OccurredAt = item.OccurredAt,
+                    CorrelationId = item.CorrelationId,
+                    MetadataJson = item.MetadataJson
+                })
+                .ToArray();
+
+            return this.ToActionResult(
+                Result<IReadOnlyList<ArticleLifecycleEventItemResponse>>.Success(response));
+        }
+
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesRead)]
+        [HttpGet("{articleId:long}/tags")]
+        [ProducesResponseType(typeof(IReadOnlyList<ArticleTagItemResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> GetTagsAsync(
+            [FromRoute] long articleId,
+            CancellationToken cancellationToken = default)
+        {
+            var useCaseRequest = new GetArticleTagsRequestDto
+            {
+                ArticleId = articleId
+            };
+
+            Result<IReadOnlyList<ArticleTagItemDto>> result =
+                await _getArticleTagsUseCase.ExecuteAsync(
+                    useCaseRequest,
+                    cancellationToken);
+
+            if (result.IsFailure)
+            {
+                return this.ToActionResult(
+                    Result<IReadOnlyList<ArticleTagItemResponse>>.Failure(result.Error!));
+            }
+
+            IReadOnlyList<ArticleTagItemResponse> response = result.Value
+                .Select(static item => new ArticleTagItemResponse
+                {
+                    ArticleId = item.ArticleId,
+                    TagId = item.TagId,
+                    AttachedAt = item.AttachedAt,
+                    AttachedByUserId = item.AttachedByUserId
+                })
+                .ToArray();
+
+            return this.ToActionResult(
+                Result<IReadOnlyList<ArticleTagItemResponse>>.Success(response));
         }
     }
 }
