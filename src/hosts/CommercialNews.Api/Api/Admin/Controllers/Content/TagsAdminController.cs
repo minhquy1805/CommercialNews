@@ -11,10 +11,10 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Models.QueryModels;
 using Content.Application.UseCases.Tags.CreateTag;
-using Content.Application.UseCases.Tags.DeleteTag;
 using Content.Application.UseCases.Tags.GetTagById;
 using Content.Application.UseCases.Tags.GetTags;
 using Content.Application.UseCases.Tags.RestoreTag;
+using Content.Application.UseCases.Tags.SoftDeleteTag;
 using Content.Application.UseCases.Tags.UpdateTag;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -32,7 +32,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
         private readonly IGetTagByIdUseCase _getTagByIdUseCase;
         private readonly IGetTagsUseCase _getTagsUseCase;
         private readonly IUpdateTagUseCase _updateTagUseCase;
-        private readonly IDeleteTagUseCase _deleteTagUseCase;
+        private readonly ISoftDeleteTagUseCase _softDeleteTagUseCase;
         private readonly IRestoreTagUseCase _restoreTagUseCase;
         private readonly IRequestContext _requestContext;
 
@@ -41,7 +41,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             IGetTagByIdUseCase getTagByIdUseCase,
             IGetTagsUseCase getTagsUseCase,
             IUpdateTagUseCase updateTagUseCase,
-            IDeleteTagUseCase deleteTagUseCase,
+            ISoftDeleteTagUseCase softDeleteTagUseCase,
             IRestoreTagUseCase restoreTagUseCase,
             IRequestContext requestContext)
         {
@@ -49,7 +49,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             _getTagByIdUseCase = getTagByIdUseCase;
             _getTagsUseCase = getTagsUseCase;
             _updateTagUseCase = updateTagUseCase;
-            _deleteTagUseCase = deleteTagUseCase;
+            _softDeleteTagUseCase = softDeleteTagUseCase;
             _restoreTagUseCase = restoreTagUseCase;
             _requestContext = requestContext;
         }
@@ -76,12 +76,13 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<CreateTagResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<CreateTagResponse>.Failure(result.Error!));
             }
 
             var response = new CreateTagResponse
             {
-                TagId = result.Value!.TagId,
+                TagId = result.Value.TagId,
                 PublicId = result.Value.PublicId,
                 Name = result.Value.Name,
                 NameNormalized = result.Value.NameNormalized,
@@ -121,7 +122,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             var response = new GetTagByIdResponse
             {
-                TagId = result.Value!.TagId,
+                TagId = result.Value.TagId,
                 PublicId = result.Value.PublicId,
                 Name = result.Value.Name,
                 NameNormalized = result.Value.NameNormalized,
@@ -157,7 +158,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 Keyword = keyword,
                 IsActive = isActive,
                 IsDeleted = isDeleted,
-                Sort = sort ?? "name"
+                Sort = string.IsNullOrWhiteSpace(sort) ? "name" : sort.Trim()
             };
 
             Result<PagedQueryResult<TagListResultItem>> result =
@@ -165,10 +166,11 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<PagedResponse<TagListItemResponse>>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<PagedResponse<TagListItemResponse>>.Failure(result.Error!));
             }
 
-            var value = result.Value!;
+            var value = result.Value;
 
             var response = new PagedResponse<TagListItemResponse>
             {
@@ -196,7 +198,8 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 }
             };
 
-            return this.ToActionResult(Result<PagedResponse<TagListItemResponse>>.Success(response));
+            return this.ToActionResult(
+                Result<PagedResponse<TagListItemResponse>>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentTagsUpdate)]
@@ -225,12 +228,13 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<UpdateTagResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<UpdateTagResponse>.Failure(result.Error!));
             }
 
             var response = new UpdateTagResponse
             {
-                TagId = result.Value!.TagId,
+                TagId = result.Value.TagId,
                 Name = result.Value.Name,
                 NameNormalized = result.Value.NameNormalized,
                 Description = result.Value.Description,
@@ -239,44 +243,47 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 UpdatedAt = result.Value.UpdatedAt
             };
 
-            return this.ToActionResult(Result<UpdateTagResponse>.Success(response));
+            return this.ToActionResult(
+                Result<UpdateTagResponse>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentTagsDelete)]
         [HttpDelete("{tagId:long}")]
-        [ProducesResponseType(typeof(DeleteTagResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(SoftDeleteTagResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> DeleteAsync(
+        public async Task<IActionResult> SoftDeleteAsync(
             [FromRoute] long tagId,
-            [FromBody] DeleteTagRequest request,
+            [FromBody] SoftDeleteTagRequest request,
             CancellationToken cancellationToken)
         {
-            var useCaseRequest = new DeleteTagRequestDto
+            var useCaseRequest = new SoftDeleteTagRequestDto
             {
                 TagId = tagId,
                 ExpectedVersion = request.ExpectedVersion,
                 ActorUserId = _requestContext.CurrentUserId
             };
 
-            Result<DeleteTagResponseDto> result =
-                await _deleteTagUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+            Result<SoftDeleteTagResponseDto> result =
+                await _softDeleteTagUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<DeleteTagResponse>.Failure(result.Error!));
+                return this.ToActionResult(Result<SoftDeleteTagResponse>.Failure(result.Error!));
             }
 
-            var response = new DeleteTagResponse
+            var response = new SoftDeleteTagResponse
             {
                 TagId = result.Value!.TagId,
                 IsDeleted = result.Value.IsDeleted,
+                IsActive = result.Value.IsActive,
                 Version = result.Value.Version,
+                UpdatedAt = result.Value.UpdatedAt,
                 DeletedAt = result.Value.DeletedAt
             };
 
-            return this.ToActionResult(Result<DeleteTagResponse>.Success(response));
+            return this.ToActionResult(Result<SoftDeleteTagResponse>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentTagsRestore)]

@@ -11,10 +11,10 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Models.QueryModels;
 using Content.Application.UseCases.Categories.CreateCategory;
-using Content.Application.UseCases.Categories.DeleteCategory;
 using Content.Application.UseCases.Categories.GetCategories;
 using Content.Application.UseCases.Categories.GetCategoryById;
 using Content.Application.UseCases.Categories.RestoreCategory;
+using Content.Application.UseCases.Categories.SoftDeleteCategory;
 using Content.Application.UseCases.Categories.UpdateCategory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -33,7 +33,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
         private readonly IGetCategoryByIdUseCase _getCategoryByIdUseCase;
         private readonly IGetCategoriesUseCase _getCategoriesUseCase;
         private readonly IUpdateCategoryUseCase _updateCategoryUseCase;
-        private readonly IDeleteCategoryUseCase _deleteCategoryUseCase;
+        private readonly ISoftDeleteCategoryUseCase _softDeleteCategoryUseCase;
         private readonly IRestoreCategoryUseCase _restoreCategoryUseCase;
         private readonly IRequestContext _requestContext;
 
@@ -42,7 +42,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             IGetCategoryByIdUseCase getCategoryByIdUseCase,
             IGetCategoriesUseCase getCategoriesUseCase,
             IUpdateCategoryUseCase updateCategoryUseCase,
-            IDeleteCategoryUseCase deleteCategoryUseCase,
+            ISoftDeleteCategoryUseCase softDeleteCategoryUseCase,
             IRestoreCategoryUseCase restoreCategoryUseCase,
             IRequestContext requestContext)
         {
@@ -50,7 +50,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
             _getCategoryByIdUseCase = getCategoryByIdUseCase;
             _getCategoriesUseCase = getCategoriesUseCase;
             _updateCategoryUseCase = updateCategoryUseCase;
-            _deleteCategoryUseCase = deleteCategoryUseCase;
+            _softDeleteCategoryUseCase = softDeleteCategoryUseCase;
             _restoreCategoryUseCase = restoreCategoryUseCase;
             _requestContext = requestContext;
         }
@@ -80,12 +80,13 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<CreateCategoryResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<CreateCategoryResponse>.Failure(result.Error!));
             }
 
             var response = new CreateCategoryResponse
             {
-                CategoryId = result.Value!.CategoryId,
+                CategoryId = result.Value.CategoryId,
                 PublicId = result.Value.PublicId,
                 ParentCategoryId = result.Value.ParentCategoryId,
                 Name = result.Value.Name,
@@ -122,12 +123,13 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<GetCategoryByIdResponse>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<GetCategoryByIdResponse>.Failure(result.Error!));
             }
 
             var response = new GetCategoryByIdResponse
             {
-                CategoryId = result.Value!.CategoryId,
+                CategoryId = result.Value.CategoryId,
                 PublicId = result.Value.PublicId,
                 ParentCategoryId = result.Value.ParentCategoryId,
                 Name = result.Value.Name,
@@ -142,7 +144,8 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 DeletedAt = result.Value.DeletedAt
             };
 
-            return this.ToActionResult(Result<GetCategoryByIdResponse>.Success(response));
+            return this.ToActionResult(
+                Result<GetCategoryByIdResponse>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentCategoriesRead)]
@@ -167,7 +170,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 ParentCategoryId = parentCategoryId,
                 IsActive = isActive,
                 IsDeleted = isDeleted,
-                Sort = sort ?? "displayOrder"
+                Sort = string.IsNullOrWhiteSpace(sort) ? "displayOrder" : sort.Trim()
             };
 
             Result<PagedQueryResult<CategoryListResultItem>> result =
@@ -175,10 +178,11 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<PagedResponse<CategoryListItemResponse>>.Failure(result.Error!));
+                return this.ToActionResult(
+                    Result<PagedResponse<CategoryListItemResponse>>.Failure(result.Error!));
             }
 
-            var value = result.Value!;
+            var value = result.Value;
 
             var response = new PagedResponse<CategoryListItemResponse>
             {
@@ -208,7 +212,8 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 }
             };
 
-            return this.ToActionResult(Result<PagedResponse<CategoryListItemResponse>>.Success(response));
+            return this.ToActionResult(
+                Result<PagedResponse<CategoryListItemResponse>>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentCategoriesUpdate)]
@@ -244,7 +249,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
             var response = new UpdateCategoryResponse
             {
-                CategoryId = result.Value!.CategoryId,
+                CategoryId = result.Value.CategoryId,
                 ParentCategoryId = result.Value.ParentCategoryId,
                 Name = result.Value.Name,
                 NameNormalized = result.Value.NameNormalized,
@@ -260,39 +265,41 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
 
         [Authorize(Policy = AuthorizationPolicies.ContentCategoriesDelete)]
         [HttpDelete("{categoryId:long}")]
-        [ProducesResponseType(typeof(DeleteCategoryResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(SoftDeleteCategoryResponse), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> DeleteAsync(
+        public async Task<IActionResult> SoftDeleteAsync(
             [FromRoute] long categoryId,
-            [FromBody] DeleteCategoryRequest request,
+            [FromBody] SoftDeleteCategoryRequest request,
             CancellationToken cancellationToken)
         {
-            var useCaseRequest = new DeleteCategoryRequestDto
+            var useCaseRequest = new SoftDeleteCategoryRequestDto
             {
                 CategoryId = categoryId,
                 ExpectedVersion = request.ExpectedVersion,
                 ActorUserId = _requestContext.CurrentUserId
             };
 
-            Result<DeleteCategoryResponseDto> result =
-                await _deleteCategoryUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+            Result<SoftDeleteCategoryResponseDto> result =
+                await _softDeleteCategoryUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
 
             if (result.IsFailure)
             {
-                return this.ToActionResult(Result<DeleteCategoryResponse>.Failure(result.Error!));
+                return this.ToActionResult(Result<SoftDeleteCategoryResponse>.Failure(result.Error!));
             }
 
-            var response = new DeleteCategoryResponse
+            var response = new SoftDeleteCategoryResponse
             {
                 CategoryId = result.Value!.CategoryId,
                 IsDeleted = result.Value.IsDeleted,
+                IsActive = result.Value.IsActive,
                 Version = result.Value.Version,
+                UpdatedAt = result.Value.UpdatedAt,
                 DeletedAt = result.Value.DeletedAt
             };
 
-            return this.ToActionResult(Result<DeleteCategoryResponse>.Success(response));
+            return this.ToActionResult(Result<SoftDeleteCategoryResponse>.Success(response));
         }
 
         [Authorize(Policy = AuthorizationPolicies.ContentCategoriesRestore)]

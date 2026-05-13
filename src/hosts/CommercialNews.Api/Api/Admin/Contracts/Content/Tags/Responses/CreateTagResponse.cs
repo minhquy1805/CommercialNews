@@ -1,17 +1,20 @@
-namespace CommercialNews.Api.Api.Admin.Contracts.Content.Tags.Responses
+namespace CommercialNews.Api.Api.Admin.Contracts.Content.Tags.Responses;
+
+public sealed class CreateTagResponse
 {
-    public sealed class CreateTagResponse
-    {
-        public long TagId { get; init; }
-        public string PublicId { get; init; } = string.Empty;
+    public long TagId { get; init; }
 
-        public string Name { get; init; } = string.Empty;
-        public string NameNormalized { get; init; } = string.Empty;
-        public string? Description { get; init; }
+    public string PublicId { get; init; } = string.Empty;
 
-        public bool IsActive { get; init; }
+    public string Name { get; init; } = string.Empty;
 
-        public int Version { get; init; }
-        public DateTime CreatedAt { get; init; }
-    }
+    public string NameNormalized { get; init; } = string.Empty;
+
+    public string? Description { get; init; }
+
+    public bool IsActive { get; init; }
+
+    public long Version { get; init; }
+
+    public DateTime CreatedAt { get; init; }
 }

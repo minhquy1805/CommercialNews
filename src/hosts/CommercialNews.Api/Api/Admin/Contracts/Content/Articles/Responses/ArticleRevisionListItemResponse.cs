@@ -1,23 +1,24 @@
-namespace CommercialNews.Api.Api.Admin.Contracts.Content.Articles.Responses
+namespace CommercialNews.Api.Api.Admin.Contracts.Content.Articles.Responses;
+
+public sealed class ArticleRevisionItemResponse
 {
-    public sealed class ArticleRevisionItemResponse
-    {
-        public long RevisionId { get; init; }
-        public int RevisionNumber { get; init; }
+    public long RevisionId { get; init; }
 
-        public string TitleSnapshot { get; init; } = string.Empty;
-        public string? SummarySnapshot { get; init; }
-        public string BodySnapshot { get; init; } = string.Empty;
+    public long ArticleId { get; init; }
 
-        public long? CategoryIdSnapshot { get; init; }
-        public string StatusSnapshot { get; init; } = string.Empty;
-        public long? CoverMediaIdSnapshot { get; init; }
+    public DateTime EditedAt { get; init; }
 
-        public DateTime ChangedAt { get; init; }
-        public long? ChangedByUserId { get; init; }
+    public long EditedByUserId { get; init; }
 
-        public string ChangeType { get; init; } = string.Empty;
-        public string? ChangeSummary { get; init; }
-    }
+    public long? ArticleVersion { get; init; }
+
+    public string? CorrelationId { get; init; }
+
+    public string? ChangeSummary { get; init; }
+
+    public string? OldTitle { get; init; }
+
+    public string? OldSummary { get; init; }
+
+    public string? OldBody { get; init; }
 }
-
