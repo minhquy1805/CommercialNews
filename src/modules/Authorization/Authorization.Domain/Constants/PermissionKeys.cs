@@ -12,9 +12,10 @@ public static class PermissionKeys
             public const string Publish = "content:articles:publish";
             public const string Unpublish = "content:articles:unpublish";
             public const string Archive = "content:articles:archive";
-            public const string Restore = "content:articles:restore";
             public const string Delete = "content:articles:delete";
             public const string ReadRevisions = "content:articles:read-revisions";
+            public const string ReadLifecycleEvents = "content:articles:read-lifecycle-events";
+            public const string ReadTags = "content:articles:read-tags";
         }
 
         public static class Categories

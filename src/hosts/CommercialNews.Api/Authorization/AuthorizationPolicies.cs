@@ -23,27 +23,28 @@ public static class AuthorizationPolicies
     public const string AuthzUserRolesRevoke = "Permission:authz:user-roles:revoke";
     public const string AuthzUserPermissionsReadEffective = "Permission:authz:user-permissions:read-effective";
 
-    public const string ContentArticlesCreate = "Permission:content:articles:create";
-    public const string ContentArticlesRead = "Permission:content:articles:read";
-    public const string ContentArticlesUpdate = "Permission:content:articles:update";
-    public const string ContentArticlesPublish = "Permission:content:articles:publish";
-    public const string ContentArticlesUnpublish = "Permission:content:articles:unpublish";
-    public const string ContentArticlesArchive = "Permission:content:articles:archive";
-    public const string ContentArticlesRestore = "Permission:content:articles:restore";
-    public const string ContentArticlesDelete = "Permission:content:articles:delete";
-    public const string ContentArticlesReadRevisions = "Permission:content:articles:read-revisions";
+    public const string ContentArticlesCreate = "Content.Articles.Create";
+    public const string ContentArticlesRead = "Content.Articles.Read";
+    public const string ContentArticlesUpdate = "Content.Articles.Update";
+    public const string ContentArticlesPublish = "Content.Articles.Publish";
+    public const string ContentArticlesUnpublish = "Content.Articles.Unpublish";
+    public const string ContentArticlesArchive = "Content.Articles.Archive";
+    public const string ContentArticlesDelete = "Content.Articles.Delete";
+    public const string ContentArticlesReadRevisions = "Content.Articles.ReadRevisions";
+    public const string ContentArticlesReadLifecycleEvents = "Content.Articles.ReadLifecycleEvents";
+    public const string ContentArticlesReadTags = "Content.Articles.ReadTags";
 
-    public const string ContentCategoriesCreate = "Permission:content:categories:create";
-    public const string ContentCategoriesRead = "Permission:content:categories:read";
-    public const string ContentCategoriesUpdate = "Permission:content:categories:update";
-    public const string ContentCategoriesDelete = "Permission:content:categories:delete";
-    public const string ContentCategoriesRestore = "Permission:content:categories:restore";
+    public const string ContentCategoriesCreate = "Content.Categories.Create";
+    public const string ContentCategoriesRead = "Content.Categories.Read";
+    public const string ContentCategoriesUpdate = "Content.Categories.Update";
+    public const string ContentCategoriesDelete = "Content.Categories.Delete";
+    public const string ContentCategoriesRestore = "Content.Categories.Restore";
 
-    public const string ContentTagsCreate = "Permission:content:tags:create";
-    public const string ContentTagsRead = "Permission:content:tags:read";
-    public const string ContentTagsUpdate = "Permission:content:tags:update";
-    public const string ContentTagsDelete = "Permission:content:tags:delete";
-    public const string ContentTagsRestore = "Permission:content:tags:restore";
+    public const string ContentTagsCreate = "Content.Tags.Create";
+    public const string ContentTagsRead = "Content.Tags.Read";
+    public const string ContentTagsUpdate = "Content.Tags.Update";
+    public const string ContentTagsDelete = "Content.Tags.Delete";
+    public const string ContentTagsRestore = "Content.Tags.Restore";
 
     public const string SeoMetadataCreate = "Permission:seo:metadata:create";
     public const string SeoMetadataRead = "Permission:seo:metadata:read";

@@ -549,7 +549,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 Result<SoftDeleteArticleResponse>.Success(response));
         }
 
-        [Authorize(Policy = AuthorizationPolicies.ContentArticlesRead)]
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesReadLifecycleEvents)]
         [HttpGet("{articleId:long}/lifecycle-events")]
         [ProducesResponseType(typeof(IReadOnlyList<ArticleLifecycleEventItemResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -594,7 +594,7 @@ namespace CommercialNews.Api.Api.Admin.Controllers.Content
                 Result<IReadOnlyList<ArticleLifecycleEventItemResponse>>.Success(response));
         }
 
-        [Authorize(Policy = AuthorizationPolicies.ContentArticlesRead)]
+        [Authorize(Policy = AuthorizationPolicies.ContentArticlesReadTags)]
         [HttpGet("{articleId:long}/tags")]
         [ProducesResponseType(typeof(IReadOnlyList<ArticleTagItemResponse>), StatusCodes.Status200OK)]
         [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
