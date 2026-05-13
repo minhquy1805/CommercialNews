@@ -1,15 +1,20 @@
-namespace Content.Application.Contracts.Requests
+namespace Content.Application.Contracts.Requests;
+
+public sealed class GetArticlesRequestDto
 {
-    public sealed class GetArticlesRequestDto
-    {
-        public int Page { get; init; } = 1;
-        public int PageSize { get; init; } = 20;
+    public int Page { get; init; } = 1;
 
-        public string? Status { get; init; }
-        public long? CategoryId { get; init; }
-        public long? TagId { get; init; }
+    public int PageSize { get; init; } = 20;
 
-        public string? Sort { get; init; } = "-updatedAt";
-    }
+    public string? Keyword { get; init; }
+
+    public string? Status { get; init; }
+
+    public long? CategoryId { get; init; }
+
+    public long? AuthorUserId { get; init; }
+
+    public bool IsDeleted { get; init; }
+
+    public string? Sort { get; init; } = "-updatedAt";
 }
-

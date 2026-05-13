@@ -3,44 +3,50 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
+using Content.Domain.Entities;
 
-namespace Content.Application.UseCases.Articles.GetArticleById
+namespace Content.Application.UseCases.Articles.GetArticleById;
+
+public sealed class GetArticleByIdUseCase : IGetArticleByIdUseCase
 {
-    public sealed class GetArticleByIdUseCase : IGetArticleByIdUseCase
-    {
-        private readonly IArticleRepository _articleRepository;
+    private readonly IArticleRepository _articleRepository;
 
-        public GetArticleByIdUseCase(IArticleRepository articleRepository)
+    public GetArticleByIdUseCase(IArticleRepository articleRepository)
+    {
+        _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
+    }
+
+    public async Task<Result<GetArticleByIdResponseDto>> ExecuteAsync(
+        GetArticleByIdRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.ArticleId <= 0)
         {
-            _articleRepository = articleRepository;
+            return Result<GetArticleByIdResponseDto>.Failure(
+                ContentErrors.Article.InvalidArticleId);
         }
 
-        public async Task<Result<GetArticleByIdResponseDto>> ExecuteAsync(
-            GetArticleByIdRequestDto request,
-            CancellationToken cancellationToken = default)
+        Article? article = await _articleRepository.GetByIdAsync(
+            request.ArticleId,
+            cancellationToken);
+
+        if (article is null)
         {
-            if (request.ArticleId <= 0)
-            {
-                return Result<GetArticleByIdResponseDto>.Failure(ContentErrors.Article.InvalidArticleId);
-            }
+            return Result<GetArticleByIdResponseDto>.Failure(
+                ContentErrors.Article.NotFound);
+        }
 
-            var article = await _articleRepository.GetByIdAsync(request.ArticleId, cancellationToken);
-
-            if (article is null)
-            {
-                return Result<GetArticleByIdResponseDto>.Failure(ContentErrors.Article.NotFound);
-            }
-
-            return Result<GetArticleByIdResponseDto>.Success(new GetArticleByIdResponseDto
+        return Result<GetArticleByIdResponseDto>.Success(
+            new GetArticleByIdResponseDto
             {
                 ArticleId = article.ArticleId,
-                PublicId = article.PublicId,
+                ArticlePublicId = article.ArticlePublicId,
+                CategoryId = article.CategoryId,
+                AuthorUserId = article.AuthorUserId,
                 Title = article.Title,
                 Summary = article.Summary,
                 Body = article.Body,
                 Status = article.Status,
-                AuthorUserId = article.AuthorUserId,
-                CategoryId = article.CategoryId,
                 CoverMediaId = article.CoverMediaId,
                 CreatedAt = article.CreatedAt,
                 UpdatedAt = article.UpdatedAt,
@@ -54,7 +60,5 @@ namespace Content.Application.UseCases.Articles.GetArticleById
                 DeletedByUserId = article.DeletedByUserId,
                 Version = article.Version
             });
-        }
-    }    
+    }
 }
-

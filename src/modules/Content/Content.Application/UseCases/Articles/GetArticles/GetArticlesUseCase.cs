@@ -2,6 +2,7 @@ using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
+using Content.Application.Errors;
 using Content.Application.Models.QueryModels;
 using Content.Application.Ports.Persistence;
 
@@ -11,16 +12,21 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
 {
     private static readonly HashSet<string> AllowedSorts = new(StringComparer.OrdinalIgnoreCase)
     {
+        "createdAt",
+        "-createdAt",
+        "updatedAt",
         "-updatedAt",
+        "publishedAt",
         "-publishedAt",
-        "title"
+        "title",
+        "-title"
     };
 
     private readonly IArticleRepository _articleRepository;
 
     public GetArticlesUseCase(IArticleRepository articleRepository)
     {
-        _articleRepository = articleRepository;
+        _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
     }
 
     public async Task<Result<PagedQueryResult<ArticleListItemDto>>> ExecuteAsync(
@@ -56,19 +62,30 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
         if (!AllowedSorts.Contains(normalizedSort))
         {
             return Result<PagedQueryResult<ArticleListItemDto>>.Failure(
-                Error.Validation(
-                    code: "CONTENT.INVALID_SORT",
-                    message: "Sort is not supported.",
-                    "Allowed sorts: -updatedAt, -publishedAt, title"));
+                ContentErrors.InvalidSortField);
+        }
+
+        if (request.CategoryId.HasValue && request.CategoryId.Value <= 0)
+        {
+            return Result<PagedQueryResult<ArticleListItemDto>>.Failure(
+                ContentErrors.Article.CategoryIdInvalid);
+        }
+
+        if (request.AuthorUserId.HasValue && request.AuthorUserId.Value <= 0)
+        {
+            return Result<PagedQueryResult<ArticleListItemDto>>.Failure(
+                ContentErrors.Article.AuthorUserIdInvalid);
         }
 
         var query = new ArticleListQuery
         {
             Page = request.Page,
             PageSize = request.PageSize,
+            Keyword = NormalizeOptional(request.Keyword),
             Status = NormalizeOptional(request.Status),
             CategoryId = request.CategoryId,
-            TagId = request.TagId,
+            AuthorUserId = request.AuthorUserId,
+            IsDeleted = request.IsDeleted,
             Sort = normalizedSort
         };
 
@@ -81,7 +98,7 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
             Items = result.Items.Select(static item => new ArticleListItemDto
             {
                 ArticleId = item.ArticleId,
-                PublicId = item.PublicId,
+                ArticlePublicId = item.ArticlePublicId,
                 Title = item.Title,
                 Summary = item.Summary,
                 Status = item.Status,
@@ -91,6 +108,9 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
                 CreatedAt = item.CreatedAt,
                 UpdatedAt = item.UpdatedAt,
                 PublishedAt = item.PublishedAt,
+                UnpublishedAt = item.UnpublishedAt,
+                ArchivedAt = item.ArchivedAt,
+                IsDeleted = item.IsDeleted,
                 Version = item.Version
             }).ToArray(),
             Page = result.Page,

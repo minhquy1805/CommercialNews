@@ -1,12 +1,12 @@
 using Content.Application.UseCases.Articles.ArchiveArticle;
 using Content.Application.UseCases.Articles.CreateArticle;
-using Content.Application.UseCases.Articles.DeleteArticle;
 using Content.Application.UseCases.Articles.GetArticleById;
 using Content.Application.UseCases.Articles.GetArticleRevisionById;
 using Content.Application.UseCases.Articles.GetArticleRevisions;
 using Content.Application.UseCases.Articles.GetArticles;
 using Content.Application.UseCases.Articles.PublishArticle;
 using Content.Application.UseCases.Articles.RestoreArticle;
+using Content.Application.UseCases.Articles.SoftDeleteArticle;
 using Content.Application.UseCases.Articles.UnpublishArticle;
 using Content.Application.UseCases.Articles.UpdateArticle;
 using Content.Application.UseCases.Categories.CreateCategory;
@@ -41,7 +41,7 @@ namespace Content.Application.DependencyInjection
             services.AddScoped<IUnpublishArticleUseCase, UnpublishArticleUseCase>();
             services.AddScoped<IArchiveArticleUseCase, ArchiveArticleUseCase>();
             services.AddScoped<IRestoreArticleUseCase, RestoreArticleUseCase>();
-            services.AddScoped<IDeleteArticleUseCase, DeleteArticleUseCase>();
+            services.AddScoped<ISoftDeleteArticleUseCase, SoftDeleteArticleUseCase>();
 
             services.AddScoped<ICreateCategoryUseCase, CreateCategoryUseCase>();
             services.AddScoped<IGetCategoryByIdUseCase, GetCategoryByIdUseCase>();
