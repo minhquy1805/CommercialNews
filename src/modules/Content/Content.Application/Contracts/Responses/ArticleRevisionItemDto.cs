@@ -1,6 +1,6 @@
 namespace Content.Application.Contracts.Responses;
 
-public sealed class GetArticleRevisionByIdResponseDto
+public sealed class ArticleRevisionItemDto
 {
     public long RevisionId { get; init; }
 

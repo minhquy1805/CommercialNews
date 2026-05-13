@@ -1,9 +1,8 @@
-namespace Content.Application.Contracts.Requests
-{
-    public sealed class GetArticleRevisionByIdRequestDto
-    {
-        public long ArticleId { get; init; }
+namespace Content.Application.Contracts.Requests;
 
-        public long RevisionId { get; init; }
-    }
+public sealed class GetArticleRevisionByIdRequestDto
+{
+    public long ArticleId { get; init; }
+
+    public long RevisionId { get; init; }
 }
