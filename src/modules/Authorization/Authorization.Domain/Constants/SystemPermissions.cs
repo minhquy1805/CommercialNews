@@ -41,22 +41,28 @@ public static class SystemPermissions
             Description: "Archive articles"),
 
         new(
-            Key: PermissionKeys.Content.Articles.Restore,
-            Module: "Content",
-            Action: "Restore",
-            Description: "Restore archived or deleted articles"),
-
-        new(
             Key: PermissionKeys.Content.Articles.Delete,
             Module: "Content",
             Action: "Delete",
-            Description: "Delete articles"),
+            Description: "Soft-delete articles"),
 
         new(
             Key: PermissionKeys.Content.Articles.ReadRevisions,
             Module: "Content",
             Action: "ReadRevisions",
             Description: "Read article revision history"),
+
+        new(
+            Key: PermissionKeys.Content.Articles.ReadLifecycleEvents,
+            Module: "Content",
+            Action: "ReadLifecycleEvents",
+            Description: "Read article lifecycle event history"),
+
+        new(
+            Key: PermissionKeys.Content.Articles.ReadTags,
+            Module: "Content",
+            Action: "ReadTags",
+            Description: "Read article tag assignments"),
 
         new(
             Key: PermissionKeys.Content.Categories.Create,
@@ -80,7 +86,7 @@ public static class SystemPermissions
             Key: PermissionKeys.Content.Categories.Delete,
             Module: "Content",
             Action: "Delete",
-            Description: "Delete categories"),
+            Description: "Soft-delete categories"),
 
         new(
             Key: PermissionKeys.Content.Categories.Restore,
@@ -110,7 +116,7 @@ public static class SystemPermissions
             Key: PermissionKeys.Content.Tags.Delete,
             Module: "Content",
             Action: "Delete",
-            Description: "Delete tags"),
+            Description: "Soft-delete tags"),
 
         new(
             Key: PermissionKeys.Content.Tags.Restore,
@@ -310,7 +316,6 @@ public static class SystemPermissions
             Action: "ReadEffective",
             Description: "Read effective permissions for a user"),
 
-        
         new(
             Key: PermissionKeys.Audit.Logs.Read,
             Module: "Audit",

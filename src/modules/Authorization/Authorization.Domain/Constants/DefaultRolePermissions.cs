@@ -13,9 +13,10 @@ public static class DefaultRolePermissions
                 PermissionKeys.Content.Articles.Publish,
                 PermissionKeys.Content.Articles.Unpublish,
                 PermissionKeys.Content.Articles.Archive,
-                PermissionKeys.Content.Articles.Restore,
                 PermissionKeys.Content.Articles.Delete,
                 PermissionKeys.Content.Articles.ReadRevisions,
+                PermissionKeys.Content.Articles.ReadLifecycleEvents,
+                PermissionKeys.Content.Articles.ReadTags,
 
                 PermissionKeys.Content.Categories.Create,
                 PermissionKeys.Content.Categories.Read,
@@ -78,10 +79,12 @@ public static class DefaultRolePermissions
             {
                 PermissionKeys.Content.Articles.Read,
                 PermissionKeys.Content.Articles.Update,
+                PermissionKeys.Content.Articles.Publish,
                 PermissionKeys.Content.Articles.Unpublish,
                 PermissionKeys.Content.Articles.Archive,
-                PermissionKeys.Content.Articles.Restore,
                 PermissionKeys.Content.Articles.ReadRevisions,
+                PermissionKeys.Content.Articles.ReadLifecycleEvents,
+                PermissionKeys.Content.Articles.ReadTags,
 
                 PermissionKeys.Content.Categories.Read,
                 PermissionKeys.Content.Tags.Read,
@@ -96,6 +99,8 @@ public static class DefaultRolePermissions
                 PermissionKeys.Content.Articles.Read,
                 PermissionKeys.Content.Articles.Update,
                 PermissionKeys.Content.Articles.ReadRevisions,
+                PermissionKeys.Content.Articles.ReadLifecycleEvents,
+                PermissionKeys.Content.Articles.ReadTags,
 
                 PermissionKeys.Content.Categories.Read,
                 PermissionKeys.Content.Tags.Read,
