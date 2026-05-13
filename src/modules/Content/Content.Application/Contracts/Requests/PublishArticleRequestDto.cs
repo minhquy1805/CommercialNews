@@ -1,9 +1,10 @@
-namespace Content.Application.Contracts.Requests
-{
-    public sealed class PublishArticleRequestDto
-    {
-        public long ArticleId { get; init; }
+namespace Content.Application.Contracts.Requests;
 
-        public int ExpectedVersion { get; init; }
-    }
+public sealed class PublishArticleRequestDto
+{
+    public long ArticleId { get; init; }
+
+    public long ExpectedVersion { get; init; }
+
+    public long? ActorUserId { get; init; }
 }

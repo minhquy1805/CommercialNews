@@ -10,9 +10,9 @@ using Content.Domain.Constants;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
 
-namespace Content.Application.UseCases.Articles.UnpublishArticle;
+namespace Content.Application.UseCases.Articles.SoftDeleteArticle;
 
-public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
+public sealed class SoftDeleteArticleUseCase : ISoftDeleteArticleUseCase
 {
     private readonly IArticleRepository _articleRepository;
     private readonly IArticleLifecycleEventRepository _articleLifecycleEventRepository;
@@ -20,7 +20,7 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
 
-    public UnpublishArticleUseCase(
+    public SoftDeleteArticleUseCase(
         IArticleRepository articleRepository,
         IArticleLifecycleEventRepository articleLifecycleEventRepository,
         IContentUnitOfWork unitOfWork,
@@ -35,26 +35,20 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
     }
 
-    public async Task<Result<UnpublishArticleResponseDto>> ExecuteAsync(
-        UnpublishArticleRequestDto request,
+    public async Task<Result<SoftDeleteArticleResponseDto>> ExecuteAsync(
+        SoftDeleteArticleRequestDto request,
         CancellationToken cancellationToken = default)
     {
         if (request.ArticleId <= 0)
         {
-            return Result<UnpublishArticleResponseDto>.Failure(
+            return Result<SoftDeleteArticleResponseDto>.Failure(
                 ContentErrors.Article.InvalidArticleId);
         }
 
         if (request.ExpectedVersion <= 0)
         {
-            return Result<UnpublishArticleResponseDto>.Failure(
+            return Result<SoftDeleteArticleResponseDto>.Failure(
                 ContentErrors.Article.InvalidVersion);
-        }
-
-        if (string.IsNullOrWhiteSpace(request.Reason))
-        {
-            return Result<UnpublishArticleResponseDto>.Failure(
-                ContentErrors.UnpublishReasonRequired);
         }
 
         Article? article = await _articleRepository.GetByIdAsync(
@@ -63,57 +57,52 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
 
         if (article is null)
         {
-            return Result<UnpublishArticleResponseDto>.Failure(
+            return Result<SoftDeleteArticleResponseDto>.Failure(
                 ContentErrors.Article.NotFound);
         }
 
         if (article.Version != request.ExpectedVersion)
         {
-            return Result<UnpublishArticleResponseDto>.Failure(
+            return Result<SoftDeleteArticleResponseDto>.Failure(
                 ContentErrors.ConcurrencyConflict);
         }
 
         DateTime nowUtc = _dateTimeProvider.UtcNow;
-
         long actorUserId =
             request.ActorUserId
             ?? _requestContext.CurrentUserId
             ?? article.AuthorUserId;
-
         string fromStatus = article.Status;
-        string reason = request.Reason.Trim();
 
         try
         {
-            article.Unpublish(
-                reason: reason,
+            article.SoftDelete(
                 nowUtc: nowUtc,
                 actorUserId: actorUserId);
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            Article? unpublishedArticle = await _articleRepository.UnpublishAsync(
+            Article? softDeletedArticle = await _articleRepository.SoftDeleteAsync(
                 articleId: request.ArticleId,
                 actorUserId: actorUserId,
                 expectedVersion: request.ExpectedVersion,
-                reason: reason,
                 cancellationToken: cancellationToken);
 
-            if (unpublishedArticle is null)
+            if (softDeletedArticle is null)
             {
                 await _unitOfWork.RollbackAsync(cancellationToken);
 
-                return Result<UnpublishArticleResponseDto>.Failure(
+                return Result<SoftDeleteArticleResponseDto>.Failure(
                     ContentErrors.ConcurrencyConflict);
             }
 
             ArticleLifecycleEvent lifecycleEvent = ArticleLifecycleEvent.Create(
-                articleId: unpublishedArticle.ArticleId,
-                articleVersion: unpublishedArticle.Version,
-                actionType: ArticleLifecycleActionTypes.Unpublish,
+                articleId: softDeletedArticle.ArticleId,
+                articleVersion: softDeletedArticle.Version,
+                actionType: ArticleLifecycleActionTypes.SoftDelete,
                 fromStatus: fromStatus,
-                toStatus: unpublishedArticle.Status,
-                reason: reason,
+                toStatus: softDeletedArticle.Status,
+                reason: null,
                 actorUserId: actorUserId,
                 occurredAt: nowUtc,
                 correlationId: _requestContext.CorrelationId,
@@ -128,35 +117,36 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
             {
                 await _unitOfWork.RollbackAsync(cancellationToken);
 
-                return Result<UnpublishArticleResponseDto>.Failure(
+                return Result<SoftDeleteArticleResponseDto>.Failure(
                     ContentErrors.WriteCommitFailed);
             }
 
             await _unitOfWork.CommitAsync(cancellationToken);
 
-            return Result<UnpublishArticleResponseDto>.Success(
-                new UnpublishArticleResponseDto
+            return Result<SoftDeleteArticleResponseDto>.Success(
+                new SoftDeleteArticleResponseDto
                 {
-                    ArticleId = unpublishedArticle.ArticleId,
-                    ArticlePublicId = unpublishedArticle.ArticlePublicId,
-                    Status = unpublishedArticle.Status,
-                    UnpublishedAt = unpublishedArticle.UnpublishedAt,
-                    Version = unpublishedArticle.Version,
-                    UpdatedAt = unpublishedArticle.UpdatedAt
+                    ArticleId = softDeletedArticle.ArticleId,
+                    ArticlePublicId = softDeletedArticle.ArticlePublicId,
+                    IsDeleted = softDeletedArticle.IsDeleted,
+                    Version = softDeletedArticle.Version,
+                    UpdatedAt = softDeletedArticle.UpdatedAt,
+                    DeletedAt = softDeletedArticle.DeletedAt,
+                    DeletedByUserId = softDeletedArticle.DeletedByUserId
                 });
         }
         catch (PersistenceException exception)
         {
             await RollbackIfNeededAsync(cancellationToken);
 
-            return Result<UnpublishArticleResponseDto>.Failure(
+            return Result<SoftDeleteArticleResponseDto>.Failure(
                 MapPersistenceException(exception));
         }
         catch (ContentDomainException exception)
         {
             await RollbackIfNeededAsync(cancellationToken);
 
-            return Result<UnpublishArticleResponseDto>.Failure(
+            return Result<SoftDeleteArticleResponseDto>.Failure(
                 MapDomainException(exception));
         }
     }
@@ -177,19 +167,14 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
             "CONTENT.ARTICLE_INVALID_ARTICLE_ID" => ContentErrors.Article.InvalidArticleId,
             "CONTENT.ARTICLE_INVALID_VERSION" => ContentErrors.Article.InvalidVersion,
 
-            "CONTENT.ARTICLE_NOT_PUBLISHED" => ContentErrors.Article.NotPublished,
-            "CONTENT.ARTICLE_ALREADY_ARCHIVED" => ContentErrors.Article.AlreadyArchived,
             "CONTENT.ARTICLE_ALREADY_DELETED" => ContentErrors.Article.AlreadyDeleted,
             "CONTENT.ARTICLE_ALREADY_SOFT_DELETED" => ContentErrors.Article.AlreadySoftDeleted,
-
-            "CONTENT.UNPUBLISH_REASON_REQUIRED" => ContentErrors.UnpublishReasonRequired,
 
             "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ACTOR_USER_ID" => ContentErrors.LifecycleEvent.InvalidActorUserId,
             "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ARTICLE_ID" => ContentErrors.LifecycleEvent.InvalidArticleId,
             "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ARTICLE_VERSION" => ContentErrors.LifecycleEvent.InvalidArticleVersion,
             "CONTENT.ARTICLE_LIFECYCLE_EVENT_ACTION_TYPE_INVALID" => ContentErrors.LifecycleEvent.InvalidActionType,
             "CONTENT.ARTICLE_LIFECYCLE_EVENT_STATUS_INVALID" => ContentErrors.LifecycleEvent.InvalidStatus,
-            "CONTENT.ARTICLE_LIFECYCLE_EVENT_UNPUBLISH_REASON_REQUIRED" => ContentErrors.UnpublishReasonRequired,
 
             _ => ContentErrors.ValidationFailed
         };
@@ -204,9 +189,7 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
             "CONTENT.ARTICLE_INVALID_ARTICLE_ID" => ContentErrors.Article.InvalidArticleId,
             "CONTENT.ARTICLE_INVALID_VERSION" => ContentErrors.Article.InvalidVersion,
 
-            "CONTENT.ARTICLE_NOT_PUBLISHED" => ContentErrors.Article.NotPublished,
             "CONTENT.ARTICLE_ALREADY_SOFT_DELETED" => ContentErrors.Article.AlreadySoftDeleted,
-            "CONTENT.UNPUBLISH_REASON_REQUIRED" => ContentErrors.UnpublishReasonRequired,
 
             "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ARTICLE_ID" => ContentErrors.LifecycleEvent.InvalidArticleId,
             "CONTENT.ARTICLE_LIFECYCLE_EVENT_INVALID_ARTICLE_VERSION" => ContentErrors.LifecycleEvent.InvalidArticleVersion,
