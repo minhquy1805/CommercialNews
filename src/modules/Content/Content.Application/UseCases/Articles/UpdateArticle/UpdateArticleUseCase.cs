@@ -6,6 +6,7 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
+using Content.Application.Ports.Services;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
 
@@ -21,6 +22,7 @@ public sealed class UpdateArticleUseCase : IUpdateArticleUseCase
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
+    private readonly IContentOutboxWriter _contentOutboxWriter;
 
     public UpdateArticleUseCase(
         IArticleRepository articleRepository,
@@ -30,7 +32,8 @@ public sealed class UpdateArticleUseCase : IUpdateArticleUseCase
         ITagRepository tagRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
-        IRequestContext requestContext)
+        IRequestContext requestContext,
+        IContentOutboxWriter contentOutboxWriter)
     {
         _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
         _articleRevisionRepository = articleRevisionRepository ?? throw new ArgumentNullException(nameof(articleRevisionRepository));
@@ -40,6 +43,7 @@ public sealed class UpdateArticleUseCase : IUpdateArticleUseCase
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
+        _contentOutboxWriter = contentOutboxWriter ?? throw new ArgumentNullException(nameof(contentOutboxWriter));
     }
 
     public async Task<Result<UpdateArticleResponseDto>> ExecuteAsync(
@@ -137,85 +141,108 @@ public sealed class UpdateArticleUseCase : IUpdateArticleUseCase
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            Article? updatedArticle = await _articleRepository.UpdateAsync(
-                article,
-                request.ExpectedVersion,
-                cancellationToken);
-
-            if (updatedArticle is null)
+            try
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-
-                return Result<UpdateArticleResponseDto>.Failure(
-                    ContentErrors.ConcurrencyConflict);
-            }
-
-            ArticleRevision revision = ArticleRevision.Create(
-                articleId: updatedArticle.ArticleId,
-                editedByUserId: actorUserId,
-                articleVersion: updatedArticle.Version,
-                correlationId: _requestContext.CorrelationId,
-                changeSummary: NormalizeOptional(request.ChangeSummary),
-                oldTitle: oldTitle,
-                oldSummary: oldSummary,
-                oldBody: oldBody,
-                nowUtc: nowUtc);
-
-            ArticleRevision? insertedRevision = await _articleRevisionRepository.InsertAsync(
-                revision,
-                cancellationToken);
-
-            if (insertedRevision is null)
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-
-                return Result<UpdateArticleResponseDto>.Failure(
-                    ContentErrors.WriteCommitFailed);
-            }
-
-            await _articleTagRepository.DeleteAllByArticleIdAsync(
-                updatedArticle.ArticleId,
-                cancellationToken);
-
-            foreach (long tagId in distinctTagIds)
-            {
-                ArticleTag articleTag = ArticleTag.Attach(
-                    articleId: updatedArticle.ArticleId,
-                    tagId: tagId,
-                    nowUtc: nowUtc,
-                    actorUserId: actorUserId);
-
-                ArticleTag? attachedTag = await _articleTagRepository.InsertAsync(
-                    articleTag,
+                Article? updatedArticle = await _articleRepository.UpdateAsync(
+                    article,
+                    request.ExpectedVersion,
                     cancellationToken);
 
-                if (attachedTag is null)
+                if (updatedArticle is null)
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+
+                    return Result<UpdateArticleResponseDto>.Failure(
+                        ContentErrors.ConcurrencyConflict);
+                }
+
+                ArticleRevision revision = ArticleRevision.Create(
+                    articleId: updatedArticle.ArticleId,
+                    editedByUserId: actorUserId,
+                    articleVersion: updatedArticle.Version,
+                    correlationId: _requestContext.CorrelationId,
+                    changeSummary: NormalizeOptional(request.ChangeSummary),
+                    oldTitle: oldTitle,
+                    oldSummary: oldSummary,
+                    oldBody: oldBody,
+                    nowUtc: nowUtc);
+
+                ArticleRevision? insertedRevision = await _articleRevisionRepository.InsertAsync(
+                    revision,
+                    cancellationToken);
+
+                if (insertedRevision is null)
                 {
                     await _unitOfWork.RollbackAsync(cancellationToken);
 
                     return Result<UpdateArticleResponseDto>.Failure(
                         ContentErrors.WriteCommitFailed);
                 }
-            }
 
-            await _unitOfWork.CommitAsync(cancellationToken);
+                await _articleTagRepository.DeleteAllByArticleIdAsync(
+                    updatedArticle.ArticleId,
+                    cancellationToken);
 
-            return Result<UpdateArticleResponseDto>.Success(
-                new UpdateArticleResponseDto
+                foreach (long tagId in distinctTagIds)
                 {
-                    ArticleId = updatedArticle.ArticleId,
-                    ArticlePublicId = updatedArticle.ArticlePublicId,
-                    CategoryId = updatedArticle.CategoryId,
-                    AuthorUserId = updatedArticle.AuthorUserId,
-                    Title = updatedArticle.Title,
-                    Summary = updatedArticle.Summary,
-                    Body = updatedArticle.Body,
-                    Status = updatedArticle.Status,
-                    CoverMediaId = updatedArticle.CoverMediaId,
-                    TagIds = distinctTagIds,
-                    Version = updatedArticle.Version,
-                    UpdatedAt = updatedArticle.UpdatedAt
-                });
+                    ArticleTag articleTag = ArticleTag.Attach(
+                        articleId: updatedArticle.ArticleId,
+                        tagId: tagId,
+                        nowUtc: nowUtc,
+                        actorUserId: actorUserId);
+
+                    ArticleTag? attachedTag = await _articleTagRepository.InsertAsync(
+                        articleTag,
+                        cancellationToken);
+
+                    if (attachedTag is null)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<UpdateArticleResponseDto>.Failure(
+                            ContentErrors.WriteCommitFailed);
+                    }
+                }
+
+                await _contentOutboxWriter.EnqueueArticleUpdatedAsync(
+                    unitOfWork: _unitOfWork,
+                    articleId: updatedArticle.ArticleId,
+                    articlePublicId: updatedArticle.ArticlePublicId,
+                    status: updatedArticle.Status,
+                    categoryId: updatedArticle.CategoryId,
+                    actorUserId: actorUserId,
+                    revisionId: insertedRevision.RevisionId,
+                    changeSummary: insertedRevision.ChangeSummary,
+                    tagIds: distinctTagIds,
+                    version: updatedArticle.Version,
+                    updatedAtUtc: updatedArticle.UpdatedAt,
+                    correlationId: _requestContext.CorrelationId,
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+
+                return Result<UpdateArticleResponseDto>.Success(
+                    new UpdateArticleResponseDto
+                    {
+                        ArticleId = updatedArticle.ArticleId,
+                        ArticlePublicId = updatedArticle.ArticlePublicId,
+                        CategoryId = updatedArticle.CategoryId,
+                        AuthorUserId = updatedArticle.AuthorUserId,
+                        Title = updatedArticle.Title,
+                        Summary = updatedArticle.Summary,
+                        Body = updatedArticle.Body,
+                        Status = updatedArticle.Status,
+                        CoverMediaId = updatedArticle.CoverMediaId,
+                        TagIds = distinctTagIds,
+                        Version = updatedArticle.Version,
+                        UpdatedAt = updatedArticle.UpdatedAt
+                    });
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
         catch (PersistenceException exception)
         {

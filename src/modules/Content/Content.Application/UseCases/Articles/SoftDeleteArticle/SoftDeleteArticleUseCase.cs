@@ -6,6 +6,7 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
+using Content.Application.Ports.Services;
 using Content.Domain.Constants;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
@@ -19,13 +20,15 @@ public sealed class SoftDeleteArticleUseCase : ISoftDeleteArticleUseCase
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
+    private readonly IContentOutboxWriter _contentOutboxWriter;
 
     public SoftDeleteArticleUseCase(
         IArticleRepository articleRepository,
         IArticleLifecycleEventRepository articleLifecycleEventRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
-        IRequestContext requestContext)
+        IRequestContext requestContext,
+        IContentOutboxWriter contentOutboxWriter)
     {
         _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
         _articleLifecycleEventRepository = articleLifecycleEventRepository
@@ -33,6 +36,7 @@ public sealed class SoftDeleteArticleUseCase : ISoftDeleteArticleUseCase
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
+        _contentOutboxWriter = contentOutboxWriter ?? throw new ArgumentNullException(nameof(contentOutboxWriter));
     }
 
     public async Task<Result<SoftDeleteArticleResponseDto>> ExecuteAsync(
@@ -68,10 +72,12 @@ public sealed class SoftDeleteArticleUseCase : ISoftDeleteArticleUseCase
         }
 
         DateTime nowUtc = _dateTimeProvider.UtcNow;
+
         long actorUserId =
             request.ActorUserId
             ?? _requestContext.CurrentUserId
             ?? article.AuthorUserId;
+
         string fromStatus = article.Status;
 
         try
@@ -82,58 +88,79 @@ public sealed class SoftDeleteArticleUseCase : ISoftDeleteArticleUseCase
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            Article? softDeletedArticle = await _articleRepository.SoftDeleteAsync(
-                articleId: request.ArticleId,
-                actorUserId: actorUserId,
-                expectedVersion: request.ExpectedVersion,
-                cancellationToken: cancellationToken);
-
-            if (softDeletedArticle is null)
+            try
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
+                Article? softDeletedArticle = await _articleRepository.SoftDeleteAsync(
+                    articleId: request.ArticleId,
+                    actorUserId: actorUserId,
+                    expectedVersion: request.ExpectedVersion,
+                    cancellationToken: cancellationToken);
 
-                return Result<SoftDeleteArticleResponseDto>.Failure(
-                    ContentErrors.ConcurrencyConflict);
-            }
-
-            ArticleLifecycleEvent lifecycleEvent = ArticleLifecycleEvent.Create(
-                articleId: softDeletedArticle.ArticleId,
-                articleVersion: softDeletedArticle.Version,
-                actionType: ArticleLifecycleActionTypes.SoftDelete,
-                fromStatus: fromStatus,
-                toStatus: softDeletedArticle.Status,
-                reason: null,
-                actorUserId: actorUserId,
-                occurredAt: nowUtc,
-                correlationId: _requestContext.CorrelationId,
-                metadataJson: null);
-
-            ArticleLifecycleEvent? createdLifecycleEvent =
-                await _articleLifecycleEventRepository.InsertAsync(
-                    lifecycleEvent,
-                    cancellationToken);
-
-            if (createdLifecycleEvent is null)
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-
-                return Result<SoftDeleteArticleResponseDto>.Failure(
-                    ContentErrors.WriteCommitFailed);
-            }
-
-            await _unitOfWork.CommitAsync(cancellationToken);
-
-            return Result<SoftDeleteArticleResponseDto>.Success(
-                new SoftDeleteArticleResponseDto
+                if (softDeletedArticle is null)
                 {
-                    ArticleId = softDeletedArticle.ArticleId,
-                    ArticlePublicId = softDeletedArticle.ArticlePublicId,
-                    IsDeleted = softDeletedArticle.IsDeleted,
-                    Version = softDeletedArticle.Version,
-                    UpdatedAt = softDeletedArticle.UpdatedAt,
-                    DeletedAt = softDeletedArticle.DeletedAt,
-                    DeletedByUserId = softDeletedArticle.DeletedByUserId
-                });
+                    await RollbackIfNeededAsync(cancellationToken);
+
+                    return Result<SoftDeleteArticleResponseDto>.Failure(
+                        ContentErrors.ConcurrencyConflict);
+                }
+
+                ArticleLifecycleEvent lifecycleEvent = ArticleLifecycleEvent.Create(
+                    articleId: softDeletedArticle.ArticleId,
+                    articleVersion: softDeletedArticle.Version,
+                    actionType: ArticleLifecycleActionTypes.SoftDelete,
+                    fromStatus: fromStatus,
+                    toStatus: softDeletedArticle.Status,
+                    reason: null,
+                    actorUserId: actorUserId,
+                    occurredAt: nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    metadataJson: null);
+
+                ArticleLifecycleEvent? createdLifecycleEvent =
+                    await _articleLifecycleEventRepository.InsertAsync(
+                        lifecycleEvent,
+                        cancellationToken);
+
+                if (createdLifecycleEvent is null)
+                {
+                    await RollbackIfNeededAsync(cancellationToken);
+
+                    return Result<SoftDeleteArticleResponseDto>.Failure(
+                        ContentErrors.WriteCommitFailed);
+                }
+
+                await _contentOutboxWriter.EnqueueArticleSoftDeletedAsync(
+                    unitOfWork: _unitOfWork,
+                    articleId: softDeletedArticle.ArticleId,
+                    articlePublicId: softDeletedArticle.ArticlePublicId,
+                    fromStatus: fromStatus,
+                    toStatus: softDeletedArticle.Status,
+                    isDeleted: softDeletedArticle.IsDeleted,
+                    actorUserId: actorUserId,
+                    version: softDeletedArticle.Version,
+                    deletedAtUtc: softDeletedArticle.DeletedAt ?? nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+
+                return Result<SoftDeleteArticleResponseDto>.Success(
+                    new SoftDeleteArticleResponseDto
+                    {
+                        ArticleId = softDeletedArticle.ArticleId,
+                        ArticlePublicId = softDeletedArticle.ArticlePublicId,
+                        IsDeleted = softDeletedArticle.IsDeleted,
+                        Version = softDeletedArticle.Version,
+                        UpdatedAt = softDeletedArticle.UpdatedAt,
+                        DeletedAt = softDeletedArticle.DeletedAt,
+                        DeletedByUserId = softDeletedArticle.DeletedByUserId
+                    });
+            }
+            catch
+            {
+                await RollbackIfNeededAsync(cancellationToken);
+                throw;
+            }
         }
         catch (PersistenceException exception)
         {

@@ -6,6 +6,7 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
+using Content.Application.Ports.Services;
 using Content.Domain.Constants;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
@@ -19,13 +20,15 @@ public sealed class ArchiveArticleUseCase : IArchiveArticleUseCase
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
+    private readonly IContentOutboxWriter _contentOutboxWriter;
 
     public ArchiveArticleUseCase(
         IArticleRepository articleRepository,
         IArticleLifecycleEventRepository articleLifecycleEventRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
-        IRequestContext requestContext)
+        IRequestContext requestContext,
+        IContentOutboxWriter contentOutboxWriter)
     {
         _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
         _articleLifecycleEventRepository = articleLifecycleEventRepository
@@ -33,6 +36,7 @@ public sealed class ArchiveArticleUseCase : IArchiveArticleUseCase
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
+        _contentOutboxWriter = contentOutboxWriter ?? throw new ArgumentNullException(nameof(contentOutboxWriter));
     }
 
     public async Task<Result<ArchiveArticleResponseDto>> ExecuteAsync(
@@ -84,57 +88,77 @@ public sealed class ArchiveArticleUseCase : IArchiveArticleUseCase
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            Article? archivedArticle = await _articleRepository.ArchiveAsync(
-                articleId: request.ArticleId,
-                actorUserId: actorUserId,
-                expectedVersion: request.ExpectedVersion,
-                cancellationToken: cancellationToken);
-
-            if (archivedArticle is null)
+            try
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
+                Article? archivedArticle = await _articleRepository.ArchiveAsync(
+                    articleId: request.ArticleId,
+                    actorUserId: actorUserId,
+                    expectedVersion: request.ExpectedVersion,
+                    cancellationToken: cancellationToken);
 
-                return Result<ArchiveArticleResponseDto>.Failure(
-                    ContentErrors.ConcurrencyConflict);
-            }
-
-            ArticleLifecycleEvent lifecycleEvent = ArticleLifecycleEvent.Create(
-                articleId: archivedArticle.ArticleId,
-                articleVersion: archivedArticle.Version,
-                actionType: ArticleLifecycleActionTypes.Archive,
-                fromStatus: fromStatus,
-                toStatus: archivedArticle.Status,
-                reason: null,
-                actorUserId: actorUserId,
-                occurredAt: nowUtc,
-                correlationId: _requestContext.CorrelationId,
-                metadataJson: null);
-
-            ArticleLifecycleEvent? createdLifecycleEvent =
-                await _articleLifecycleEventRepository.InsertAsync(
-                    lifecycleEvent,
-                    cancellationToken);
-
-            if (createdLifecycleEvent is null)
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-
-                return Result<ArchiveArticleResponseDto>.Failure(
-                    ContentErrors.WriteCommitFailed);
-            }
-
-            await _unitOfWork.CommitAsync(cancellationToken);
-
-            return Result<ArchiveArticleResponseDto>.Success(
-                new ArchiveArticleResponseDto
+                if (archivedArticle is null)
                 {
-                    ArticleId = archivedArticle.ArticleId,
-                    ArticlePublicId = archivedArticle.ArticlePublicId,
-                    Status = archivedArticle.Status,
-                    ArchivedAt = archivedArticle.ArchivedAt,
-                    Version = archivedArticle.Version,
-                    UpdatedAt = archivedArticle.UpdatedAt
-                });
+                    await RollbackIfNeededAsync(cancellationToken);
+
+                    return Result<ArchiveArticleResponseDto>.Failure(
+                        ContentErrors.ConcurrencyConflict);
+                }
+
+                ArticleLifecycleEvent lifecycleEvent = ArticleLifecycleEvent.Create(
+                    articleId: archivedArticle.ArticleId,
+                    articleVersion: archivedArticle.Version,
+                    actionType: ArticleLifecycleActionTypes.Archive,
+                    fromStatus: fromStatus,
+                    toStatus: archivedArticle.Status,
+                    reason: null,
+                    actorUserId: actorUserId,
+                    occurredAt: nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    metadataJson: null);
+
+                ArticleLifecycleEvent? createdLifecycleEvent =
+                    await _articleLifecycleEventRepository.InsertAsync(
+                        lifecycleEvent,
+                        cancellationToken);
+
+                if (createdLifecycleEvent is null)
+                {
+                    await RollbackIfNeededAsync(cancellationToken);
+
+                    return Result<ArchiveArticleResponseDto>.Failure(
+                        ContentErrors.WriteCommitFailed);
+                }
+
+                await _contentOutboxWriter.EnqueueArticleArchivedAsync(
+                    unitOfWork: _unitOfWork,
+                    articleId: archivedArticle.ArticleId,
+                    articlePublicId: archivedArticle.ArticlePublicId,
+                    fromStatus: fromStatus,
+                    toStatus: archivedArticle.Status,
+                    actorUserId: actorUserId,
+                    version: archivedArticle.Version,
+                    archivedAtUtc: archivedArticle.ArchivedAt ?? nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+
+                return Result<ArchiveArticleResponseDto>.Success(
+                    new ArchiveArticleResponseDto
+                    {
+                        ArticleId = archivedArticle.ArticleId,
+                        ArticlePublicId = archivedArticle.ArticlePublicId,
+                        Status = archivedArticle.Status,
+                        ArchivedAt = archivedArticle.ArchivedAt,
+                        Version = archivedArticle.Version,
+                        UpdatedAt = archivedArticle.UpdatedAt
+                    });
+            }
+            catch
+            {
+                await RollbackIfNeededAsync(cancellationToken);
+                throw;
+            }
         }
         catch (PersistenceException exception)
         {
