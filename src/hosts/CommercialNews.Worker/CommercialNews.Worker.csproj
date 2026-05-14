@@ -32,6 +32,9 @@
     <ProjectReference Include="..\..\modules\Authorization\Authorization.Application\Authorization.Application.csproj" />
     <ProjectReference Include="..\..\modules\Authorization\Authorization.Infrastructure\Authorization.Infrastructure.csproj" />
 
+    <ProjectReference Include="..\..\modules\Content\Content.Application\Content.Application.csproj" />
+    <ProjectReference Include="..\..\modules\Content\Content.Infrastructure\Content.Infrastructure.csproj" />
+
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Application\Notifications.Application.csproj" />
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Infrastructure\Notifications.Infrastructure.csproj" />
 
