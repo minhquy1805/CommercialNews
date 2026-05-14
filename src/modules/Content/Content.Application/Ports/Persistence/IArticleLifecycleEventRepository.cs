@@ -1,15 +1,15 @@
+using Content.Domain.Entities;
+
 namespace Content.Application.Ports.Persistence
 {
     public interface IArticleLifecycleEventRepository
     {
-        Task InsertAsync(
+        Task<ArticleLifecycleEvent?> InsertAsync(
+            ArticleLifecycleEvent lifecycleEvent,
+            CancellationToken cancellationToken = default);
+
+        Task<IReadOnlyList<ArticleLifecycleEvent>> GetByArticleIdAsync(
             long articleId,
-            string actionType,
-            string? fromStatus,
-            string? toStatus,
-            string? reason,
-            DateTime occurredAt,
-            long? actorUserId,
             CancellationToken cancellationToken = default);
     }
 }

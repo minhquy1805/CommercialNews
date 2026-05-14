@@ -1,8 +1,10 @@
+using Content.Domain.Common;
+using Content.Domain.Constants;
 using Content.Domain.Exceptions;
 
 namespace Content.Domain.Entities
 {
-    public sealed class Category
+    public sealed class Category : ContentSoftDeletableEntity
     {
         public long CategoryId { get; private set; }
         public string PublicId { get; private set; } = string.Empty;
@@ -16,21 +18,11 @@ namespace Content.Domain.Entities
         public bool IsActive { get; private set; }
         public int DisplayOrder { get; private set; }
 
-        public DateTime CreatedAt { get; private set; }
-        public DateTime UpdatedAt { get; private set; }
-
-        public long? CreatedByUserId { get; private set; }
-        public long? UpdatedByUserId { get; private set; }
-
-        public bool IsDeleted { get; private set; }
-        public DateTime? DeletedAt { get; private set; }
-        public long? DeletedByUserId { get; private set; }
-
-        public int Version { get; private set; }
-
         private Category()
         {
         }
+
+        public bool CanBeUsedByArticle => IsActive && !IsDeleted;
 
         public static Category Create(
             string publicId,
@@ -43,27 +35,27 @@ namespace Content.Domain.Entities
             DateTime nowUtc,
             long? actorUserId)
         {
-            ValidatePublicId(publicId);
+            string normalizedPublicId = ValidatePublicId(publicId);
+            ValidateParentCategoryId(parentCategoryId);
             ValidateName(name);
             ValidateNameNormalized(nameNormalized);
             ValidateDisplayOrder(displayOrder);
 
-            return new Category
+            var category = new Category
             {
-                PublicId = publicId.Trim(),
+                PublicId = normalizedPublicId,
                 ParentCategoryId = parentCategoryId,
-                Name = name.Trim(),
-                NameNormalized = nameNormalized.Trim(),
-                Description = NormalizeOptional(description),
+                Name = ContentText.NormalizeRequired(name),
+                NameNormalized = ContentText.NormalizeRequired(nameNormalized),
+                Description = ContentText.NormalizeOptional(description),
                 IsActive = isActive,
-                DisplayOrder = displayOrder,
-                CreatedAt = nowUtc,
-                UpdatedAt = nowUtc,
-                CreatedByUserId = actorUserId,
-                UpdatedByUserId = actorUserId,
-                IsDeleted = false,
-                Version = 1
+                DisplayOrder = displayOrder
             };
+
+            category.InitializeTracking(nowUtc, actorUserId);
+            category.InitializeDeletion();
+
+            return category;
         }
 
         public static Category Rehydrate(
@@ -82,23 +74,31 @@ namespace Content.Domain.Entities
             bool isDeleted,
             DateTime? deletedAt,
             long? deletedByUserId,
-            int version)
+            long version)
         {
-            if (categoryId <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_INVALID_CATEGORY_ID",
-                    "Category id must be greater than zero.");
-            }
+            ContentGuard.AgainstInvalidId(
+                categoryId,
+                "CONTENT.CATEGORY_INVALID_CATEGORY_ID",
+                "Category id must be greater than zero.");
+            ContentGuard.AgainstInvalidVersion(
+                version,
+                "CONTENT.CATEGORY_INVALID_VERSION",
+                "Category version must be greater than zero.");
 
-            if (version <= 0)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_INVALID_VERSION",
-                    "Category version must be greater than zero.");
-            }
+            ContentGuard.AgainstUpdatedBeforeCreated(
+                updatedAt,
+                createdAt,
+                "CONTENT.CATEGORY_INVALID_UPDATED_AT",
+                "UpdatedAt cannot be earlier than CreatedAt.");
 
-            ValidatePublicId(publicId);
+            ContentGuard.AgainstDeletedBeforeCreated(
+                deletedAt,
+                createdAt,
+                "CONTENT.CATEGORY_INVALID_DELETED_AT",
+                "DeletedAt cannot be earlier than CreatedAt.");
+
+            string normalizedPublicId = ValidatePublicId(publicId);
+            ValidateParentCategoryId(parentCategoryId);
             ValidateName(name);
             ValidateNameNormalized(nameNormalized);
             ValidateDisplayOrder(displayOrder);
@@ -110,25 +110,27 @@ namespace Content.Domain.Entities
                     "Category cannot be its own parent.");
             }
 
-            return new Category
+            var category = new Category
             {
                 CategoryId = categoryId,
-                PublicId = publicId.Trim(),
+                PublicId = normalizedPublicId,
                 ParentCategoryId = parentCategoryId,
-                Name = name.Trim(),
-                NameNormalized = nameNormalized.Trim(),
-                Description = NormalizeOptional(description),
+                Name = ContentText.NormalizeRequired(name),
+                NameNormalized = ContentText.NormalizeRequired(nameNormalized),
+                Description = ContentText.NormalizeOptional(description),
                 IsActive = isActive,
-                DisplayOrder = displayOrder,
-                CreatedAt = createdAt,
-                UpdatedAt = updatedAt,
-                CreatedByUserId = createdByUserId,
-                UpdatedByUserId = updatedByUserId,
-                IsDeleted = isDeleted,
-                DeletedAt = deletedAt,
-                DeletedByUserId = deletedByUserId,
-                Version = version
+                DisplayOrder = displayOrder
             };
+
+            category.RehydrateTracking(
+                createdAt,
+                updatedAt,
+                createdByUserId,
+                updatedByUserId,
+                version);
+            category.RehydrateDeletion(isDeleted, deletedAt, deletedByUserId);
+
+            return category;
         }
 
         public void Update(
@@ -141,10 +143,11 @@ namespace Content.Domain.Entities
             DateTime nowUtc,
             long? actorUserId)
         {
-            EnsureNotDeleted();
+            EnsureCategoryNotDeleted();
 
             ValidateName(name);
             ValidateNameNormalized(nameNormalized);
+            ValidateParentCategoryId(parentCategoryId);
             ValidateDisplayOrder(displayOrder);
 
             if (CategoryId > 0 && parentCategoryId.HasValue && parentCategoryId.Value == CategoryId)
@@ -155,48 +158,38 @@ namespace Content.Domain.Entities
             }
 
             ParentCategoryId = parentCategoryId;
-            Name = name.Trim();
-            NameNormalized = nameNormalized.Trim();
-            Description = NormalizeOptional(description);
+            Name = ContentText.NormalizeRequired(name);
+            NameNormalized = ContentText.NormalizeRequired(nameNormalized);
+            Description = ContentText.NormalizeOptional(description);
             IsActive = isActive;
             DisplayOrder = displayOrder;
-            UpdatedAt = nowUtc;
-            UpdatedByUserId = actorUserId;
-            Version++;
+            MarkUpdated(nowUtc, actorUserId);
         }
 
         public void Activate(DateTime nowUtc, long? actorUserId)
         {
-            EnsureNotDeleted();
+            EnsureCategoryNotDeleted();
 
             if (IsActive)
             {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_ALREADY_ACTIVE",
-                    "Category is already active.");
+                return;
             }
 
             IsActive = true;
-            UpdatedAt = nowUtc;
-            UpdatedByUserId = actorUserId;
-            Version++;
+            MarkUpdated(nowUtc, actorUserId);
         }
 
         public void Deactivate(DateTime nowUtc, long? actorUserId)
         {
-            EnsureNotDeleted();
+            EnsureCategoryNotDeleted();
 
             if (!IsActive)
             {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_ALREADY_INACTIVE",
-                    "Category is already inactive.");
+                return;
             }
 
             IsActive = false;
-            UpdatedAt = nowUtc;
-            UpdatedByUserId = actorUserId;
-            Version++;
+            MarkUpdated(nowUtc, actorUserId);
         }
 
         public void SoftDelete(DateTime nowUtc, long? actorUserId)
@@ -208,12 +201,8 @@ namespace Content.Domain.Entities
                     "Category is already deleted.");
             }
 
-            IsDeleted = true;
-            DeletedAt = nowUtc;
-            DeletedByUserId = actorUserId;
-            UpdatedAt = nowUtc;
-            UpdatedByUserId = actorUserId;
-            Version++;
+            IsActive = false;
+            MarkDeleted(nowUtc, actorUserId);
         }
 
         public void Restore(DateTime nowUtc, long? actorUserId)
@@ -225,73 +214,58 @@ namespace Content.Domain.Entities
                     "Category is not deleted.");
             }
 
-            IsDeleted = false;
-            DeletedAt = null;
-            DeletedByUserId = null;
-            UpdatedAt = nowUtc;
-            UpdatedByUserId = actorUserId;
-            Version++;
+            IsActive = true;
+            MarkRestored(nowUtc, actorUserId);
         }
 
-        private void EnsureNotDeleted()
+        private void EnsureCategoryNotDeleted()
         {
-            if (IsDeleted)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_ALREADY_DELETED",
-                    "Category is already deleted.");
-            }
+            EnsureNotDeleted(
+                "CONTENT.CATEGORY_ALREADY_DELETED",
+                "Category is already deleted.");
         }
 
-        private static void ValidatePublicId(string publicId)
+        private static string ValidatePublicId(string publicId)
         {
-            if (string.IsNullOrWhiteSpace(publicId))
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_PUBLIC_ID_REQUIRED",
-                    "Category public id is required.");
-            }
+            return PublicIdRules.ValidateAndNormalize(
+                publicId,
+                "CONTENT.CATEGORY_PUBLIC_ID_REQUIRED",
+                "CONTENT.CATEGORY_PUBLIC_ID_INVALID",
+                "Category public id");
+        }
 
-            if (publicId.Trim().Length != 26)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_PUBLIC_ID_INVALID",
-                    "Category public id must be exactly 26 characters.");
-            }
+        private static void ValidateParentCategoryId(long? parentCategoryId)
+        {
+            ContentGuard.AgainstInvalidOptionalId(
+                parentCategoryId,
+                "CONTENT.CATEGORY_PARENT_ID_INVALID",
+                "Parent category id must be greater than zero.");
         }
 
         private static void ValidateName(string name)
         {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_NAME_REQUIRED",
-                    "Category name is required.");
-            }
-
-            if (name.Trim().Length > 200)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_NAME_TOO_LONG",
-                    "Category name must not exceed 200 characters.");
-            }
+            ContentGuard.AgainstRequiredText(
+                name,
+                "CONTENT.CATEGORY_NAME_REQUIRED",
+                "Category name is required.");
+            ContentGuard.AgainstTooLong(
+                name,
+                ContentFieldLimits.CategoryNameMaxLength,
+                "CONTENT.CATEGORY_NAME_TOO_LONG",
+                $"Category name must not exceed {ContentFieldLimits.CategoryNameMaxLength} characters.");
         }
 
         private static void ValidateNameNormalized(string nameNormalized)
         {
-            if (string.IsNullOrWhiteSpace(nameNormalized))
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_NAME_NORMALIZED_REQUIRED",
-                    "Category normalized name is required.");
-            }
-
-            if (nameNormalized.Trim().Length > 200)
-            {
-                throw new ContentDomainException(
-                    "CONTENT.CATEGORY_NAME_NORMALIZED_TOO_LONG",
-                    "Category normalized name must not exceed 200 characters.");
-            }
+            ContentGuard.AgainstRequiredText(
+                nameNormalized,
+                "CONTENT.CATEGORY_NAME_NORMALIZED_REQUIRED",
+                "Category normalized name is required.");
+            ContentGuard.AgainstTooLong(
+                nameNormalized,
+                ContentFieldLimits.CategoryNameNormalizedMaxLength,
+                "CONTENT.CATEGORY_NAME_NORMALIZED_TOO_LONG",
+                $"Category normalized name must not exceed {ContentFieldLimits.CategoryNameNormalizedMaxLength} characters.");
         }
 
         private static void ValidateDisplayOrder(int displayOrder)
@@ -304,14 +278,5 @@ namespace Content.Domain.Entities
             }
         }
 
-        private static string? NormalizeOptional(string? value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return null;
-            }
-
-            return value.Trim();
-        }
     }
 }

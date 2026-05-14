@@ -2,12 +2,11 @@ using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Models.QueryModels;
 
-namespace Content.Application.UseCases.Tags.GetTags
+namespace Content.Application.UseCases.Tags.GetTags;
+
+public interface IGetTagsUseCase
 {
-    public interface IGetTagsUseCase
-    {
-        Task<Result<PagedQueryResult<TagListResultItem>>> ExecuteAsync(
-            TagListQuery query,
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<PagedQueryResult<TagListResultItem>>> ExecuteAsync(
+        TagListQuery query,
+        CancellationToken cancellationToken = default);
 }

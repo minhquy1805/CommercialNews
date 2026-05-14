@@ -129,11 +129,6 @@ public static class AuthorizationPolicyRegistrationExtensions
                     new PermissionRequirement(PermissionKeys.Content.Articles.Archive)));
 
             options.AddPolicy(
-                AuthorizationPolicies.ContentArticlesRestore,
-                policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Content.Articles.Restore)));
-
-            options.AddPolicy(
                 AuthorizationPolicies.ContentArticlesDelete,
                 policy => policy.Requirements.Add(
                     new PermissionRequirement(PermissionKeys.Content.Articles.Delete)));
@@ -142,6 +137,16 @@ public static class AuthorizationPolicyRegistrationExtensions
                 AuthorizationPolicies.ContentArticlesReadRevisions,
                 policy => policy.Requirements.Add(
                     new PermissionRequirement(PermissionKeys.Content.Articles.ReadRevisions)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.ContentArticlesReadLifecycleEvents,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Content.Articles.ReadLifecycleEvents)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.ContentArticlesReadTags,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Content.Articles.ReadTags)));
 
             options.AddPolicy(
                 AuthorizationPolicies.ContentCategoriesCreate,
@@ -232,12 +237,6 @@ public static class AuthorizationPolicyRegistrationExtensions
                 AuthorizationPolicies.SeoSlugRoutesDeactivate,
                 policy => policy.Requirements.Add(
                     new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Deactivate)));
-
-            options.AddPolicy(
-                AuthorizationPolicies.SeoSlugRoutesGenerate,
-                policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Generate)));
-
 
             options.AddPolicy(
                 AuthorizationPolicies.SeoSlugRoutesGenerate,

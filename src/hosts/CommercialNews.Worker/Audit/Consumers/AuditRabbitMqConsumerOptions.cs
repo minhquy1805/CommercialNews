@@ -61,6 +61,13 @@ public sealed class AuditRabbitMqConsumerOptions
         "identity.user_unlocked",
 
         "identity.email_marked_verified",
-        "identity.user_sessions_revoked"
+        "identity.user_sessions_revoked",
+
+        "content.article_created",
+        "content.article_updated",
+        "content.article_published",
+        "content.article_unpublished",
+        "content.article_archived",
+        "content.article_soft_deleted"
     ];
 }

@@ -15,6 +15,6 @@ namespace CommercialNews.Api.Api.Admin.Contracts.Content.Tags.Responses
         public DateTime CreatedAt { get; init; }
         public DateTime UpdatedAt { get; init; }
 
-        public int Version { get; init; }
+        public long Version { get; init; }
     }
 }
