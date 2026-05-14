@@ -6,7 +6,7 @@ namespace Content.Application.Ports.Persistence
 {
     public interface IArticleRepository
     {
-        Task<(long ArticleId, int Version)> InsertAsync(
+        Task<(long ArticleId, long Version)> InsertAsync(
             Article article,
             CancellationToken cancellationToken = default);
 
@@ -15,46 +15,41 @@ namespace Content.Application.Ports.Persistence
             CancellationToken cancellationToken = default);
 
         Task<Article?> GetByPublicIdAsync(
-            string publicId,
+            string articlePublicId,
             CancellationToken cancellationToken = default);
 
         Task<PagedQueryResult<ArticleListResultItem>> GetPagedAsync(
             ArticleListQuery query,
             CancellationToken cancellationToken = default);
 
-        Task<bool> UpdateAsync(
+        Task<Article?> UpdateAsync(
             Article article,
-            int expectedVersion,
+            long expectedVersion,
             CancellationToken cancellationToken = default);
 
         Task<Article?> PublishAsync(
             long articleId,
             long? actorUserId,
-            int expectedVersion,
+            long expectedVersion,
             CancellationToken cancellationToken = default);
 
         Task<Article?> UnpublishAsync(
             long articleId,
             long? actorUserId,
-            int expectedVersion,
+            long expectedVersion,
+            string reason,
             CancellationToken cancellationToken = default);
 
         Task<Article?> ArchiveAsync(
             long articleId,
             long? actorUserId,
-            int expectedVersion,
+            long expectedVersion,
             CancellationToken cancellationToken = default);
 
-        Task<Article?> RestoreAsync(
+        Task<Article?> SoftDeleteAsync(
             long articleId,
             long? actorUserId,
-            int expectedVersion,
-            CancellationToken cancellationToken = default);
-
-        Task<Article?> DeleteAsync(
-            long articleId,
-            long? actorUserId,
-            int expectedVersion,
+            long expectedVersion,
             CancellationToken cancellationToken = default);
     }
 }

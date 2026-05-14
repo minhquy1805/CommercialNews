@@ -1,7 +1,6 @@
-namespace CommercialNews.Api.Api.Admin.Contracts.Content.Articles.Requests
+namespace CommercialNews.Api.Api.Admin.Contracts.Content.Articles.Requests;
+
+public sealed class PublishArticleRequest
 {
-    public sealed class PublishArticleRequest
-    {
-        public int ExpectedVersion { get; init; }
-    }
+    public long ExpectedVersion { get; init; }
 }

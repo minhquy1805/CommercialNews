@@ -1,10 +1,10 @@
-namespace Content.Application.Contracts.Requests
+namespace Content.Application.Contracts.Requests;
+
+public sealed class ArchiveArticleRequestDto
 {
-    public sealed class ArchiveArticleRequestDto
-    {
-        public long ArticleId { get; init; }
+    public long ArticleId { get; init; }
 
-        public int ExpectedVersion { get; init; }
-    }
+    public long ExpectedVersion { get; init; }
+
+    public long? ActorUserId { get; init; }
 }
-

@@ -7,6 +7,7 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
+using Content.Application.Ports.Services;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
 
@@ -15,127 +16,215 @@ namespace Content.Application.UseCases.Articles.CreateArticle;
 public sealed class CreateArticleUseCase : ICreateArticleUseCase
 {
     private readonly IArticleRepository _articleRepository;
-    private readonly IArticleLifecycleEventRepository _articleLifecycleEventRepository;
     private readonly ICategoryRepository _categoryRepository;
+    private readonly ITagRepository _tagRepository;
+    private readonly IArticleTagRepository _articleTagRepository;
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IPublicIdGenerator _publicIdGenerator;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
+    private readonly IContentOutboxWriter _contentOutboxWriter;
 
     public CreateArticleUseCase(
         IArticleRepository articleRepository,
-        IArticleLifecycleEventRepository articleLifecycleEventRepository,
         ICategoryRepository categoryRepository,
+        ITagRepository tagRepository,
+        IArticleTagRepository articleTagRepository,
         IContentUnitOfWork unitOfWork,
         IPublicIdGenerator publicIdGenerator,
         IDateTimeProvider dateTimeProvider,
-        IRequestContext requestContext)
+        IRequestContext requestContext,
+        IContentOutboxWriter contentOutboxWriter)
     {
-        _articleRepository = articleRepository;
-        _articleLifecycleEventRepository = articleLifecycleEventRepository;
-        _categoryRepository = categoryRepository;
-        _unitOfWork = unitOfWork;
-        _publicIdGenerator = publicIdGenerator;
-        _dateTimeProvider = dateTimeProvider;
-        _requestContext = requestContext;
+        _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
+        _categoryRepository = categoryRepository ?? throw new ArgumentNullException(nameof(categoryRepository));
+        _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
+        _articleTagRepository = articleTagRepository ?? throw new ArgumentNullException(nameof(articleTagRepository));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _publicIdGenerator = publicIdGenerator ?? throw new ArgumentNullException(nameof(publicIdGenerator));
+        _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
+        _contentOutboxWriter = contentOutboxWriter ?? throw new ArgumentNullException(nameof(contentOutboxWriter));
     }
 
     public async Task<Result<CreateArticleResponseDto>> ExecuteAsync(
         CreateArticleRequestDto request,
         CancellationToken cancellationToken = default)
     {
+        if (request.CategoryId <= 0)
+        {
+            return Result<CreateArticleResponseDto>.Failure(
+                ContentErrors.Article.CategoryIdInvalid);
+        }
+
+        if (request.AuthorUserId <= 0)
+        {
+            return Result<CreateArticleResponseDto>.Failure(
+                ContentErrors.Article.AuthorUserIdInvalid);
+        }
+
+        IReadOnlyCollection<long> distinctTagIds = request.TagIds
+            .Distinct()
+            .ToArray();
+
+        if (distinctTagIds.Any(tagId => tagId <= 0))
+        {
+            return Result<CreateArticleResponseDto>.Failure(
+                ContentErrors.ArticleTag.InvalidTagId);
+        }
+
         try
         {
-            if (request.CategoryId.HasValue)
+            bool categoryUsable = await _categoryRepository.ExistsActiveByIdAsync(
+                request.CategoryId,
+                cancellationToken);
+
+            if (!categoryUsable)
             {
-                bool categoryExists = await _categoryRepository.ExistsByIdAsync(
-                    request.CategoryId.Value,
+                return Result<CreateArticleResponseDto>.Failure(
+                    ContentErrors.Category.InactiveOrDeleted);
+            }
+
+            foreach (long tagId in distinctTagIds)
+            {
+                bool tagUsable = await _tagRepository.ExistsActiveByIdAsync(
+                    tagId,
                     cancellationToken);
 
-                if (!categoryExists)
+                if (!tagUsable)
                 {
-                    return Result<CreateArticleResponseDto>.Failure(ContentErrors.Category.NotFound);
+                    return Result<CreateArticleResponseDto>.Failure(
+                        ContentErrors.ArticleTag.TagNotAttachable);
                 }
             }
 
-            string publicId = _publicIdGenerator.NewId();
             DateTime nowUtc = _dateTimeProvider.UtcNow;
-            long? actorUserId = _requestContext.CurrentUserId;
+            string articlePublicId = _publicIdGenerator.NewId();
+
+            long createdByUserId =
+                request.ActorUserId
+                ?? _requestContext.CurrentUserId
+                ?? request.AuthorUserId;
 
             Article article = Article.CreateDraft(
-                publicId: publicId,
+                articlePublicId: articlePublicId,
+                categoryId: request.CategoryId,
                 authorUserId: request.AuthorUserId,
                 title: request.Title,
-                body: request.Body,
                 summary: request.Summary,
-                categoryId: request.CategoryId,
+                body: request.Body,
                 coverMediaId: request.CoverMediaId,
                 nowUtc: nowUtc,
-                actorUserId: actorUserId);
+                actorUserId: createdByUserId);
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                (long articleId, int version) = await _articleRepository.InsertAsync(
+                (long articleId, long version) = await _articleRepository.InsertAsync(
                     article,
                     cancellationToken);
 
-                await _articleLifecycleEventRepository.InsertAsync(
+                foreach (long tagId in distinctTagIds)
+                {
+                    ArticleTag articleTag = ArticleTag.Attach(
+                        articleId: articleId,
+                        tagId: tagId,
+                        nowUtc: nowUtc,
+                        actorUserId: createdByUserId);
+
+                    ArticleTag? attachedTag = await _articleTagRepository.InsertAsync(
+                        articleTag,
+                        cancellationToken);
+
+                    if (attachedTag is null)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<CreateArticleResponseDto>.Failure(
+                            ContentErrors.WriteCommitFailed);
+                    }
+                }
+
+                await _contentOutboxWriter.EnqueueArticleCreatedAsync(
+                    unitOfWork: _unitOfWork,
                     articleId: articleId,
-                    actionType: "Create",
-                    fromStatus: null,
-                    toStatus: article.Status,
-                    reason: null,
-                    occurredAt: nowUtc,
-                    actorUserId: actorUserId,
+                    articlePublicId: article.ArticlePublicId,
+                    categoryId: article.CategoryId,
+                    authorUserId: article.AuthorUserId,
+                    createdByUserId: createdByUserId,
+                    status: article.Status,
+                    tagIds: distinctTagIds,
+                    version: version,
+                    createdAtUtc: article.CreatedAt,
+                    correlationId: _requestContext.CorrelationId,
                     cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                return Result<CreateArticleResponseDto>.Success(new CreateArticleResponseDto
-                {
-                    ArticleId = articleId,
-                    PublicId = article.PublicId,
-                    Status = article.Status,
-                    Version = version,
-                    CreatedAt = article.CreatedAt
-                });
+                return Result<CreateArticleResponseDto>.Success(
+                    new CreateArticleResponseDto
+                    {
+                        ArticleId = articleId,
+                        ArticlePublicId = article.ArticlePublicId,
+                        CategoryId = article.CategoryId,
+                        AuthorUserId = article.AuthorUserId,
+                        Title = article.Title,
+                        Summary = article.Summary,
+                        Status = article.Status,
+                        CoverMediaId = article.CoverMediaId,
+                        TagIds = distinctTagIds,
+                        Version = version,
+                        CreatedAt = article.CreatedAt
+                    });
             }
             catch
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
+                await RollbackIfNeededAsync(cancellationToken);
                 throw;
             }
         }
         catch (PersistenceException exception)
         {
-            return Result<CreateArticleResponseDto>.Failure(MapPersistenceException(exception));
+            await RollbackIfNeededAsync(cancellationToken);
+
+            return Result<CreateArticleResponseDto>.Failure(
+                MapPersistenceException(exception));
         }
-        catch (ContentDomainException ex)
+        catch (ContentDomainException exception)
         {
-            return Result<CreateArticleResponseDto>.Failure(MapDomainException(ex));
+            await RollbackIfNeededAsync(cancellationToken);
+
+            return Result<CreateArticleResponseDto>.Failure(
+                MapDomainException(exception));
         }
     }
 
-    private static Error MapDomainException(ContentDomainException ex)
+    private async Task RollbackIfNeededAsync(CancellationToken cancellationToken)
     {
-        return ex.Code switch
+        if (_unitOfWork.HasActiveTransaction)
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
+        }
+    }
+
+    private static Error MapDomainException(ContentDomainException exception)
+    {
+        return exception.Code switch
         {
             "CONTENT.ARTICLE_PUBLIC_ID_REQUIRED" => ContentErrors.Article.PublicIdRequired,
+            "CONTENT.ARTICLE_PUBLIC_ID_INVALID" => ContentErrors.Article.PublicIdInvalid,
+            "CONTENT.ARTICLE_CATEGORY_ID_INVALID" => ContentErrors.Article.CategoryIdInvalid,
             "CONTENT.ARTICLE_AUTHOR_USER_ID_INVALID" => ContentErrors.Article.AuthorUserIdInvalid,
+            "CONTENT.ARTICLE_CREATED_BY_USER_ID_INVALID" => ContentErrors.Article.CreatedByUserIdInvalid,
             "CONTENT.ARTICLE_TITLE_REQUIRED" => ContentErrors.Article.TitleRequired,
             "CONTENT.ARTICLE_TITLE_TOO_LONG" => ContentErrors.Article.TitleTooLong,
+            "CONTENT.ARTICLE_SUMMARY_REQUIRED" => ContentErrors.Article.SummaryRequired,
+            "CONTENT.ARTICLE_SUMMARY_TOO_LONG" => ContentErrors.Article.SummaryTooLong,
             "CONTENT.ARTICLE_BODY_REQUIRED" => ContentErrors.Article.BodyRequired,
-            "CONTENT.INVALID_STATE_TRANSITION" => ContentErrors.InvalidStateTransition,
-            "CONTENT.UNPUBLISH_REASON_REQUIRED" => ContentErrors.UnpublishReasonRequired,
-            "CONTENT.ARTICLE_INVALID_ARTICLE_ID" => ContentErrors.Article.InvalidArticleId,
-            "CONTENT.ARTICLE_INVALID_VERSION" => ContentErrors.Article.InvalidVersion,
-            "CONTENT.ARTICLE_ALREADY_PUBLISHED" => ContentErrors.Article.AlreadyPublished,
-            "CONTENT.ARTICLE_NOT_PUBLISHED" => ContentErrors.Article.NotPublished,
-            "CONTENT.ARTICLE_ALREADY_ARCHIVED" => ContentErrors.Article.AlreadyArchived,
-            "CONTENT.ARTICLE_NOT_ARCHIVED" => ContentErrors.Article.NotArchived,
-            "CONTENT.ARTICLE_ALREADY_DELETED" => ContentErrors.Article.AlreadyDeleted,
+            "CONTENT.ARTICLE_BODY_TOO_LONG" => ContentErrors.Article.BodyTooLong,
+            "CONTENT.ARTICLE_TAG_INVALID_ARTICLE_ID" => ContentErrors.ArticleTag.InvalidArticleId,
+            "CONTENT.ARTICLE_TAG_INVALID_TAG_ID" => ContentErrors.ArticleTag.InvalidTagId,
             _ => ContentErrors.ValidationFailed
         };
     }
@@ -144,8 +233,20 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
     {
         return exception.Code switch
         {
+            "CONTENT.ARTICLE_PUBLIC_ID_INVALID" => ContentErrors.Article.PublicIdInvalid,
+            "CONTENT.ARTICLE_PUBLIC_ID_ALREADY_EXISTS" => ContentErrors.Article.PublicIdAlreadyExists,
+            "CONTENT.ARTICLE_CATEGORY_ID_INVALID" => ContentErrors.Article.CategoryIdInvalid,
+            "CONTENT.ARTICLE_AUTHOR_USER_ID_INVALID" => ContentErrors.Article.AuthorUserIdInvalid,
+            "CONTENT.ARTICLE_CREATED_BY_USER_ID_INVALID" => ContentErrors.Article.CreatedByUserIdInvalid,
+            "CONTENT.ARTICLE_TITLE_REQUIRED" => ContentErrors.Article.TitleRequired,
+            "CONTENT.ARTICLE_SUMMARY_REQUIRED" => ContentErrors.Article.SummaryRequired,
+            "CONTENT.ARTICLE_BODY_REQUIRED" => ContentErrors.Article.BodyRequired,
+            "CONTENT.CATEGORY_INACTIVE_OR_DELETED" => ContentErrors.Category.InactiveOrDeleted,
+            "CONTENT.ARTICLE_TAG_ARTICLE_NOT_DRAFT" => ContentErrors.ArticleTag.ArticleNotDraft,
+            "CONTENT.ARTICLE_TAG_TAG_NOT_ATTACHABLE" => ContentErrors.ArticleTag.TagNotAttachable,
+            "CONTENT.ARTICLE_TAG_ALREADY_EXISTS" => ContentErrors.ArticleTag.AlreadyExists,
             "CONTENT.CONCURRENCY_CONFLICT" => ContentErrors.ConcurrencyConflict,
-            _ => ContentErrors.ValidationFailed
+            _ => ContentErrors.WriteCommitFailed
         };
     }
 }

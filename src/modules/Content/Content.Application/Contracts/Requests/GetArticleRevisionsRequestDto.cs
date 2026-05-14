@@ -1,12 +1,6 @@
-namespace Content.Application.Contracts.Requests
+namespace Content.Application.Contracts.Requests;
+
+public sealed class GetArticleRevisionsRequestDto
 {
-   public sealed class GetArticleRevisionsRequestDto
-    {
-        public long ArticleId { get; init; }
-
-        public int Page { get; init; } = 1;
-
-        public int PageSize { get; init; } = 20;
-    } 
+    public long ArticleId { get; init; }
 }
-

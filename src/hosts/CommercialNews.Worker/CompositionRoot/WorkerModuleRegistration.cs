@@ -22,6 +22,8 @@ using CommercialNews.Worker.Outbox.Handlers.Notifications;
 using CommercialNews.Worker.Outbox.Publishing;
 using Notifications.Application.DependencyInjection;
 using Notifications.Infrastructure.DependencyInjection;
+using CommercialNews.Worker.Outbox.Handlers.Content;
+using CommercialNews.Worker.Audit.Handlers.Content;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -87,6 +89,13 @@ public static class WorkerModuleRegistration
         services.AddScoped<IOutboxMessageHandler, AuthorizationPermissionActivatedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, AuthorizationPermissionDeactivatedOutboxHandler>();
 
+        services.AddScoped<IOutboxMessageHandler, ContentArticleCreatedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, ContentArticleUpdatedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, ContentArticlePublishedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, ContentArticleUnpublishedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, ContentArticleArchivedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, ContentArticleSoftDeletedOutboxHandler>();
+
         services.Configure<NotificationsRabbitMqConsumerOptions>(
             configuration.GetSection(NotificationsRabbitMqConsumerOptions.SectionName));
 
@@ -134,6 +143,13 @@ public static class WorkerModuleRegistration
 
         services.AddScoped<IAuditIntegrationEventHandler, IdentityEmailMarkedVerifiedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, IdentityUserSessionsRevokedAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleCreatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleUpdatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ContentArticlePublishedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleUnpublishedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleArchivedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleSoftDeletedAuditHandler>();
 
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));

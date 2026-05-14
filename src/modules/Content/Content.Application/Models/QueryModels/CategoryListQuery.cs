@@ -1,15 +1,18 @@
-namespace Content.Application.Models.QueryModels
+namespace Content.Application.Models.QueryModels;
+
+public sealed class CategoryListQuery
 {
-    public sealed class CategoryListQuery
-    {
-        public int Page { get; init; }
-        public int PageSize { get; init; }
+    public int Page { get; init; } = 1;
 
-        public string? Keyword { get; init; }
-        public long? ParentCategoryId { get; init; }
-        public bool? IsActive { get; init; }
-        public bool IsDeleted { get; init; }
+    public int PageSize { get; init; } = 20;
 
-        public string Sort { get; init; } = "displayOrder";
-    }
+    public string? Keyword { get; init; }
+
+    public long? ParentCategoryId { get; init; }
+
+    public bool? IsActive { get; init; }
+
+    public bool IsDeleted { get; init; }
+
+    public string Sort { get; init; } = "displayOrder";
 }

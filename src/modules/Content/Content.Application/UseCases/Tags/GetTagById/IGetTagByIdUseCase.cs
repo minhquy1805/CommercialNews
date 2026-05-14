@@ -2,12 +2,11 @@ using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 
-namespace Content.Application.UseCases.Tags.GetTagById
+namespace Content.Application.UseCases.Tags.GetTagById;
+
+public interface IGetTagByIdUseCase
 {
-    public interface IGetTagByIdUseCase
-    {
-        Task<Result<GetTagByIdResponseDto>> ExecuteAsync(
-            GetTagByIdRequestDto request,
-            CancellationToken cancellationToken = default);
-    }
+    Task<Result<GetTagByIdResponseDto>> ExecuteAsync(
+        GetTagByIdRequestDto request,
+        CancellationToken cancellationToken = default);
 }

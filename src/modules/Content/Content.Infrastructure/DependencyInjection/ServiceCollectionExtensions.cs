@@ -1,7 +1,9 @@
 using Content.Application.Ports.Persistence;
+using Content.Application.Ports.Services;
 using Content.Infrastructure.Persistence.Exceptions;
 using Content.Infrastructure.Persistence.Repositories;
 using Content.Infrastructure.Persistence.Sql;
+using Content.Infrastructure.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Content.Infrastructure.DependencyInjection
@@ -16,12 +18,15 @@ namespace Content.Infrastructure.DependencyInjection
             services.AddScoped<IContentUnitOfWork>(sp => sp.GetRequiredService<ContentUnitOfWork>());
 
             services.AddScoped<IArticleRepository, ArticleRepository>();
+            services.AddScoped<IArticleTagRepository, ArticleTagRepository>();
             services.AddScoped<IArticleLifecycleEventRepository, ArticleLifecycleEventRepository>();
             services.AddScoped<ITagRepository, TagRepository>();
 
             services.AddScoped<ICategoryRepository, CategoryRepository>();
             services.AddScoped<IArticleRevisionRepository, ArticleRevisionRepository>();
             services.AddScoped<ContentSqlExceptionTranslator>();
+
+            services.AddScoped<IContentOutboxWriter, ContentOutboxWriter>();
 
             return services;
         }

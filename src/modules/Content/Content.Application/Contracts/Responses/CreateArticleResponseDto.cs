@@ -1,12 +1,26 @@
-namespace Content.Application.Contracts.Responses
-{
-    public sealed class CreateArticleResponseDto
-    {
-        public long ArticleId { get; init; }
-        public string PublicId { get; init; } = string.Empty;
-        public string Status { get; init; } = string.Empty;
-        public int Version { get; init; }
-        public DateTime CreatedAt { get; init; }
-    }
-}
+namespace Content.Application.Contracts.Responses;
 
+public sealed class CreateArticleResponseDto
+{
+    public long ArticleId { get; init; }
+
+    public string ArticlePublicId { get; init; } = string.Empty;
+
+    public long CategoryId { get; init; }
+
+    public long AuthorUserId { get; init; }
+
+    public string Title { get; init; } = string.Empty;
+
+    public string Summary { get; init; } = string.Empty;
+
+    public string Status { get; init; } = string.Empty;
+
+    public long? CoverMediaId { get; init; }
+
+    public IReadOnlyCollection<long> TagIds { get; init; } = Array.Empty<long>();
+
+    public long Version { get; init; }
+
+    public DateTime CreatedAt { get; init; }
+}

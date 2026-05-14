@@ -12,7 +12,7 @@ namespace CommercialNews.Api.Api.Admin.Contracts.Content.Tags.Responses
         public bool IsActive { get; init; }
         public bool IsDeleted { get; init; }
 
-        public int Version { get; init; }
+        public long Version { get; init; }
 
         public DateTime CreatedAt { get; init; }
         public DateTime UpdatedAt { get; init; }

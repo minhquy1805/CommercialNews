@@ -4,53 +4,52 @@ using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
 
-namespace Content.Application.UseCases.Tags.GetTagById
+namespace Content.Application.UseCases.Tags.GetTagById;
+
+public sealed class GetTagByIdUseCase : IGetTagByIdUseCase
 {
-    public sealed class GetTagByIdUseCase : IGetTagByIdUseCase
+    private readonly ITagRepository _tagRepository;
+
+    public GetTagByIdUseCase(ITagRepository tagRepository)
     {
-        private readonly ITagRepository _tagRepository;
+        _tagRepository = tagRepository;
+    }
 
-        public GetTagByIdUseCase(ITagRepository tagRepository)
+    public async Task<Result<GetTagByIdResponseDto>> ExecuteAsync(
+        GetTagByIdRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request.TagId <= 0)
         {
-            _tagRepository = tagRepository;
+            return Result<GetTagByIdResponseDto>.Failure(
+                ContentErrors.Tag.InvalidTagId);
         }
 
-        public async Task<Result<GetTagByIdResponseDto>> ExecuteAsync(
-            GetTagByIdRequestDto request,
-            CancellationToken cancellationToken = default)
+        var tag = await _tagRepository.GetByIdAsync(
+            request.TagId,
+            cancellationToken);
+
+        if (tag is null)
         {
-            if (request.TagId <= 0)
-            {
-                return Result<GetTagByIdResponseDto>.Failure(
-                    ContentErrors.Tag.InvalidTagId);
-            }
-
-            var tag = await _tagRepository.GetByIdAsync(
-                request.TagId,
-                cancellationToken);
-
-            if (tag is null)
-            {
-                return Result<GetTagByIdResponseDto>.Failure(
-                    ContentErrors.Tag.NotFound);
-            }
-
-            var response = new GetTagByIdResponseDto
-            {
-                TagId = tag.TagId,
-                PublicId = tag.PublicId,
-                Name = tag.Name,
-                NameNormalized = tag.NameNormalized,
-                Description = tag.Description,
-                IsActive = tag.IsActive,
-                IsDeleted = tag.IsDeleted,
-                Version = tag.Version,
-                CreatedAt = tag.CreatedAt,
-                UpdatedAt = tag.UpdatedAt,
-                DeletedAt = tag.DeletedAt
-            };
-
-            return Result<GetTagByIdResponseDto>.Success(response);
+            return Result<GetTagByIdResponseDto>.Failure(
+                ContentErrors.Tag.NotFound);
         }
+
+        var response = new GetTagByIdResponseDto
+        {
+            TagId = tag.TagId,
+            PublicId = tag.PublicId,
+            Name = tag.Name,
+            NameNormalized = tag.NameNormalized,
+            Description = tag.Description,
+            IsActive = tag.IsActive,
+            IsDeleted = tag.IsDeleted,
+            Version = tag.Version,
+            CreatedAt = tag.CreatedAt,
+            UpdatedAt = tag.UpdatedAt,
+            DeletedAt = tag.DeletedAt
+        };
+
+        return Result<GetTagByIdResponseDto>.Success(response);
     }
 }
