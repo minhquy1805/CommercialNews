@@ -91,7 +91,7 @@ Move an article from draft to public truth safely and durably.
 
 4. Admin calls `PUT /api/v1/admin/content/articles/{articleId}` to update draft content.
 5. Content validates update legality and freshness.
-6. Content persists article updates and appends revision/history entry according to policy.
+6. Content persists article updates, appends revision/history entry according to policy, increments `Article.Version` for meaningful changes, and writes `OutboxMessage` with event `content.article_updated` in the same transaction when the update is meaningful.
 
 7. Admin calls `POST /api/v1/admin/content/articles/{articleId}:publish`.
 8. Authorization enforces publish policy.

@@ -186,6 +186,12 @@ services:
       RabbitMq__AuditConsumer__RoutingKeys__17: "identity.user_unlocked"
       RabbitMq__AuditConsumer__RoutingKeys__18: "identity.email_marked_verified"
       RabbitMq__AuditConsumer__RoutingKeys__19: "identity.user_sessions_revoked"
+      RabbitMq__AuditConsumer__RoutingKeys__20: "content.article_created"
+      RabbitMq__AuditConsumer__RoutingKeys__21: "content.article_updated"
+      RabbitMq__AuditConsumer__RoutingKeys__22: "content.article_published"
+      RabbitMq__AuditConsumer__RoutingKeys__23: "content.article_unpublished"
+      RabbitMq__AuditConsumer__RoutingKeys__24: "content.article_archived"
+      RabbitMq__AuditConsumer__RoutingKeys__25: "content.article_soft_deleted"
     depends_on:
       - cn-mssql
       - rabbitmq
