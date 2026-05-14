@@ -7,6 +7,7 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
+using Content.Application.Ports.Services;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
 
@@ -22,6 +23,7 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
     private readonly IPublicIdGenerator _publicIdGenerator;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
+    private readonly IContentOutboxWriter _contentOutboxWriter;
 
     public CreateArticleUseCase(
         IArticleRepository articleRepository,
@@ -31,7 +33,8 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
         IContentUnitOfWork unitOfWork,
         IPublicIdGenerator publicIdGenerator,
         IDateTimeProvider dateTimeProvider,
-        IRequestContext requestContext)
+        IRequestContext requestContext,
+        IContentOutboxWriter contentOutboxWriter)
     {
         _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
         _categoryRepository = categoryRepository ?? throw new ArgumentNullException(nameof(categoryRepository));
@@ -41,6 +44,7 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
         _publicIdGenerator = publicIdGenerator ?? throw new ArgumentNullException(nameof(publicIdGenerator));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
+        _contentOutboxWriter = contentOutboxWriter ?? throw new ArgumentNullException(nameof(contentOutboxWriter));
     }
 
     public async Task<Result<CreateArticleResponseDto>> ExecuteAsync(
@@ -115,48 +119,70 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            (long articleId, long version) = await _articleRepository.InsertAsync(
-                article,
-                cancellationToken);
-
-            foreach (long tagId in distinctTagIds)
+            try
             {
-                ArticleTag articleTag = ArticleTag.Attach(
-                    articleId: articleId,
-                    tagId: tagId,
-                    nowUtc: nowUtc,
-                    actorUserId: createdByUserId);
-
-                ArticleTag? attachedTag = await _articleTagRepository.InsertAsync(
-                    articleTag,
+                (long articleId, long version) = await _articleRepository.InsertAsync(
+                    article,
                     cancellationToken);
 
-                if (attachedTag is null)
+                foreach (long tagId in distinctTagIds)
                 {
-                    await _unitOfWork.RollbackAsync(cancellationToken);
+                    ArticleTag articleTag = ArticleTag.Attach(
+                        articleId: articleId,
+                        tagId: tagId,
+                        nowUtc: nowUtc,
+                        actorUserId: createdByUserId);
 
-                    return Result<CreateArticleResponseDto>.Failure(
-                        ContentErrors.WriteCommitFailed);
+                    ArticleTag? attachedTag = await _articleTagRepository.InsertAsync(
+                        articleTag,
+                        cancellationToken);
+
+                    if (attachedTag is null)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<CreateArticleResponseDto>.Failure(
+                            ContentErrors.WriteCommitFailed);
+                    }
                 }
+
+                await _contentOutboxWriter.EnqueueArticleCreatedAsync(
+                    unitOfWork: _unitOfWork,
+                    articleId: articleId,
+                    articlePublicId: article.ArticlePublicId,
+                    categoryId: article.CategoryId,
+                    authorUserId: article.AuthorUserId,
+                    createdByUserId: createdByUserId,
+                    status: article.Status,
+                    tagIds: distinctTagIds,
+                    version: version,
+                    createdAtUtc: article.CreatedAt,
+                    correlationId: _requestContext.CorrelationId,
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+
+                return Result<CreateArticleResponseDto>.Success(
+                    new CreateArticleResponseDto
+                    {
+                        ArticleId = articleId,
+                        ArticlePublicId = article.ArticlePublicId,
+                        CategoryId = article.CategoryId,
+                        AuthorUserId = article.AuthorUserId,
+                        Title = article.Title,
+                        Summary = article.Summary,
+                        Status = article.Status,
+                        CoverMediaId = article.CoverMediaId,
+                        TagIds = distinctTagIds,
+                        Version = version,
+                        CreatedAt = article.CreatedAt
+                    });
             }
-
-            await _unitOfWork.CommitAsync(cancellationToken);
-
-            return Result<CreateArticleResponseDto>.Success(
-                new CreateArticleResponseDto
-                {
-                    ArticleId = articleId,
-                    ArticlePublicId = article.ArticlePublicId,
-                    CategoryId = article.CategoryId,
-                    AuthorUserId = article.AuthorUserId,
-                    Title = article.Title,
-                    Summary = article.Summary,
-                    Status = article.Status,
-                    CoverMediaId = article.CoverMediaId,
-                    TagIds = distinctTagIds,
-                    Version = version,
-                    CreatedAt = article.CreatedAt
-                });
+            catch
+            {
+                await RollbackIfNeededAsync(cancellationToken);
+                throw;
+            }
         }
         catch (PersistenceException exception)
         {

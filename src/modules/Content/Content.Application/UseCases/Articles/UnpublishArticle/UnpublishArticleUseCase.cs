@@ -6,6 +6,7 @@ using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
 using Content.Application.Ports.Persistence;
+using Content.Application.Ports.Services;
 using Content.Domain.Constants;
 using Content.Domain.Entities;
 using Content.Domain.Exceptions;
@@ -19,13 +20,15 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
+    private readonly IContentOutboxWriter _contentOutboxWriter;
 
     public UnpublishArticleUseCase(
         IArticleRepository articleRepository,
         IArticleLifecycleEventRepository articleLifecycleEventRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
-        IRequestContext requestContext)
+        IRequestContext requestContext,
+        IContentOutboxWriter contentOutboxWriter)
     {
         _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
         _articleLifecycleEventRepository = articleLifecycleEventRepository
@@ -33,6 +36,7 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
+        _contentOutboxWriter = contentOutboxWriter ?? throw new ArgumentNullException(nameof(contentOutboxWriter));
     }
 
     public async Task<Result<UnpublishArticleResponseDto>> ExecuteAsync(
@@ -92,58 +96,79 @@ public sealed class UnpublishArticleUseCase : IUnpublishArticleUseCase
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            Article? unpublishedArticle = await _articleRepository.UnpublishAsync(
-                articleId: request.ArticleId,
-                actorUserId: actorUserId,
-                expectedVersion: request.ExpectedVersion,
-                reason: reason,
-                cancellationToken: cancellationToken);
-
-            if (unpublishedArticle is null)
+            try
             {
-                await _unitOfWork.RollbackAsync(cancellationToken);
+                Article? unpublishedArticle = await _articleRepository.UnpublishAsync(
+                    articleId: request.ArticleId,
+                    actorUserId: actorUserId,
+                    expectedVersion: request.ExpectedVersion,
+                    reason: reason,
+                    cancellationToken: cancellationToken);
 
-                return Result<UnpublishArticleResponseDto>.Failure(
-                    ContentErrors.ConcurrencyConflict);
-            }
-
-            ArticleLifecycleEvent lifecycleEvent = ArticleLifecycleEvent.Create(
-                articleId: unpublishedArticle.ArticleId,
-                articleVersion: unpublishedArticle.Version,
-                actionType: ArticleLifecycleActionTypes.Unpublish,
-                fromStatus: fromStatus,
-                toStatus: unpublishedArticle.Status,
-                reason: reason,
-                actorUserId: actorUserId,
-                occurredAt: nowUtc,
-                correlationId: _requestContext.CorrelationId,
-                metadataJson: null);
-
-            ArticleLifecycleEvent? createdLifecycleEvent =
-                await _articleLifecycleEventRepository.InsertAsync(
-                    lifecycleEvent,
-                    cancellationToken);
-
-            if (createdLifecycleEvent is null)
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-
-                return Result<UnpublishArticleResponseDto>.Failure(
-                    ContentErrors.WriteCommitFailed);
-            }
-
-            await _unitOfWork.CommitAsync(cancellationToken);
-
-            return Result<UnpublishArticleResponseDto>.Success(
-                new UnpublishArticleResponseDto
+                if (unpublishedArticle is null)
                 {
-                    ArticleId = unpublishedArticle.ArticleId,
-                    ArticlePublicId = unpublishedArticle.ArticlePublicId,
-                    Status = unpublishedArticle.Status,
-                    UnpublishedAt = unpublishedArticle.UnpublishedAt,
-                    Version = unpublishedArticle.Version,
-                    UpdatedAt = unpublishedArticle.UpdatedAt
-                });
+                    await RollbackIfNeededAsync(cancellationToken);
+
+                    return Result<UnpublishArticleResponseDto>.Failure(
+                        ContentErrors.ConcurrencyConflict);
+                }
+
+                ArticleLifecycleEvent lifecycleEvent = ArticleLifecycleEvent.Create(
+                    articleId: unpublishedArticle.ArticleId,
+                    articleVersion: unpublishedArticle.Version,
+                    actionType: ArticleLifecycleActionTypes.Unpublish,
+                    fromStatus: fromStatus,
+                    toStatus: unpublishedArticle.Status,
+                    reason: reason,
+                    actorUserId: actorUserId,
+                    occurredAt: nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    metadataJson: null);
+
+                ArticleLifecycleEvent? createdLifecycleEvent =
+                    await _articleLifecycleEventRepository.InsertAsync(
+                        lifecycleEvent,
+                        cancellationToken);
+
+                if (createdLifecycleEvent is null)
+                {
+                    await RollbackIfNeededAsync(cancellationToken);
+
+                    return Result<UnpublishArticleResponseDto>.Failure(
+                        ContentErrors.WriteCommitFailed);
+                }
+
+                await _contentOutboxWriter.EnqueueArticleUnpublishedAsync(
+                    unitOfWork: _unitOfWork,
+                    articleId: unpublishedArticle.ArticleId,
+                    articlePublicId: unpublishedArticle.ArticlePublicId,
+                    fromStatus: fromStatus,
+                    toStatus: unpublishedArticle.Status,
+                    reason: reason,
+                    actorUserId: actorUserId,
+                    version: unpublishedArticle.Version,
+                    unpublishedAtUtc: unpublishedArticle.UnpublishedAt ?? nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.CommitAsync(cancellationToken);
+
+                return Result<UnpublishArticleResponseDto>.Success(
+                    new UnpublishArticleResponseDto
+                    {
+                        ArticleId = unpublishedArticle.ArticleId,
+                        ArticlePublicId = unpublishedArticle.ArticlePublicId,
+                        Status = unpublishedArticle.Status,
+                        UnpublishedAt = unpublishedArticle.UnpublishedAt,
+                        Version = unpublishedArticle.Version,
+                        UpdatedAt = unpublishedArticle.UpdatedAt
+                    });
+            }
+            catch
+            {
+                await RollbackIfNeededAsync(cancellationToken);
+                throw;
+            }
         }
         catch (PersistenceException exception)
         {
