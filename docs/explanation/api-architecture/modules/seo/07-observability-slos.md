@@ -15,9 +15,9 @@ Related:
 
 ### `/seo/resolve` (routing hot path)
 Track separately for:
-- success (200/204 depending on design)
-- not-found (404) — expected in normal usage
-- errors (5xx/timeouts) — incidents
+- success: `200`
+- safe not-found: `404` — expected in normal usage
+- errors: `5xx` / timeouts — incidents
 
 SLIs:
 - P95/P99 latency
@@ -29,7 +29,7 @@ SLIs:
 
 Correctness signals (must-have):
 - "resolved → denied by visibility" rate (internal signal from Reading/Content checks; should not leak to clients)
-- any draft/unpublished exposure incidents = **0** (release blocker)
+- any draft/non-public exposure incidents = **0** (release blocker)
 - truth-vs-derived disagreement rate:
   - route/serving state says resolvable
   - Content truth says non-public
@@ -66,7 +66,16 @@ Metadata lag must never be confused with visibility truth or route safety truth.
 ## 3) Async workflow health (SEO updates)
 
 ### Consumer pipeline SLIs
-- consumer success/failure rate (by eventType: published/unpublished/slug-changed)
+- consumer success/failure rate by event type:
+  - `content.article_published`
+  - `content.article_unpublished`
+  - `content.article_archived`
+  - `content.article_soft_deleted`
+  - `content.article_restored`
+  - `content.article_updated`
+  - `seo.slug_route_changed`
+  - `seo.slug_route_deactivated`
+  - `seo.metadata_updated`
 - processing latency (P95/P99)
 - retry volume and error classification (transient vs permanent)
 - broker queue depth (ready/unacked)
@@ -78,9 +87,9 @@ Metadata lag must never be confused with visibility truth or route safety truth.
 - broker publish failure rate for SEO-relevant events where observable
 - queue drain rate during backlog recovery
 
-### Time-to-consistency (publish/unpublish)
+### Time-to-consistency (Content event → SEO apply)
 Measure distribution:
-- `content.occurredAt (publish/unpublish) → SEO appliedAt`
+- `OccurredAtUtc` on `content.article_*` event → SEO `appliedAt`
 Report P50/P95/P99 time-to-consistency.
 
 Operational expectation:
@@ -103,7 +112,34 @@ Observability must distinguish:
 
 ---
 
-## 4) Batch / rebuild / reconciliation signals (SEO-specific)
+## 4) Admin SEO write signals
+
+Track admin SEO APIs separately from public hot-path APIs.
+
+### Admin API SLIs
+- `PUT /api/v1/admin/seo/articles/{articlePublicId}` latency (P95/P99)
+- `PUT /api/v1/admin/seo/articles/{articlePublicId}` error rate by status class
+- `409 Conflict` slug conflict rate
+- `412 Precondition Failed` stale version / precondition failure rate
+- validation failure rate by error code where available
+- idempotency replay/retry convergence count where `Idempotency-Key` is used
+
+### Manual override and sync-protection signals
+- manual override update count
+- manual override protected/skip count for Content-derived metadata sync
+- automatic metadata update count
+- automatic metadata update rejected by stale `AggregateVersion`
+- manual override state mismatch detected by reconciliation
+
+### SEO truth mutation signals
+- SEO truth commit success/failure count
+- Outbox write failure count for SEO truth mutations
+- post-commit SEO integration event backlog/lag
+- cache/sitemap/search refresh lag after admin write, tracked as async lag rather than sync API failure
+
+---
+
+## 5) Batch / rebuild / reconciliation signals (SEO-specific)
 
 These apply when SEO uses bounded workflows for:
 - route-serving rebuild
@@ -142,7 +178,7 @@ Operators should be able to see whether:
 
 ---
 
-## 5) Incident signals
+## 6) Incident signals
 
 ### Hot path regressions
 - sudden spikes in resolve failures (5xx/timeouts)
@@ -151,14 +187,17 @@ Operators should be able to see whether:
 
 ### Admin workflow issues
 - slug conflict error spikes (unique constraint violations or repeated collisions)
+- `412 Precondition Failed` spikes (stale forms or stale clients)
 - unusual rate of slug changes/rewrites (possible editorial tooling issue)
 - stale-update conflict spikes if optimistic concurrency is used
+- manual override protected/skip spikes after Content update bursts
+- Outbox write failures on SEO truth mutations
 
 ### Safety regressions (highest severity)
-- any signal of draft/unpublished leak (immediate stop/rollback)
+- any signal of draft/non-public leak (immediate stop/rollback)
 - abnormal rise in "resolved but denied by visibility" (may indicate routing truth drift, stale serving state, or content state regressions)
 - publication/cutover of incorrect derived route output (highest severity if such outputs become active)
-- stale route surviving after unpublish/archive beyond accepted lag budget
+- stale route surviving after unpublish/archive/soft-delete beyond accepted lag budget
 - replay/rebuild publishing older route knowledge over fresher truth
 
 ### Duplicate/replay storm indicators
@@ -169,12 +208,13 @@ Operators should be able to see whether:
 
 ---
 
-## 6) Release gates (recommended)
+## 7) Release gates (recommended)
 
 During rollout, gate on:
 - `/seo/resolve` P99 latency sustained regression
 - spikes in 5xx/timeouts on resolve/metadata
 - sustained DB fallback rate increase (cache/invalidation regression)
+- admin SEO write error or latency sustained regression
 - SEO consumer backlog/lag sustained growth (outbox age, queue depth)
 - DLQ non-zero and growing / DLQ oldest age breach
 - rebuild/reconciliation failure spikes for SEO-derived outputs
@@ -184,14 +224,55 @@ During rollout, gate on:
 
 ### Strong stop conditions
 Immediate pause/rollback is recommended if:
-- draft/unpublished exposure is detected
+- draft/non-public exposure is detected
 - active route-serving artifact contradicts current truth in a way that can expose content incorrectly
 - rebuild/cutover publishes stale route knowledge over fresher SEO or Content truth
 - routing truth itself becomes inconsistent or conflict errors spike abnormally after rollout
 
 ---
 
-## 7) Operator questions this module must answer
+## 8) Suggested SLO posture
+
+Baseline targets are policy-level and must be tuned after measurement.
+
+- `/seo/resolve` availability: high availability target, excluding valid `404`.
+- `/seo/resolve` latency: track P95/P99; budget should be tighter than metadata/admin APIs.
+- visibility leak: zero tolerated incidents.
+- SEO async consistency lag: track P95/P99 from Content event occurred time to SEO applied time.
+- DLQ/dead-state: should be zero during normal operation; any growth requires investigation.
+- rebuild/cutover correctness: zero stale cutover over fresher truth.
+
+Correctness SLOs such as visibility leak and stale cutover are stricter than latency/freshness SLOs.
+
+---
+
+## 9) Sync vs async interpretation rule
+
+A successful admin SEO write means SEO truth committed.
+It does not mean cache invalidation, sitemap refresh, search/index refresh, Audit ingestion, or downstream projections have completed.
+
+Async lag must be measured separately through outbox, broker, consumer, cache, and rebuild signals.
+
+---
+
+## 10) Metric cardinality guidance
+
+Metrics must not use raw `slug` or `resourcePublicId` as high-cardinality labels by default.
+
+Allowed labels:
+- endpoint
+- status class
+- eventType
+- scope
+- dependency
+- outcome
+- errorCode
+
+Use logs/traces for specific slug/resource investigations.
+
+---
+
+## 11) Operator questions this module must answer
 
 SEO observability should help answer:
 

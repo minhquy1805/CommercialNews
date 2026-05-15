@@ -32,11 +32,19 @@ Reading owns:
 **Rule:** SEO can answer **where a slug points**.  
 It does not own **whether that target is publicly visible right now**.
 
+**Rule:** Public and cross-module SEO contracts should use stable public identifiers such as `ResourcePublicId`, not internal database primary keys.
+
 ---
 
 ## 2) Allowed dependencies
 
-- Consumes Content events (`ArticlePublished/Unpublished/Archived`) asynchronously
+- Consumes Content lifecycle events asynchronously:
+  - `content.article_published`
+  - `content.article_unpublished`
+  - `content.article_archived`
+  - `content.article_soft_deleted`
+  - `content.article_restored`
+  - `content.article_updated` where SEO auto-sync policy requires metadata evaluation
 - Reading module calls SEO public APIs for slug routing
 - SEO may emit cache/projection/search update signals
 - SEO batch/rebuild workflows may read:
@@ -44,6 +52,9 @@ It does not own **whether that target is publicly visible right now**.
   - bounded Content truth inputs where reconciliation requires comparison
   - cache/derived serving state for mismatch detection
 - downstream consumers may consume SEO-owned events for cache/search/projection refresh
+- Audit may consume SEO-owned events for investigation/governance records if SEO event emission is adopted
+- cache/search/sitemap refresh consumers may consume SEO-owned events as derived-state update signals
+- Audit ingestion lag must not redefine SEO truth commit success
 
 ### 2.1 Allowed dependency shapes
 Approved interaction patterns are:
@@ -115,12 +126,17 @@ But none of those automatically become:
 
 ### 5.1 Content events are causes SEO reacts to
 SEO may consume:
-- `ArticlePublished`
-- `ArticleUnpublished`
-- `ArticleArchived`
-- related Content lifecycle signals
+- `content.article_published`
+- `content.article_unpublished`
+- `content.article_archived`
+- `content.article_soft_deleted`
+- `content.article_restored`
+- `content.article_updated` where SEO auto-sync policy requires metadata evaluation
 
 But those events do not transfer ownership of publication truth to SEO.
+
+Content events are inputs for SEO convergence only.
+They do not authorize SEO to write Content lifecycle state or infer final public visibility without truth validation.
 
 SEO uses them to:
 - converge routing behavior
@@ -134,6 +150,14 @@ SEO may emit events or signals for:
 - metadata refresh
 - search/index synchronization
 - downstream serving refresh
+
+SEO event emission is optional in V1.
+If adopted, SEO truth mutation and the Outbox record must commit atomically.
+
+Possible SEO-owned integration events:
+- `seo.slug_route_changed`
+- `seo.slug_route_deactivated`
+- `seo.metadata_updated`
 
 SEO owns those signals as propagation mechanisms.
 It does not own the truth of Content lifecycle through them.
