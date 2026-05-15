@@ -52,12 +52,12 @@ Therefore:
 
 ### 1.1 Truth (SEO store)
 SEO owns the routing truth and SEO metadata:
-- slug routing truth: `(Scope, Slug) -> ArticleId/PublicId` plus status/flags as defined by SEO policy
+- slug routing truth: `(Scope, Slug) -> ResourceType + ResourcePublicId` plus status/flags as defined by SEO policy
 - optional SEO metadata: canonical, meta title, meta description, social preview fields
 
 Truth invariants:
 - `(Scope, Slug)` is unique for **active** routes
-- routing truth is authoritative for resolving a slug to a target identifier
+- routing truth is authoritative for resolving a slug to a public target identity
 - only one active route is valid per slug scope at a time, according to V1 policy
 
 ### 1.2 Derived (fast path)
@@ -94,7 +94,7 @@ Required for:
 
 #### Ordered / causality-sensitive consistency
 Required for:
-- route changes per target/article
+- route changes per target/resource
 - slug switchovers
 - stale-route rejection
 - metadata convergence where overwrite order matters
@@ -132,7 +132,7 @@ Examples:
 - a rebuilt route-serving dataset publishes older route knowledge after newer truth exists
 
 Therefore:
-- resolving `slug -> articleId` is only one part of public correctness
+- resolving `slug -> ResourcePublicId` is only one part of public correctness
 - Reading/Public Query must still validate:
   - the article exists
   - the article is `Published`
@@ -340,24 +340,34 @@ It also applies when:
 
 ### 5.1 Events consumed by SEO (V1)
 SEO reacts to Content lifecycle events (via Outbox → Broker → Consumer), such as:
-- `ArticlePublished`
-- `ArticleUnpublished`
-- `ArticleDeleted/Restored` (if used)
-- `SlugChanged` / `SeoMetadataUpdated` (if modeled separately)
+- `content.article_published`
+- `content.article_unpublished`
+- `content.article_archived`
+- `content.article_soft_deleted`
+- `content.article_restored`
+- `content.article_updated`
 
 ### 5.2 Events emitted by SEO (V1)
-SEO may emit downstream signals for:
+SEO event emission is optional in V1.
+
+If adopted, SEO may emit downstream signals for:
 - cache invalidation/update
 - metadata refresh
 - route update notifications to derived consumers
 - future projection/index synchronization
 
+Possible SEO integration events:
+- `seo.slug_route_changed`
+- `seo.slug_route_deactivated`
+- `seo.metadata_updated`
+
 Where ordering matters, events must include:
-- `messageId`
-- `aggregateId`
-- `version`
-- `occurredAt`
-- `correlationId`
+- `MessageId`
+- `EventType`
+- `AggregateId` / `ResourcePublicId`
+- `AggregateVersion`
+- `OccurredAtUtc`
+- `CorrelationId`
 
 ### 5.3 Lag budget (policy-level)
 - routing cache staleness: expected to be small (seconds) under normal load; spikes are acceptable but must be observable
@@ -369,7 +379,7 @@ On `/resolve` or equivalent routing flow:
 
 1. cache-first lookup (Redis), if enabled  
 2. on miss or suspicion of staleness, DB lookup from SEO truth  
-3. return routing target identifier only  
+3. return `ResourcePublicId` as a routing target only
 4. caller (Reading/Public Query) must still enforce `Published` visibility from Content truth
 
 On public detail:
@@ -410,17 +420,21 @@ They must remain:
 ## 6) Idempotency (must-haves)
 
 ### 6.1 Admin APIs
-- `PUT /admin/seo/articles/{articleId}` is naturally idempotent if it replaces the full SEO state
-- `PUT /admin/seo/slug` (if exists) MUST be idempotent by the command’s business meaning, typically around `(Scope, ArticleId)` plus expected version semantics where applicable
+- `PUT /api/v1/admin/seo/articles/{articlePublicId}` is naturally idempotent if it replaces the full SEO state for the requested scope
+- slug-specific command endpoints, if introduced later, MUST be idempotent by the command’s business meaning, typically around `(Scope, ResourceType, ResourcePublicId)` plus expected version semantics where applicable
 
 ### 6.2 Consumer idempotency
-SEO consumers must tolerate at-least-once delivery:
-- reprocessing `ArticlePublished` must not create duplicate routes or metadata rows
-- reprocessing `SlugChanged` must converge to the latest active mapping
+SEO truth-affecting consumers and downstream SEO-event consumers must tolerate at-least-once delivery:
+- reprocessing `content.article_published` must not create duplicate routes or metadata rows
+- reprocessing `seo.slug_route_changed` must converge to the latest active mapping
 - duplicate invalidation/update signals must not corrupt cache or derived route state
 
 Recommended dedupe key:
-- `MessageId`, stored durably or in Redis with TTL according to system policy
+- `MessageId`
+
+Recommended storage:
+- durable processed-message table or durable apply marker for SEO truth-affecting consumers
+- Redis TTL may be used only for non-critical cache refresh/invalidation dedupe, not as the sole protection for SEO truth mutation
 
 ### 6.3 Duplicate delivery vs stale delivery
 SEO must distinguish:
@@ -458,20 +472,42 @@ Therefore:
 - repeated refresh/invalidation should be harmless
 - stale refresh must lose to fresher truth/version state
 
+### 6.7 Content event idempotency matrix
+
+| Event | Message-level dedupe | Business-level guard | Version rule | Recovery |
+|---|---|---|---|---|
+| `content.article_published` | `MessageId` | `(Scope, ResourceType, ResourcePublicId)` and `(Scope, Slug)` | apply only if incoming `AggregateVersion` is newer | resync from Content truth |
+| `content.article_unpublished` | `MessageId` | deactivate by `(Scope, ResourceType, ResourcePublicId)` | ignore stale `AggregateVersion` | resync Content visibility |
+| `content.article_archived` | `MessageId` | deactivate by `(Scope, ResourceType, ResourcePublicId)` | ignore stale `AggregateVersion` | resync Content visibility |
+| `content.article_soft_deleted` | `MessageId` | deactivate by `(Scope, ResourceType, ResourcePublicId)` | ignore stale `AggregateVersion` | resync Content visibility |
+| `content.article_restored` | `MessageId` | reactivate only if Content truth says public | apply only if incoming `AggregateVersion` is newer | truth re-check before indexable |
+| `content.article_updated` | `MessageId` | do not overwrite manual metadata | apply only if incoming `AggregateVersion` is newer | resync metadata defaults |
+
+### 6.8 Manual override consistency
+
+Automatic Content event sync must not overwrite manual SEO metadata unless explicitly allowed.
+
+Rules:
+- manual `MetaTitle` blocks automatic title-derived meta title overwrite
+- manual `MetaDescription` blocks automatic summary-derived meta description overwrite
+- manual social preview fields block automatic social-preview overwrites for those fields
+- lifecycle-derived route/indexability updates may still apply
+- manual override decisions must be persisted in SEO truth, not inferred from timestamps
+
 ---
 
 ## 7) Ordering & conflict posture
 
 ### 7.1 Ordered transitions
-For a given article/route target, the following transitions are ordered:
-- publish / unpublish reactions
+For a given resource/route target, the following transitions are ordered:
+- publish / unpublish / archive / soft-delete / restore reactions
 - slug updates
 - SEO metadata changes where overwrite ordering matters
 - rebuild/publication of derived route-serving outputs where overlapping runs are possible
 
 Events SHOULD include:
-- `AggregateId = ArticleId/PublicId`
-- `Version` (monotonic per target/aggregate)
+- `AggregateId = ResourcePublicId`
+- `AggregateVersion` (monotonic per target/aggregate)
 
 ### 7.2 Consumer rule
 If version gaps or stale deliveries are detected:
@@ -512,7 +548,7 @@ If a candidate derived route-serving dataset is built from bounded input:
 
 - indexability and routing behavior must reflect Content state by policy
 - if SEO processing is delayed, Content/Reading must still enforce visibility correctness
-- unpublish must never be undone by stale SEO routing:
+- non-public lifecycle changes must never be undone by stale SEO routing:
   - even if slug still resolves
   - even if cache still contains a target
   - even if an old derived route-serving candidate exists
@@ -546,17 +582,22 @@ None of them may override Content truth on public visibility.
 
 ### 9.1 Example key posture
 Illustrative key:
-- `cn:seo:slug:{scope}:{slug}` → `{ articleId/publicId, version, updatedAt }`
+- `cn:seo:slug:{scope}:{slug}` → `{ resourceType, resourcePublicId, version, updatedAt }`
 
 Where available:
 - `version` is preferred over `updatedAt` for freshness comparison
 
 ### 9.2 Invalidation triggers
 Typical invalidation/update triggers:
-- `ArticlePublished`
-- `ArticleUnpublished`
-- `SlugChanged`
-- optional `SeoMetadataUpdated`
+- `content.article_published`
+- `content.article_unpublished`
+- `content.article_archived`
+- `content.article_soft_deleted`
+- `content.article_restored`
+- `content.article_updated`
+- `seo.slug_route_changed`
+- `seo.slug_route_deactivated`
+- `seo.metadata_updated`
 
 ### 9.3 Cache rules
 - event-driven invalidation/update is preferred
@@ -674,7 +715,7 @@ Minimum signals:
 Logs should include:
 - `correlationId / traceId`
 - scope + slug (when safe)
-- resolved target id
+- resolved target public id
 - route source (`cache` vs `DB`)
 - fallback path taken
 - visibility-safe handoff outcome when available
