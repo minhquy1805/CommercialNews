@@ -14,6 +14,9 @@ Desktop.ini
 *.userosscache
 *.sln.docstates
 *.rsuser
+# C# Dev Kit / Roslyn language server caches
+*.csproj.lscache
+*.sln.lscache
 
 # --------------------------------------------------
 # Build outputs
