@@ -8,10 +8,11 @@
       * SeoMetadata
   - Support:
       * fast slug routing truth
-      * optional SEO metadata truth
+      * SEO metadata truth
       * deterministic slug conflict handling
       * active/inactive route policy
       * optimistic concurrency via Version
+      * Content-event apply markers without a dedicated consumed-message table
       * future outbox / async invalidation / rebuild readiness
   - Idempotent: safe to re-run.
 
@@ -22,6 +23,13 @@
   - Redis/cache/search/projections are NOT modeled here in 001_tables.sql.
   - Index-heavy tuning belongs in 010_indexes.sql.
   - Stored procedures belong in 020_procs.sql.
+  - SEO V1 does not create a dedicated SeoConsumedMessage table.
+    Truth-affecting consumer idempotency is handled through:
+      * SourceAggregateVersion
+      * LastAppliedMessageId
+      * LastSyncedAtUtc
+      * unique constraints / indexes
+      * idempotent upsert procedures
 */
 
 SET NOCOUNT ON;
@@ -43,27 +51,15 @@ BEGIN
 END
 GO
 
-IF SCHEMA_ID(N'content') IS NULL
-BEGIN
-    THROW 57003, 'Schema [content] does not exist. Run 010_create_schemas.sql first.', 1;
-END
-GO
-
 IF SCHEMA_ID(N'identity') IS NULL
 BEGIN
-    THROW 57004, 'Schema [identity] does not exist. Run 010_create_schemas.sql first.', 1;
-END
-GO
-
-IF OBJECT_ID(N'[content].[Article]', N'U') IS NULL
-BEGIN
-    THROW 57005, 'Table [content].[Article] does not exist. Run content/001_tables.sql first.', 1;
+    THROW 57003, 'Schema [identity] does not exist. Run identity/001_tables.sql first.', 1;
 END
 GO
 
 IF OBJECT_ID(N'[identity].[UserAccount]', N'U') IS NULL
 BEGIN
-    THROW 57006, 'Table [identity].[UserAccount] does not exist. Run identity/001_tables.sql first.', 1;
+    THROW 57004, 'Table [identity].[UserAccount] does not exist. Run identity/001_tables.sql first.', 1;
 END
 GO
 
@@ -74,42 +70,77 @@ IF OBJECT_ID(N'[seo].[SeoMetadata]', N'U') IS NULL
 BEGIN
     CREATE TABLE [seo].[SeoMetadata]
     (
-        [SeoId]                 BIGINT IDENTITY(1,1) NOT NULL,
+        [SeoId]                  BIGINT IDENTITY(1,1) NOT NULL,
 
-        [ArticleId]             BIGINT               NOT NULL,
+        [Scope]                  VARCHAR(30)          NOT NULL
+            CONSTRAINT [DF_SeoMetadata_Scope] DEFAULT ('public'),
 
-        [CanonicalUrl]          NVARCHAR(500)        NULL,
-        [MetaTitle]             NVARCHAR(300)        NULL,
-        [MetaDescription]       NVARCHAR(500)        NULL,
+        [ResourceType]           VARCHAR(50)          NOT NULL,
+        [ResourcePublicId]       CHAR(26)             NOT NULL,
 
-        [OgTitle]               NVARCHAR(300)        NULL,
-        [OgDescription]         NVARCHAR(500)        NULL,
-        [OgImageUrl]            NVARCHAR(800)        NULL,
+        [Slug]                   NVARCHAR(200)        NULL,
+        [CanonicalUrl]           NVARCHAR(500)        NULL,
 
-        [TwitterTitle]          NVARCHAR(300)        NULL,
-        [TwitterDescription]    NVARCHAR(500)        NULL,
-        [TwitterImageUrl]       NVARCHAR(800)        NULL,
+        [MetaTitle]              NVARCHAR(300)        NULL,
+        [MetaDescription]        NVARCHAR(500)        NULL,
 
-        [Version]               INT                  NOT NULL
+        [OgTitle]                NVARCHAR(300)        NULL,
+        [OgDescription]          NVARCHAR(500)        NULL,
+        [OgImageUrl]             NVARCHAR(800)        NULL,
+
+        [TwitterTitle]           NVARCHAR(300)        NULL,
+        [TwitterDescription]     NVARCHAR(500)        NULL,
+        [TwitterImageUrl]        NVARCHAR(800)        NULL,
+
+        [Robots]                 NVARCHAR(100)        NULL,
+
+        [IsManualOverride]       BIT                  NOT NULL
+            CONSTRAINT [DF_SeoMetadata_IsManualOverride] DEFAULT (0),
+
+        /*
+          Content-event apply markers.
+          Used for idempotent, version-aware SEO sync without a dedicated consumed-message table.
+        */
+        [SourceAggregateVersion] BIGINT               NULL,
+        [LastAppliedMessageId]   CHAR(26)             NULL,
+        [LastSyncedAtUtc]        DATETIME2(3)         NULL,
+
+        /*
+          SEO-owned optimistic concurrency version.
+          This is not necessarily the same as SourceAggregateVersion.
+        */
+        [Version]                INT                  NOT NULL
             CONSTRAINT [DF_SeoMetadata_Version] DEFAULT (1),
 
-        [UpdatedAt]             DATETIME2(3)         NOT NULL
-            CONSTRAINT [DF_SeoMetadata_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
-        [UpdatedByUserId]       BIGINT               NULL,
+        [CreatedAtUtc]           DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_SeoMetadata_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+
+        [UpdatedAtUtc]           DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_SeoMetadata_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+
+        [UpdatedByUserId]        BIGINT               NULL,
 
         CONSTRAINT [PK_SeoMetadata]
             PRIMARY KEY CLUSTERED ([SeoId] ASC),
 
-        CONSTRAINT [UQ_SeoMetadata_ArticleId]
-            UNIQUE ([ArticleId]),
-
-        CONSTRAINT [FK_SeoMetadata_Article]
-            FOREIGN KEY ([ArticleId])
-            REFERENCES [content].[Article]([ArticleId]),
+        CONSTRAINT [UQ_SeoMetadata_Scope_Resource]
+            UNIQUE ([Scope], [ResourceType], [ResourcePublicId]),
 
         CONSTRAINT [FK_SeoMetadata_UpdatedByUser]
             FOREIGN KEY ([UpdatedByUserId])
             REFERENCES [identity].[UserAccount]([UserId]),
+
+        CONSTRAINT [CK_SeoMetadata_Scope]
+            CHECK ([Scope] IN ('public')),
+
+        CONSTRAINT [CK_SeoMetadata_ResourceType]
+            CHECK ([ResourceType] IN ('Article')),
+
+        CONSTRAINT [CK_SeoMetadata_ResourcePublicId_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([ResourcePublicId]))) > 0),
+
+        CONSTRAINT [CK_SeoMetadata_Slug_NotBlank]
+            CHECK ([Slug] IS NULL OR LEN(LTRIM(RTRIM([Slug]))) > 0),
 
         CONSTRAINT [CK_SeoMetadata_CanonicalUrl_NotBlank]
             CHECK ([CanonicalUrl] IS NULL OR LEN(LTRIM(RTRIM([CanonicalUrl]))) > 0),
@@ -138,8 +169,20 @@ BEGIN
         CONSTRAINT [CK_SeoMetadata_TwitterImageUrl_NotBlank]
             CHECK ([TwitterImageUrl] IS NULL OR LEN(LTRIM(RTRIM([TwitterImageUrl]))) > 0),
 
+        CONSTRAINT [CK_SeoMetadata_Robots_NotBlank]
+            CHECK ([Robots] IS NULL OR LEN(LTRIM(RTRIM([Robots]))) > 0),
+
+        CONSTRAINT [CK_SeoMetadata_SourceAggregateVersion_Positive]
+            CHECK ([SourceAggregateVersion] IS NULL OR [SourceAggregateVersion] > 0),
+
+        CONSTRAINT [CK_SeoMetadata_LastAppliedMessageId_NotBlank]
+            CHECK ([LastAppliedMessageId] IS NULL OR LEN(LTRIM(RTRIM([LastAppliedMessageId]))) > 0),
+
         CONSTRAINT [CK_SeoMetadata_Version_Positive]
-            CHECK ([Version] > 0)
+            CHECK ([Version] > 0),
+
+        CONSTRAINT [CK_SeoMetadata_UpdatedAtUtc]
+            CHECK ([UpdatedAtUtc] >= [CreatedAtUtc])
     );
 
     PRINT N'Created table: [seo].[SeoMetadata]';
@@ -157,42 +200,59 @@ IF OBJECT_ID(N'[seo].[SlugRegistry]', N'U') IS NULL
 BEGIN
     CREATE TABLE [seo].[SlugRegistry]
     (
-        [SlugId]                BIGINT IDENTITY(1,1) NOT NULL,
+        [SlugId]                 BIGINT IDENTITY(1,1) NOT NULL,
 
-        [ArticleId]             BIGINT               NOT NULL,
-
-        [Slug]                  NVARCHAR(200)        NOT NULL,
-        [Scope]                 VARCHAR(30)          NOT NULL
+        [Scope]                  VARCHAR(30)          NOT NULL
             CONSTRAINT [DF_SlugRegistry_Scope] DEFAULT ('public'),
 
-        [CanonicalUrl]          NVARCHAR(500)        NULL,
+        [Slug]                   NVARCHAR(200)        NOT NULL,
 
-        [IsIndexable]           BIT                  NOT NULL
+        [ResourceType]           VARCHAR(50)          NOT NULL,
+        [ResourcePublicId]       CHAR(26)             NOT NULL,
+
+        [CanonicalUrl]           NVARCHAR(500)        NULL,
+
+        [IsIndexable]            BIT                  NOT NULL
             CONSTRAINT [DF_SlugRegistry_IsIndexable] DEFAULT (0),
 
-        [IsActive]              BIT                  NOT NULL
+        [IsActive]               BIT                  NOT NULL
             CONSTRAINT [DF_SlugRegistry_IsActive] DEFAULT (1),
 
-        [Version]               INT                  NOT NULL
+        /*
+          Content-event apply markers.
+          Used for idempotent, version-aware SEO sync without a dedicated consumed-message table.
+        */
+        [SourceAggregateVersion] BIGINT               NULL,
+        [LastAppliedMessageId]   CHAR(26)             NULL,
+        [LastSyncedAtUtc]        DATETIME2(3)         NULL,
+
+        /*
+          SEO-owned optimistic concurrency version.
+          This is not necessarily the same as SourceAggregateVersion.
+        */
+        [Version]                INT                  NOT NULL
             CONSTRAINT [DF_SlugRegistry_Version] DEFAULT (1),
 
-        [CreatedAt]             DATETIME2(3)         NOT NULL
-            CONSTRAINT [DF_SlugRegistry_CreatedAt] DEFAULT (SYSUTCDATETIME()),
-        [CreatedByUserId]       BIGINT               NULL,
+        [CreatedAtUtc]           DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_SlugRegistry_CreatedAtUtc] DEFAULT (SYSUTCDATETIME()),
 
-        [UpdatedAt]             DATETIME2(3)         NOT NULL
-            CONSTRAINT [DF_SlugRegistry_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
-        [UpdatedByUserId]       BIGINT               NULL,
+        [CreatedByUserId]        BIGINT               NULL,
+
+        [UpdatedAtUtc]           DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_SlugRegistry_UpdatedAtUtc] DEFAULT (SYSUTCDATETIME()),
+
+        [UpdatedByUserId]        BIGINT               NULL,
 
         CONSTRAINT [PK_SlugRegistry]
             PRIMARY KEY CLUSTERED ([SlugId] ASC),
 
-        CONSTRAINT [UQ_SlugRegistry_Scope_Slug]
-            UNIQUE ([Scope], [Slug]),
-
-        CONSTRAINT [FK_SlugRegistry_Article]
-            FOREIGN KEY ([ArticleId])
-            REFERENCES [content].[Article]([ArticleId]),
+        /*
+          One current route per resource in a scope.
+          Slug uniqueness itself should be enforced in 010_indexes.sql,
+          preferably with a filtered unique index on active routes.
+        */
+        CONSTRAINT [UQ_SlugRegistry_Scope_Resource]
+            UNIQUE ([Scope], [ResourceType], [ResourcePublicId]),
 
         CONSTRAINT [FK_SlugRegistry_CreatedByUser]
             FOREIGN KEY ([CreatedByUserId])
@@ -202,20 +262,32 @@ BEGIN
             FOREIGN KEY ([UpdatedByUserId])
             REFERENCES [identity].[UserAccount]([UserId]),
 
-        CONSTRAINT [CK_SlugRegistry_Slug_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([Slug]))) > 0),
-
         CONSTRAINT [CK_SlugRegistry_Scope]
             CHECK ([Scope] IN ('public')),
+
+        CONSTRAINT [CK_SlugRegistry_ResourceType]
+            CHECK ([ResourceType] IN ('Article')),
+
+        CONSTRAINT [CK_SlugRegistry_ResourcePublicId_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([ResourcePublicId]))) > 0),
+
+        CONSTRAINT [CK_SlugRegistry_Slug_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([Slug]))) > 0),
 
         CONSTRAINT [CK_SlugRegistry_CanonicalUrl_NotBlank]
             CHECK ([CanonicalUrl] IS NULL OR LEN(LTRIM(RTRIM([CanonicalUrl]))) > 0),
 
-        CONSTRAINT [CK_SlugRegistry_UpdatedAt]
-            CHECK ([UpdatedAt] >= [CreatedAt]),
+        CONSTRAINT [CK_SlugRegistry_SourceAggregateVersion_Positive]
+            CHECK ([SourceAggregateVersion] IS NULL OR [SourceAggregateVersion] > 0),
+
+        CONSTRAINT [CK_SlugRegistry_LastAppliedMessageId_NotBlank]
+            CHECK ([LastAppliedMessageId] IS NULL OR LEN(LTRIM(RTRIM([LastAppliedMessageId]))) > 0),
 
         CONSTRAINT [CK_SlugRegistry_Version_Positive]
-            CHECK ([Version] > 0)
+            CHECK ([Version] > 0),
+
+        CONSTRAINT [CK_SlugRegistry_UpdatedAtUtc]
+            CHECK ([UpdatedAtUtc] >= [CreatedAtUtc])
     );
 
     PRINT N'Created table: [seo].[SlugRegistry]';

@@ -4,21 +4,19 @@
   Purpose:
   - Create stored procedures for SEO truth model in CommercialNews V1.
   - Support:
-      * SeoMetadata CRUD-ish reads/writes
-      * SlugRegistry CRUD-ish reads/writes
-      * route activation / deactivation
+      * SeoMetadata reads/writes/upsert
+      * SlugRegistry reads/writes/upsert
       * hot-path slug resolve
-      * admin paging / filtering
-      * article SEO aggregate read
+      * admin aggregate SEO read
+      * idempotent Content-event apply without SeoConsumedMessage
+      * version-aware stale-event protection
   - Idempotent: safe to re-run.
 
   Notes:
-  - Truth remains in [seo] tables.
-  - Public read model / projections / cache / search are outside this file.
-  - App layer should still orchestrate transaction boundaries where multiple procs
-    must succeed atomically (for example: slug switch + metadata update + outbox write).
-  - SEO owns routing truth and SEO metadata truth.
+  - SEO uses ResourceType + ResourcePublicId, not internal Content ArticleId.
+  - SEO owns routing truth and metadata truth.
   - SEO does NOT own publication visibility truth.
+  - Reading/Public Query must still validate Content truth before serving.
 */
 
 SET NOCOUNT ON;
@@ -40,6 +38,18 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'[seo].[SeoMetadata]', N'U') IS NULL
+BEGIN
+    THROW 57203, 'Table [seo].[SeoMetadata] does not exist. Run seo/001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[seo].[SlugRegistry]', N'U') IS NULL
+BEGIN
+    THROW 57204, 'Table [seo].[SlugRegistry] does not exist. Run seo/001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
    SEO METADATA
    ========================================================= */
@@ -49,8 +59,11 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_Insert]
-    @ArticleId              BIGINT,
+CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_Upsert]
+    @Scope                  VARCHAR(30) = 'public',
+    @ResourceType           VARCHAR(50),
+    @ResourcePublicId       CHAR(26),
+    @Slug                   NVARCHAR(200) = NULL,
     @CanonicalUrl           NVARCHAR(500) = NULL,
     @MetaTitle              NVARCHAR(300) = NULL,
     @MetaDescription        NVARCHAR(500) = NULL,
@@ -60,85 +73,10 @@ CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_Insert]
     @TwitterTitle           NVARCHAR(300) = NULL,
     @TwitterDescription     NVARCHAR(500) = NULL,
     @TwitterImageUrl        NVARCHAR(800) = NULL,
-    @UpdatedByUserId        BIGINT = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-
-    IF @ArticleId IS NULL OR @ArticleId <= 0
-        THROW 57210, 'ArticleId must be > 0.', 1;
-
-    IF NOT EXISTS
-    (
-        SELECT 1
-        FROM [content].[Article]
-        WHERE [ArticleId] = @ArticleId
-          AND [IsDeleted] = 0
-    )
-        THROW 57211, 'Article does not exist or was deleted.', 1;
-
-    IF EXISTS
-    (
-        SELECT 1
-        FROM [seo].[SeoMetadata]
-        WHERE [ArticleId] = @ArticleId
-    )
-        THROW 57212, 'SeoMetadata already exists for this article.', 1;
-
-    INSERT INTO [seo].[SeoMetadata]
-    (
-        [ArticleId],
-        [CanonicalUrl],
-        [MetaTitle],
-        [MetaDescription],
-        [OgTitle],
-        [OgDescription],
-        [OgImageUrl],
-        [TwitterTitle],
-        [TwitterDescription],
-        [TwitterImageUrl],
-        [UpdatedByUserId]
-    )
-    VALUES
-    (
-        @ArticleId,
-        @CanonicalUrl,
-        @MetaTitle,
-        @MetaDescription,
-        @OgTitle,
-        @OgDescription,
-        @OgImageUrl,
-        @TwitterTitle,
-        @TwitterDescription,
-        @TwitterImageUrl,
-        @UpdatedByUserId
-    );
-
-    SELECT TOP (1) *
-    FROM [seo].[SeoMetadata]
-    WHERE [SeoId] = SCOPE_IDENTITY();
-END
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_Update]
-    @SeoId                  BIGINT,
-    @CanonicalUrl           NVARCHAR(500) = NULL,
-    @MetaTitle              NVARCHAR(300) = NULL,
-    @MetaDescription        NVARCHAR(500) = NULL,
-    @OgTitle                NVARCHAR(300) = NULL,
-    @OgDescription          NVARCHAR(500) = NULL,
-    @OgImageUrl             NVARCHAR(800) = NULL,
-    @TwitterTitle           NVARCHAR(300) = NULL,
-    @TwitterDescription     NVARCHAR(500) = NULL,
-    @TwitterImageUrl        NVARCHAR(800) = NULL,
+    @Robots                 NVARCHAR(100) = NULL,
+    @IsManualOverride       BIT = 1,
     @UpdatedByUserId        BIGINT = NULL,
-    @ExpectedVersion        INT,
+    @ExpectedVersion        INT = NULL,
     @AffectedRows           INT OUTPUT
 AS
 BEGIN
@@ -147,34 +85,242 @@ BEGIN
 
     SET @AffectedRows = 0;
 
-    IF @SeoId IS NULL OR @SeoId <= 0
-        THROW 57220, 'SeoId must be > 0.', 1;
+    IF LEN(LTRIM(RTRIM(ISNULL(@Scope, '')))) = 0
+        THROW 57210, 'Scope is required.', 1;
 
-    UPDATE [seo].[SeoMetadata]
-    SET
-        [CanonicalUrl] = @CanonicalUrl,
-        [MetaTitle] = @MetaTitle,
-        [MetaDescription] = @MetaDescription,
-        [OgTitle] = @OgTitle,
-        [OgDescription] = @OgDescription,
-        [OgImageUrl] = @OgImageUrl,
-        [TwitterTitle] = @TwitterTitle,
-        [TwitterDescription] = @TwitterDescription,
-        [TwitterImageUrl] = @TwitterImageUrl,
-        [UpdatedAt] = SYSUTCDATETIME(),
-        [UpdatedByUserId] = @UpdatedByUserId,
-        [Version] = [Version] + 1
-    WHERE [SeoId] = @SeoId
-      AND [Version] = @ExpectedVersion;
+    IF @Scope NOT IN ('public')
+        THROW 57211, 'Scope is invalid.', 1;
 
-    SET @AffectedRows = @@ROWCOUNT;
+    IF LEN(LTRIM(RTRIM(ISNULL(@ResourceType, '')))) = 0
+        THROW 57212, 'ResourceType is required.', 1;
 
-    IF @AffectedRows = 0
-        RETURN;
+    IF @ResourceType NOT IN ('Article')
+        THROW 57213, 'ResourceType is invalid.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@ResourcePublicId, '')))) = 0
+        THROW 57214, 'ResourcePublicId is required.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [seo].[SeoMetadata]
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
+    )
+    BEGIN
+        UPDATE [seo].[SeoMetadata]
+        SET
+            [Slug] = @Slug,
+            [CanonicalUrl] = @CanonicalUrl,
+            [MetaTitle] = @MetaTitle,
+            [MetaDescription] = @MetaDescription,
+            [OgTitle] = @OgTitle,
+            [OgDescription] = @OgDescription,
+            [OgImageUrl] = @OgImageUrl,
+            [TwitterTitle] = @TwitterTitle,
+            [TwitterDescription] = @TwitterDescription,
+            [TwitterImageUrl] = @TwitterImageUrl,
+            [Robots] = @Robots,
+            [IsManualOverride] = @IsManualOverride,
+            [UpdatedAtUtc] = SYSUTCDATETIME(),
+            [UpdatedByUserId] = @UpdatedByUserId,
+            [Version] = [Version] + 1
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
+          AND (@ExpectedVersion IS NULL OR [Version] = @ExpectedVersion);
+
+        SET @AffectedRows = @@ROWCOUNT;
+
+        IF @AffectedRows = 0
+            RETURN;
+    END
+    ELSE
+    BEGIN
+        INSERT INTO [seo].[SeoMetadata]
+        (
+            [Scope],
+            [ResourceType],
+            [ResourcePublicId],
+            [Slug],
+            [CanonicalUrl],
+            [MetaTitle],
+            [MetaDescription],
+            [OgTitle],
+            [OgDescription],
+            [OgImageUrl],
+            [TwitterTitle],
+            [TwitterDescription],
+            [TwitterImageUrl],
+            [Robots],
+            [IsManualOverride],
+            [UpdatedByUserId]
+        )
+        VALUES
+        (
+            @Scope,
+            @ResourceType,
+            @ResourcePublicId,
+            @Slug,
+            @CanonicalUrl,
+            @MetaTitle,
+            @MetaDescription,
+            @OgTitle,
+            @OgDescription,
+            @OgImageUrl,
+            @TwitterTitle,
+            @TwitterDescription,
+            @TwitterImageUrl,
+            @Robots,
+            @IsManualOverride,
+            @UpdatedByUserId
+        );
+
+        SET @AffectedRows = 1;
+    END
 
     SELECT TOP (1) *
     FROM [seo].[SeoMetadata]
-    WHERE [SeoId] = @SeoId;
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId;
+END
+GO
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_ApplyContentDefaults]
+    @Scope                      VARCHAR(30) = 'public',
+    @ResourceType               VARCHAR(50),
+    @ResourcePublicId           CHAR(26),
+    @Slug                       NVARCHAR(200) = NULL,
+    @CanonicalUrl               NVARCHAR(500) = NULL,
+    @MetaTitle                  NVARCHAR(300) = NULL,
+    @MetaDescription            NVARCHAR(500) = NULL,
+    @OgTitle                    NVARCHAR(300) = NULL,
+    @OgDescription              NVARCHAR(500) = NULL,
+    @OgImageUrl                 NVARCHAR(800) = NULL,
+    @SourceAggregateVersion     BIGINT,
+    @LastAppliedMessageId       CHAR(26),
+    @LastSyncedAtUtc            DATETIME2(3) = NULL,
+    @ApplyResult                VARCHAR(30) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @ApplyResult = 'NotApplied';
+
+    IF @LastSyncedAtUtc IS NULL
+        SET @LastSyncedAtUtc = SYSUTCDATETIME();
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@Scope, '')))) = 0
+        THROW 57220, 'Scope is required.', 1;
+
+    IF @Scope NOT IN ('public')
+        THROW 57221, 'Scope is invalid.', 1;
+
+    IF @ResourceType NOT IN ('Article')
+        THROW 57222, 'ResourceType is invalid.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@ResourcePublicId, '')))) = 0
+        THROW 57223, 'ResourcePublicId is required.', 1;
+
+    IF @SourceAggregateVersion IS NULL OR @SourceAggregateVersion <= 0
+        THROW 57224, 'SourceAggregateVersion must be > 0.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@LastAppliedMessageId, '')))) = 0
+        THROW 57225, 'LastAppliedMessageId is required.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [seo].[SeoMetadata]
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
+    )
+    BEGIN
+        UPDATE [seo].[SeoMetadata]
+        SET
+            [Slug] = COALESCE(@Slug, [Slug]),
+            [CanonicalUrl] = CASE WHEN [IsManualOverride] = 1 THEN [CanonicalUrl] ELSE @CanonicalUrl END,
+            [MetaTitle] = CASE WHEN [IsManualOverride] = 1 THEN [MetaTitle] ELSE @MetaTitle END,
+            [MetaDescription] = CASE WHEN [IsManualOverride] = 1 THEN [MetaDescription] ELSE @MetaDescription END,
+            [OgTitle] = CASE WHEN [IsManualOverride] = 1 THEN [OgTitle] ELSE @OgTitle END,
+            [OgDescription] = CASE WHEN [IsManualOverride] = 1 THEN [OgDescription] ELSE @OgDescription END,
+            [OgImageUrl] = CASE WHEN [IsManualOverride] = 1 THEN [OgImageUrl] ELSE @OgImageUrl END,
+            [SourceAggregateVersion] = @SourceAggregateVersion,
+            [LastAppliedMessageId] = @LastAppliedMessageId,
+            [LastSyncedAtUtc] = @LastSyncedAtUtc,
+            [UpdatedAtUtc] = SYSUTCDATETIME(),
+            [Version] = [Version] + 1
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
+          AND
+          (
+              [SourceAggregateVersion] IS NULL
+              OR @SourceAggregateVersion > [SourceAggregateVersion]
+          );
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            SET @ApplyResult = 'StaleIgnored';
+            RETURN;
+        END
+
+        SET @ApplyResult = 'Applied';
+    END
+    ELSE
+    BEGIN
+        INSERT INTO [seo].[SeoMetadata]
+        (
+            [Scope],
+            [ResourceType],
+            [ResourcePublicId],
+            [Slug],
+            [CanonicalUrl],
+            [MetaTitle],
+            [MetaDescription],
+            [OgTitle],
+            [OgDescription],
+            [OgImageUrl],
+            [IsManualOverride],
+            [SourceAggregateVersion],
+            [LastAppliedMessageId],
+            [LastSyncedAtUtc]
+        )
+        VALUES
+        (
+            @Scope,
+            @ResourceType,
+            @ResourcePublicId,
+            @Slug,
+            @CanonicalUrl,
+            @MetaTitle,
+            @MetaDescription,
+            @OgTitle,
+            @OgDescription,
+            @OgImageUrl,
+            0,
+            @SourceAggregateVersion,
+            @LastAppliedMessageId,
+            @LastSyncedAtUtc
+        );
+
+        SET @ApplyResult = 'Applied';
+    END
+
+    SELECT TOP (1) *
+    FROM [seo].[SeoMetadata]
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId;
 END
 GO
 
@@ -200,31 +346,19 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_SelectByArticleId]
-    @ArticleId BIGINT
+CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_SelectByResource]
+    @Scope              VARCHAR(30) = 'public',
+    @ResourceType       VARCHAR(50),
+    @ResourcePublicId   CHAR(26)
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT TOP (1) *
     FROM [seo].[SeoMetadata]
-    WHERE [ArticleId] = @ArticleId;
-END
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_SelectAll]
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    SELECT *
-    FROM [seo].[SeoMetadata]
-    ORDER BY [UpdatedAt] DESC, [SeoId] DESC;
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId;
 END
 GO
 
@@ -236,10 +370,13 @@ GO
 CREATE OR ALTER PROCEDURE [seo].[Seo_SeoMetadata_SelectSkipAndTake]
     @Skip               INT = 0,
     @Take               INT = 20,
-    @ArticleId          BIGINT = NULL,
+    @Scope              VARCHAR(30) = NULL,
+    @ResourceType       VARCHAR(50) = NULL,
+    @ResourcePublicId   CHAR(26) = NULL,
+    @IsManualOverride   BIT = NULL,
     @UpdatedByUserId    BIGINT = NULL,
     @Keyword            NVARCHAR(300) = NULL,
-    @SortBy             NVARCHAR(30) = N'UpdatedAt',
+    @SortBy             NVARCHAR(30) = N'UpdatedAtUtc',
     @SortDirection      NVARCHAR(4) = N'DESC'
 AS
 BEGIN
@@ -250,8 +387,8 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    IF @SortBy NOT IN (N'UpdatedAt', N'ArticleId', N'SeoId')
-        SET @SortBy = N'UpdatedAt';
+    IF @SortBy NOT IN (N'UpdatedAtUtc', N'ResourcePublicId', N'SeoId', N'Version')
+        SET @SortBy = N'UpdatedAtUtc';
 
     IF UPPER(@SortDirection) NOT IN (N'ASC', N'DESC')
         SET @SortDirection = N'DESC';
@@ -260,7 +397,10 @@ BEGIN
     (
         SELECT
             [s].[SeoId],
-            [s].[ArticleId],
+            [s].[Scope],
+            [s].[ResourceType],
+            [s].[ResourcePublicId],
+            [s].[Slug],
             [s].[CanonicalUrl],
             [s].[MetaTitle],
             [s].[MetaDescription],
@@ -270,16 +410,26 @@ BEGIN
             [s].[TwitterTitle],
             [s].[TwitterDescription],
             [s].[TwitterImageUrl],
+            [s].[Robots],
+            [s].[IsManualOverride],
+            [s].[SourceAggregateVersion],
+            [s].[LastAppliedMessageId],
+            [s].[LastSyncedAtUtc],
             [s].[Version],
-            [s].[UpdatedAt],
+            [s].[CreatedAtUtc],
+            [s].[UpdatedAtUtc],
             [s].[UpdatedByUserId],
             COUNT(1) OVER() AS [TotalCount]
         FROM [seo].[SeoMetadata] AS [s]
-        WHERE (@ArticleId IS NULL OR [s].[ArticleId] = @ArticleId)
+        WHERE (@Scope IS NULL OR [s].[Scope] = @Scope)
+          AND (@ResourceType IS NULL OR [s].[ResourceType] = @ResourceType)
+          AND (@ResourcePublicId IS NULL OR [s].[ResourcePublicId] = @ResourcePublicId)
+          AND (@IsManualOverride IS NULL OR [s].[IsManualOverride] = @IsManualOverride)
           AND (@UpdatedByUserId IS NULL OR [s].[UpdatedByUserId] = @UpdatedByUserId)
           AND
           (
               @Keyword IS NULL
+              OR [s].[Slug] LIKE N'%' + @Keyword + N'%'
               OR [s].[CanonicalUrl] LIKE N'%' + @Keyword + N'%'
               OR [s].[MetaTitle] LIKE N'%' + @Keyword + N'%'
               OR [s].[MetaDescription] LIKE N'%' + @Keyword + N'%'
@@ -289,12 +439,14 @@ BEGIN
     SELECT *
     FROM [Filtered]
     ORDER BY
-        CASE WHEN @SortBy = N'UpdatedAt' AND @SortDirection = N'ASC'  THEN [UpdatedAt] END ASC,
-        CASE WHEN @SortBy = N'UpdatedAt' AND @SortDirection = N'DESC' THEN [UpdatedAt] END DESC,
-        CASE WHEN @SortBy = N'ArticleId' AND @SortDirection = N'ASC'  THEN [ArticleId] END ASC,
-        CASE WHEN @SortBy = N'ArticleId' AND @SortDirection = N'DESC' THEN [ArticleId] END DESC,
-        CASE WHEN @SortBy = N'SeoId'     AND @SortDirection = N'ASC'  THEN [SeoId] END ASC,
-        CASE WHEN @SortBy = N'SeoId'     AND @SortDirection = N'DESC' THEN [SeoId] END DESC,
+        CASE WHEN @SortBy = N'UpdatedAtUtc' AND @SortDirection = N'ASC'  THEN [UpdatedAtUtc] END ASC,
+        CASE WHEN @SortBy = N'UpdatedAtUtc' AND @SortDirection = N'DESC' THEN [UpdatedAtUtc] END DESC,
+        CASE WHEN @SortBy = N'ResourcePublicId' AND @SortDirection = N'ASC'  THEN [ResourcePublicId] END ASC,
+        CASE WHEN @SortBy = N'ResourcePublicId' AND @SortDirection = N'DESC' THEN [ResourcePublicId] END DESC,
+        CASE WHEN @SortBy = N'SeoId' AND @SortDirection = N'ASC' THEN [SeoId] END ASC,
+        CASE WHEN @SortBy = N'SeoId' AND @SortDirection = N'DESC' THEN [SeoId] END DESC,
+        CASE WHEN @SortBy = N'Version' AND @SortDirection = N'ASC' THEN [Version] END ASC,
+        CASE WHEN @SortBy = N'Version' AND @SortDirection = N'DESC' THEN [Version] END DESC,
         [SeoId] DESC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END
@@ -309,103 +461,16 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_Insert]
-    @ArticleId              BIGINT,
-    @Slug                   NVARCHAR(200),
+CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_Upsert]
     @Scope                  VARCHAR(30) = 'public',
+    @Slug                   NVARCHAR(200),
+    @ResourceType           VARCHAR(50),
+    @ResourcePublicId       CHAR(26),
     @CanonicalUrl           NVARCHAR(500) = NULL,
     @IsIndexable            BIT = 0,
     @IsActive               BIT = 1,
-    @CreatedByUserId        BIGINT = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-
-    IF @ArticleId IS NULL OR @ArticleId <= 0
-        THROW 57240, 'ArticleId must be > 0.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@Slug, N'')))) = 0
-        THROW 57241, 'Slug is required.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@Scope, '')))) = 0
-        THROW 57242, 'Scope is required.', 1;
-
-    IF @Scope NOT IN ('public')
-        THROW 57243, 'Scope is invalid.', 1;
-
-    IF NOT EXISTS
-    (
-        SELECT 1
-        FROM [content].[Article]
-        WHERE [ArticleId] = @ArticleId
-          AND [IsDeleted] = 0
-    )
-        THROW 57244, 'Article does not exist or was deleted.', 1;
-
-    IF EXISTS
-    (
-        SELECT 1
-        FROM [seo].[SlugRegistry]
-        WHERE [Scope] = @Scope
-          AND [Slug] = @Slug
-    )
-        THROW 57245, 'Slug already exists in this scope.', 1;
-
-    IF @IsActive = 1
-       AND EXISTS
-       (
-           SELECT 1
-           FROM [seo].[SlugRegistry]
-           WHERE [ArticleId] = @ArticleId
-             AND [Scope] = @Scope
-             AND [IsActive] = 1
-       )
-        THROW 57246, 'An active slug already exists for this article in this scope.', 1;
-
-    INSERT INTO [seo].[SlugRegistry]
-    (
-        [ArticleId],
-        [Slug],
-        [Scope],
-        [CanonicalUrl],
-        [IsIndexable],
-        [IsActive],
-        [CreatedByUserId],
-        [UpdatedByUserId]
-    )
-    VALUES
-    (
-        @ArticleId,
-        @Slug,
-        @Scope,
-        @CanonicalUrl,
-        @IsIndexable,
-        @IsActive,
-        @CreatedByUserId,
-        @CreatedByUserId
-    );
-
-    SELECT TOP (1) *
-    FROM [seo].[SlugRegistry]
-    WHERE [SlugId] = SCOPE_IDENTITY();
-END
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_Update]
-    @SlugId                 BIGINT,
-    @Slug                   NVARCHAR(200),
-    @Scope                  VARCHAR(30),
-    @CanonicalUrl           NVARCHAR(500) = NULL,
-    @IsIndexable            BIT,
-    @IsActive               BIT,
-    @UpdatedByUserId        BIGINT = NULL,
-    @ExpectedVersion        INT,
+    @ActorUserId            BIGINT = NULL,
+    @ExpectedVersion        INT = NULL,
     @AffectedRows           INT OUTPUT
 AS
 BEGIN
@@ -414,66 +479,84 @@ BEGIN
 
     SET @AffectedRows = 0;
 
-    IF @SlugId IS NULL OR @SlugId <= 0
-        THROW 57250, 'SlugId must be > 0.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@Slug, N'')))) = 0
-        THROW 57251, 'Slug is required.', 1;
-
     IF LEN(LTRIM(RTRIM(ISNULL(@Scope, '')))) = 0
-        THROW 57252, 'Scope is required.', 1;
+        THROW 57240, 'Scope is required.', 1;
 
     IF @Scope NOT IN ('public')
-        THROW 57253, 'Scope is invalid.', 1;
+        THROW 57241, 'Scope is invalid.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@Slug, N'')))) = 0
+        THROW 57242, 'Slug is required.', 1;
+
+    IF @ResourceType NOT IN ('Article')
+        THROW 57243, 'ResourceType is invalid.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@ResourcePublicId, '')))) = 0
+        THROW 57244, 'ResourcePublicId is required.', 1;
 
     IF EXISTS
     (
         SELECT 1
         FROM [seo].[SlugRegistry]
         WHERE [Scope] = @Scope
-          AND [Slug] = @Slug
-          AND [SlugId] <> @SlugId
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
     )
-        THROW 57254, 'Slug already exists in this scope.', 1;
+    BEGIN
+        UPDATE [seo].[SlugRegistry]
+        SET
+            [Slug] = @Slug,
+            [CanonicalUrl] = @CanonicalUrl,
+            [IsIndexable] = @IsIndexable,
+            [IsActive] = @IsActive,
+            [UpdatedAtUtc] = SYSUTCDATETIME(),
+            [UpdatedByUserId] = @ActorUserId,
+            [Version] = [Version] + 1
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
+          AND (@ExpectedVersion IS NULL OR [Version] = @ExpectedVersion);
 
-    IF @IsActive = 1
-       AND EXISTS
-       (
-           SELECT 1
-           FROM [seo].[SlugRegistry] AS [s]
-           WHERE [s].[SlugId] <> @SlugId
-             AND [s].[IsActive] = 1
-             AND [s].[Scope] = @Scope
-             AND [s].[ArticleId] =
-                 (
-                     SELECT TOP (1) [x].[ArticleId]
-                     FROM [seo].[SlugRegistry] AS [x]
-                     WHERE [x].[SlugId] = @SlugId
-                 )
-       )
-        THROW 57255, 'Another active slug already exists for this article in this scope.', 1;
+        SET @AffectedRows = @@ROWCOUNT;
 
-    UPDATE [seo].[SlugRegistry]
-    SET
-        [Slug] = @Slug,
-        [Scope] = @Scope,
-        [CanonicalUrl] = @CanonicalUrl,
-        [IsIndexable] = @IsIndexable,
-        [IsActive] = @IsActive,
-        [UpdatedAt] = SYSUTCDATETIME(),
-        [UpdatedByUserId] = @UpdatedByUserId,
-        [Version] = [Version] + 1
-    WHERE [SlugId] = @SlugId
-      AND [Version] = @ExpectedVersion;
+        IF @AffectedRows = 0
+            RETURN;
+    END
+    ELSE
+    BEGIN
+        INSERT INTO [seo].[SlugRegistry]
+        (
+            [Scope],
+            [Slug],
+            [ResourceType],
+            [ResourcePublicId],
+            [CanonicalUrl],
+            [IsIndexable],
+            [IsActive],
+            [CreatedByUserId],
+            [UpdatedByUserId]
+        )
+        VALUES
+        (
+            @Scope,
+            @Slug,
+            @ResourceType,
+            @ResourcePublicId,
+            @CanonicalUrl,
+            @IsIndexable,
+            @IsActive,
+            @ActorUserId,
+            @ActorUserId
+        );
 
-    SET @AffectedRows = @@ROWCOUNT;
-
-    IF @AffectedRows = 0
-        RETURN;
+        SET @AffectedRows = 1;
+    END
 
     SELECT TOP (1) *
     FROM [seo].[SlugRegistry]
-    WHERE [SlugId] = @SlugId;
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId;
 END
 GO
 
@@ -482,59 +565,126 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_Activate]
-    @SlugId                 BIGINT,
-    @UpdatedByUserId        BIGINT = NULL,
-    @ExpectedVersion        INT,
-    @AffectedRows           INT OUTPUT
+CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_ApplyContentVisibility]
+    @Scope                      VARCHAR(30) = 'public',
+    @Slug                       NVARCHAR(200) = NULL,
+    @ResourceType               VARCHAR(50),
+    @ResourcePublicId           CHAR(26),
+    @CanonicalUrl               NVARCHAR(500) = NULL,
+    @IsIndexable                BIT,
+    @IsActive                   BIT,
+    @SourceAggregateVersion     BIGINT,
+    @LastAppliedMessageId       CHAR(26),
+    @LastSyncedAtUtc            DATETIME2(3) = NULL,
+    @ApplyResult                VARCHAR(30) OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    SET @AffectedRows = 0;
+    SET @ApplyResult = 'NotApplied';
 
-    DECLARE @ArticleId BIGINT;
-    DECLARE @Scope VARCHAR(30);
+    IF @LastSyncedAtUtc IS NULL
+        SET @LastSyncedAtUtc = SYSUTCDATETIME();
 
-    SELECT
-        @ArticleId = [ArticleId],
-        @Scope = [Scope]
-    FROM [seo].[SlugRegistry]
-    WHERE [SlugId] = @SlugId;
+    IF @Scope NOT IN ('public')
+        THROW 57250, 'Scope is invalid.', 1;
 
-    IF @ArticleId IS NULL
-        RETURN;
+    IF @ResourceType NOT IN ('Article')
+        THROW 57251, 'ResourceType is invalid.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@ResourcePublicId, '')))) = 0
+        THROW 57252, 'ResourcePublicId is required.', 1;
+
+    IF @SourceAggregateVersion IS NULL OR @SourceAggregateVersion <= 0
+        THROW 57253, 'SourceAggregateVersion must be > 0.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@LastAppliedMessageId, '')))) = 0
+        THROW 57254, 'LastAppliedMessageId is required.', 1;
+
+    IF @IsActive = 1 AND LEN(LTRIM(RTRIM(ISNULL(@Slug, N'')))) = 0
+        THROW 57255, 'Slug is required when activating a route.', 1;
 
     IF EXISTS
     (
         SELECT 1
         FROM [seo].[SlugRegistry]
-        WHERE [ArticleId] = @ArticleId
-          AND [Scope] = @Scope
-          AND [IsActive] = 1
-          AND [SlugId] <> @SlugId
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
     )
-        THROW 57261, 'Another active slug already exists for this article in this scope.', 1;
+    BEGIN
+        UPDATE [seo].[SlugRegistry]
+        SET
+            [Slug] = CASE WHEN @Slug IS NULL THEN [Slug] ELSE @Slug END,
+            [CanonicalUrl] = @CanonicalUrl,
+            [IsIndexable] = @IsIndexable,
+            [IsActive] = @IsActive,
+            [SourceAggregateVersion] = @SourceAggregateVersion,
+            [LastAppliedMessageId] = @LastAppliedMessageId,
+            [LastSyncedAtUtc] = @LastSyncedAtUtc,
+            [UpdatedAtUtc] = SYSUTCDATETIME(),
+            [Version] = [Version] + 1
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
+          AND
+          (
+              [SourceAggregateVersion] IS NULL
+              OR @SourceAggregateVersion > [SourceAggregateVersion]
+          );
 
-    UPDATE [seo].[SlugRegistry]
-    SET
-        [IsActive] = 1,
-        [UpdatedAt] = SYSUTCDATETIME(),
-        [UpdatedByUserId] = @UpdatedByUserId,
-        [Version] = [Version] + 1
-    WHERE [SlugId] = @SlugId
-      AND [IsActive] = 0
-      AND [Version] = @ExpectedVersion;
+        IF @@ROWCOUNT = 0
+        BEGIN
+            SET @ApplyResult = 'StaleIgnored';
+            RETURN;
+        END
 
-    SET @AffectedRows = @@ROWCOUNT;
+        SET @ApplyResult = 'Applied';
+    END
+    ELSE
+    BEGIN
+        IF @IsActive = 0
+        BEGIN
+            SET @ApplyResult = 'NoRouteToDeactivate';
+            RETURN;
+        END
 
-    IF @AffectedRows = 0
-        RETURN;
+        INSERT INTO [seo].[SlugRegistry]
+        (
+            [Scope],
+            [Slug],
+            [ResourceType],
+            [ResourcePublicId],
+            [CanonicalUrl],
+            [IsIndexable],
+            [IsActive],
+            [SourceAggregateVersion],
+            [LastAppliedMessageId],
+            [LastSyncedAtUtc]
+        )
+        VALUES
+        (
+            @Scope,
+            @Slug,
+            @ResourceType,
+            @ResourcePublicId,
+            @CanonicalUrl,
+            @IsIndexable,
+            @IsActive,
+            @SourceAggregateVersion,
+            @LastAppliedMessageId,
+            @LastSyncedAtUtc
+        );
+
+        SET @ApplyResult = 'Applied';
+    END
 
     SELECT TOP (1) *
     FROM [seo].[SlugRegistry]
-    WHERE [SlugId] = @SlugId;
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId;
 END
 GO
 
@@ -543,10 +693,12 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_Deactivate]
-    @SlugId                 BIGINT,
-    @UpdatedByUserId        BIGINT = NULL,
-    @ExpectedVersion        INT,
+CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_DeactivateByResource]
+    @Scope                  VARCHAR(30) = 'public',
+    @ResourceType           VARCHAR(50),
+    @ResourcePublicId       CHAR(26),
+    @ActorUserId            BIGINT = NULL,
+    @ExpectedVersion        INT = NULL,
     @AffectedRows           INT OUTPUT
 AS
 BEGIN
@@ -558,12 +710,15 @@ BEGIN
     UPDATE [seo].[SlugRegistry]
     SET
         [IsActive] = 0,
-        [UpdatedAt] = SYSUTCDATETIME(),
-        [UpdatedByUserId] = @UpdatedByUserId,
+        [IsIndexable] = 0,
+        [UpdatedAtUtc] = SYSUTCDATETIME(),
+        [UpdatedByUserId] = @ActorUserId,
         [Version] = [Version] + 1
-    WHERE [SlugId] = @SlugId
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId
       AND [IsActive] = 1
-      AND [Version] = @ExpectedVersion;
+      AND (@ExpectedVersion IS NULL OR [Version] = @ExpectedVersion);
 
     SET @AffectedRows = @@ROWCOUNT;
 
@@ -572,7 +727,9 @@ BEGIN
 
     SELECT TOP (1) *
     FROM [seo].[SlugRegistry]
-    WHERE [SlugId] = @SlugId;
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId;
 END
 GO
 
@@ -598,20 +755,22 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_SelectByArticleId]
-    @ArticleId BIGINT,
-    @Scope     VARCHAR(30) = NULL,
-    @OnlyActive BIT = NULL
+CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_SelectByResource]
+    @Scope              VARCHAR(30) = 'public',
+    @ResourceType       VARCHAR(50),
+    @ResourcePublicId   CHAR(26),
+    @OnlyActive         BIT = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT *
     FROM [seo].[SlugRegistry]
-    WHERE [ArticleId] = @ArticleId
-      AND (@Scope IS NULL OR [Scope] = @Scope)
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId
       AND (@OnlyActive IS NULL OR [IsActive] = @OnlyActive)
-    ORDER BY [IsActive] DESC, [UpdatedAt] DESC, [SlugId] DESC;
+    ORDER BY [IsActive] DESC, [UpdatedAtUtc] DESC, [SlugId] DESC;
 END
 GO
 
@@ -642,33 +801,16 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_SelectAll]
-    @OnlyActive BIT = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    SELECT *
-    FROM [seo].[SlugRegistry]
-    WHERE (@OnlyActive IS NULL OR [IsActive] = @OnlyActive)
-    ORDER BY [UpdatedAt] DESC, [SlugId] DESC;
-END
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
 CREATE OR ALTER PROCEDURE [seo].[Seo_SlugRegistry_SelectSkipAndTake]
     @Skip               INT = 0,
     @Take               INT = 20,
-    @ArticleId          BIGINT = NULL,
     @Scope              VARCHAR(30) = NULL,
+    @ResourceType       VARCHAR(50) = NULL,
+    @ResourcePublicId   CHAR(26) = NULL,
     @IsActive           BIT = NULL,
     @IsIndexable        BIT = NULL,
     @Keyword            NVARCHAR(200) = NULL,
-    @SortBy             NVARCHAR(30) = N'UpdatedAt',
+    @SortBy             NVARCHAR(30) = N'UpdatedAtUtc',
     @SortDirection      NVARCHAR(4) = N'DESC'
 AS
 BEGIN
@@ -679,8 +821,8 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    IF @SortBy NOT IN (N'UpdatedAt', N'CreatedAt', N'Slug', N'ArticleId')
-        SET @SortBy = N'UpdatedAt';
+    IF @SortBy NOT IN (N'UpdatedAtUtc', N'CreatedAtUtc', N'Slug', N'ResourcePublicId', N'Version')
+        SET @SortBy = N'UpdatedAtUtc';
 
     IF UPPER(@SortDirection) NOT IN (N'ASC', N'DESC')
         SET @SortDirection = N'DESC';
@@ -689,21 +831,26 @@ BEGIN
     (
         SELECT
             [s].[SlugId],
-            [s].[ArticleId],
-            [s].[Slug],
             [s].[Scope],
+            [s].[Slug],
+            [s].[ResourceType],
+            [s].[ResourcePublicId],
             [s].[CanonicalUrl],
             [s].[IsIndexable],
             [s].[IsActive],
+            [s].[SourceAggregateVersion],
+            [s].[LastAppliedMessageId],
+            [s].[LastSyncedAtUtc],
             [s].[Version],
-            [s].[CreatedAt],
+            [s].[CreatedAtUtc],
             [s].[CreatedByUserId],
-            [s].[UpdatedAt],
+            [s].[UpdatedAtUtc],
             [s].[UpdatedByUserId],
             COUNT(1) OVER() AS [TotalCount]
         FROM [seo].[SlugRegistry] AS [s]
-        WHERE (@ArticleId IS NULL OR [s].[ArticleId] = @ArticleId)
-          AND (@Scope IS NULL OR [s].[Scope] = @Scope)
+        WHERE (@Scope IS NULL OR [s].[Scope] = @Scope)
+          AND (@ResourceType IS NULL OR [s].[ResourceType] = @ResourceType)
+          AND (@ResourcePublicId IS NULL OR [s].[ResourcePublicId] = @ResourcePublicId)
           AND (@IsActive IS NULL OR [s].[IsActive] = @IsActive)
           AND (@IsIndexable IS NULL OR [s].[IsIndexable] = @IsIndexable)
           AND
@@ -716,14 +863,16 @@ BEGIN
     SELECT *
     FROM [Filtered]
     ORDER BY
-        CASE WHEN @SortBy = N'UpdatedAt' AND @SortDirection = N'ASC'  THEN [UpdatedAt] END ASC,
-        CASE WHEN @SortBy = N'UpdatedAt' AND @SortDirection = N'DESC' THEN [UpdatedAt] END DESC,
-        CASE WHEN @SortBy = N'CreatedAt' AND @SortDirection = N'ASC'  THEN [CreatedAt] END ASC,
-        CASE WHEN @SortBy = N'CreatedAt' AND @SortDirection = N'DESC' THEN [CreatedAt] END DESC,
-        CASE WHEN @SortBy = N'Slug'      AND @SortDirection = N'ASC'  THEN [Slug] END ASC,
-        CASE WHEN @SortBy = N'Slug'      AND @SortDirection = N'DESC' THEN [Slug] END DESC,
-        CASE WHEN @SortBy = N'ArticleId' AND @SortDirection = N'ASC'  THEN [ArticleId] END ASC,
-        CASE WHEN @SortBy = N'ArticleId' AND @SortDirection = N'DESC' THEN [ArticleId] END DESC,
+        CASE WHEN @SortBy = N'UpdatedAtUtc' AND @SortDirection = N'ASC'  THEN [UpdatedAtUtc] END ASC,
+        CASE WHEN @SortBy = N'UpdatedAtUtc' AND @SortDirection = N'DESC' THEN [UpdatedAtUtc] END DESC,
+        CASE WHEN @SortBy = N'CreatedAtUtc' AND @SortDirection = N'ASC'  THEN [CreatedAtUtc] END ASC,
+        CASE WHEN @SortBy = N'CreatedAtUtc' AND @SortDirection = N'DESC' THEN [CreatedAtUtc] END DESC,
+        CASE WHEN @SortBy = N'Slug' AND @SortDirection = N'ASC' THEN [Slug] END ASC,
+        CASE WHEN @SortBy = N'Slug' AND @SortDirection = N'DESC' THEN [Slug] END DESC,
+        CASE WHEN @SortBy = N'ResourcePublicId' AND @SortDirection = N'ASC' THEN [ResourcePublicId] END ASC,
+        CASE WHEN @SortBy = N'ResourcePublicId' AND @SortDirection = N'DESC' THEN [ResourcePublicId] END DESC,
+        CASE WHEN @SortBy = N'Version' AND @SortDirection = N'ASC' THEN [Version] END ASC,
+        CASE WHEN @SortBy = N'Version' AND @SortDirection = N'DESC' THEN [Version] END DESC,
         [SlugId] DESC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END
@@ -754,14 +903,15 @@ BEGIN
     SELECT TOP (1)
         [s].[Scope],
         [s].[Slug],
-        CAST(N'Article' AS NVARCHAR(30)) AS [ResourceType],
-        [s].[ArticleId] AS [ResourceId],
+        [s].[ResourceType],
+        [s].[ResourcePublicId],
         [s].[CanonicalUrl],
         [s].[IsIndexable],
         CASE
             WHEN [s].[IsActive] = 1 THEN N'Resolved'
             ELSE N'Inactive'
         END AS [Status],
+        [s].[SourceAggregateVersion],
         [s].[Version]
     FROM [seo].[SlugRegistry] AS [s]
     WHERE [s].[Scope] = @Scope
@@ -776,49 +926,19 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [seo].[Seo_SelectMetadataByArticleId]
-    @ArticleId BIGINT
+CREATE OR ALTER PROCEDURE [seo].[Seo_SelectMetadataByResource]
+    @Scope              VARCHAR(30) = 'public',
+    @ResourceType       VARCHAR(50),
+    @ResourcePublicId   CHAR(26)
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT TOP (1)
-        CAST(N'Article' AS NVARCHAR(30)) AS [ResourceType],
-        [a].[ArticleId] AS [ResourceId],
-        [sr].[Slug],
-        COALESCE([sm].[CanonicalUrl], [sr].[CanonicalUrl]) AS [CanonicalUrl],
-        [sm].[MetaTitle],
-        [sm].[MetaDescription],
-        [sm].[OgTitle],
-        [sm].[OgDescription],
-        [sm].[OgImageUrl],
-        COALESCE([sm].[Version], [sr].[Version]) AS [Version]
-    FROM [content].[Article] AS [a]
-    LEFT JOIN [seo].[SeoMetadata] AS [sm]
-        ON [sm].[ArticleId] = [a].[ArticleId]
-    LEFT JOIN [seo].[SlugRegistry] AS [sr]
-        ON [sr].[ArticleId] = [a].[ArticleId]
-       AND [sr].[IsActive] = 1
-       AND [sr].[Scope] = 'public'
-    WHERE [a].[ArticleId] = @ArticleId;
-END
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-CREATE OR ALTER PROCEDURE [seo].[Seo_SelectArticleSeoByArticleId]
-    @ArticleId BIGINT
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    SELECT TOP (1)
-        [a].[ArticleId],
-        [sr].[Scope],
-        [sr].[Slug],
+        COALESCE([sm].[Scope], [sr].[Scope]) AS [Scope],
+        COALESCE([sm].[ResourceType], [sr].[ResourceType], @ResourceType) AS [ResourceType],
+        COALESCE([sm].[ResourcePublicId], [sr].[ResourcePublicId], @ResourcePublicId) AS [ResourcePublicId],
+        COALESCE([sm].[Slug], [sr].[Slug]) AS [Slug],
         COALESCE([sm].[CanonicalUrl], [sr].[CanonicalUrl]) AS [CanonicalUrl],
         [sm].[MetaTitle],
         [sm].[MetaDescription],
@@ -828,22 +948,51 @@ BEGIN
         [sm].[TwitterTitle],
         [sm].[TwitterDescription],
         [sm].[TwitterImageUrl],
+        [sm].[Robots],
+        [sm].[IsManualOverride],
         CASE
             WHEN [sm].[Version] IS NULL AND [sr].[Version] IS NULL THEN 0
             WHEN [sm].[Version] IS NULL THEN [sr].[Version]
             WHEN [sr].[Version] IS NULL THEN [sm].[Version]
             WHEN [sm].[Version] >= [sr].[Version] THEN [sm].[Version]
             ELSE [sr].[Version]
-        END AS [Version],
-        [sr].[IsIndexable],
-        [sr].[IsActive]
-    FROM [content].[Article] AS [a]
+        END AS [Version]
+    FROM
+    (
+        SELECT
+            @Scope AS [Scope],
+            @ResourceType AS [ResourceType],
+            @ResourcePublicId AS [ResourcePublicId]
+    ) AS [r]
     LEFT JOIN [seo].[SeoMetadata] AS [sm]
-        ON [sm].[ArticleId] = [a].[ArticleId]
+        ON [sm].[Scope] = [r].[Scope]
+       AND [sm].[ResourceType] = [r].[ResourceType]
+       AND [sm].[ResourcePublicId] = [r].[ResourcePublicId]
     LEFT JOIN [seo].[SlugRegistry] AS [sr]
-        ON [sr].[ArticleId] = [a].[ArticleId]
+        ON [sr].[Scope] = [r].[Scope]
+       AND [sr].[ResourceType] = [r].[ResourceType]
+       AND [sr].[ResourcePublicId] = [r].[ResourcePublicId]
        AND [sr].[IsActive] = 1
-       AND [sr].[Scope] = 'public'
-    WHERE [a].[ArticleId] = @ArticleId;
+    WHERE [sm].[SeoId] IS NOT NULL
+       OR [sr].[SlugId] IS NOT NULL;
+END
+GO
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE [seo].[Seo_SelectArticleSeoByArticlePublicId]
+    @ArticlePublicId CHAR(26),
+    @Scope           VARCHAR(30) = 'public'
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    EXEC [seo].[Seo_SelectMetadataByResource]
+        @Scope = @Scope,
+        @ResourceType = 'Article',
+        @ResourcePublicId = @ArticlePublicId;
 END
 GO
