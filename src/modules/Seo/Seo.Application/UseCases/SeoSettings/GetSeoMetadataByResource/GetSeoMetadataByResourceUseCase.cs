@@ -1,5 +1,6 @@
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Seo.Application.Contracts.SeoMetadata.Requests;
 using Seo.Application.Contracts.SeoMetadata.Responses;
 using Seo.Application.Errors;
 using Seo.Application.Models.Results;
@@ -7,56 +8,65 @@ using Seo.Application.Ports.Persistence;
 using Seo.Domain.Constants;
 using Seo.Domain.Exceptions;
 
-namespace Seo.Application.UseCases.SeoSettings.GetArticleSeoSettings;
+namespace Seo.Application.UseCases.SeoSettings.GetSeoMetadataByResource;
 
-public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
+public sealed class GetSeoMetadataByResourceUseCase : IGetSeoMetadataByResourceUseCase
 {
     private readonly ISeoMetadataRepository _seoMetadataRepository;
 
-    public GetArticleSeoSettingsUseCase(
+    public GetSeoMetadataByResourceUseCase(
         ISeoMetadataRepository seoMetadataRepository)
     {
         _seoMetadataRepository = seoMetadataRepository
             ?? throw new ArgumentNullException(nameof(seoMetadataRepository));
     }
 
-    public async Task<Result<GetArticleSeoSettingsResponse>> ExecuteAsync(
-        string articlePublicId,
-        string? scope = null,
+    public async Task<Result<GetSeoMetadataByResourceResponse>> ExecuteAsync(
+        GetSeoMetadataByResourceRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         try
         {
-            if (string.IsNullOrWhiteSpace(articlePublicId) || articlePublicId.Trim().Length != 26)
-            {
-                return Result<GetArticleSeoSettingsResponse>.Failure(
-                    SeoErrors.Article.InvalidArticlePublicId);
-            }
-
-            string normalizedScope = string.IsNullOrWhiteSpace(scope)
+            string scope = string.IsNullOrWhiteSpace(request.Scope)
                 ? SeoScopes.Public
-                : scope.Trim();
+                : request.Scope.Trim();
 
-            if (!SeoScopes.IsValid(normalizedScope))
+            if (!SeoScopes.IsValid(scope))
             {
-                return Result<GetArticleSeoSettingsResponse>.Failure(
-                    SeoErrors.SlugRegistry.InvalidScope);
+                return Result<GetSeoMetadataByResourceResponse>.Failure(
+                    SeoErrors.SeoMetadata.InvalidScope);
             }
 
-            ArticleSeoSettingsResult? result =
-                await _seoMetadataRepository.GetArticleSeoSettingsByArticlePublicIdAsync(
-                    articlePublicId: articlePublicId.Trim(),
-                    scope: normalizedScope,
+            if (!SeoResourceTypes.IsValid(request.ResourceType))
+            {
+                return Result<GetSeoMetadataByResourceResponse>.Failure(
+                    SeoErrors.Resource.InvalidResourceType);
+            }
+
+            if (string.IsNullOrWhiteSpace(request.ResourcePublicId) ||
+                request.ResourcePublicId.Trim().Length != 26)
+            {
+                return Result<GetSeoMetadataByResourceResponse>.Failure(
+                    SeoErrors.Resource.InvalidResourcePublicId);
+            }
+
+            SeoMetadataResult? result =
+                await _seoMetadataRepository.SelectMetadataByResourceAsync(
+                    scope: scope,
+                    resourceType: request.ResourceType.Trim(),
+                    resourcePublicId: request.ResourcePublicId.Trim(),
                     cancellationToken: cancellationToken);
 
             if (result is null)
             {
-                return Result<GetArticleSeoSettingsResponse>.Failure(
-                    SeoErrors.Article.NotFound);
+                return Result<GetSeoMetadataByResourceResponse>.Failure(
+                    SeoErrors.SeoMetadata.NotFound);
             }
 
-            return Result<GetArticleSeoSettingsResponse>.Success(
-                new GetArticleSeoSettingsResponse
+            return Result<GetSeoMetadataByResourceResponse>.Success(
+                new GetSeoMetadataByResourceResponse
                 {
                     Scope = result.Scope,
                     ResourceType = result.ResourceType,
@@ -73,8 +83,6 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
                     TwitterImageUrl = result.TwitterImageUrl,
                     Robots = result.Robots,
                     IsManualOverride = result.IsManualOverride,
-                    IsIndexable = result.IsIndexable,
-                    IsActive = result.IsActive,
                     SourceAggregateVersion = result.SourceAggregateVersion,
                     LastAppliedMessageId = result.LastAppliedMessageId,
                     LastSyncedAtUtc = result.LastSyncedAtUtc,
@@ -83,12 +91,12 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
         }
         catch (PersistenceException exception)
         {
-            return Result<GetArticleSeoSettingsResponse>.Failure(
+            return Result<GetSeoMetadataByResourceResponse>.Failure(
                 MapPersistenceException(exception));
         }
         catch (SeoDomainException exception)
         {
-            return Result<GetArticleSeoSettingsResponse>.Failure(
+            return Result<GetSeoMetadataByResourceResponse>.Failure(
                 MapDomainException(exception));
         }
     }
@@ -97,7 +105,7 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
     {
         return exception.Code switch
         {
-            "SEO.INVALID_SCOPE" => SeoErrors.SlugRegistry.InvalidScope,
+            "SEO.INVALID_SCOPE" => SeoErrors.SeoMetadata.InvalidScope,
             "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
             "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
             _ => SeoErrors.ValidationFailed
@@ -108,7 +116,7 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
     {
         return exception.Code switch
         {
-            "SEO.INVALID_SCOPE" => SeoErrors.SlugRegistry.InvalidScope,
+            "SEO.INVALID_SCOPE" => SeoErrors.SeoMetadata.InvalidScope,
             "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
             "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
             "SEO.STORE_UNAVAILABLE" => SeoErrors.Infrastructure.StoreUnavailable,

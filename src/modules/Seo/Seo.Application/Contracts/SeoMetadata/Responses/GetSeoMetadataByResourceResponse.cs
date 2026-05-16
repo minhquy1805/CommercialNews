@@ -1,14 +1,12 @@
 namespace Seo.Application.Contracts.SeoMetadata.Responses;
 
-public sealed class GetArticleSeoSettingsResponse
+public sealed class GetSeoMetadataByResourceResponse
 {
     public string Scope { get; init; } = string.Empty;
 
     public string ResourceType { get; init; } = string.Empty;
 
     public string ResourcePublicId { get; init; } = string.Empty;
-
-    public string ArticlePublicId => ResourcePublicId;
 
     public string? Slug { get; init; }
 
@@ -33,10 +31,6 @@ public sealed class GetArticleSeoSettingsResponse
     public string? Robots { get; init; }
 
     public bool? IsManualOverride { get; init; }
-
-    public bool? IsIndexable { get; init; }
-
-    public bool? IsActive { get; init; }
 
     public long? SourceAggregateVersion { get; init; }
 

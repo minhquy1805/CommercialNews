@@ -4,7 +4,8 @@ using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Seo.Application.Contracts.SeoMetadata.Requests;
 using Seo.Application.Contracts.SeoMetadata.Responses;
 using Seo.Application.Errors;
-using Seo.Application.Models.QueryModels;
+using Seo.Application.Models.Queries;
+using Seo.Application.Models.Results;
 using Seo.Application.Ports.Persistence;
 using Seo.Domain.Exceptions;
 
@@ -17,24 +18,42 @@ public sealed class GetSeoMetadataListUseCase : IGetSeoMetadataListUseCase
     public GetSeoMetadataListUseCase(
         ISeoMetadataRepository seoMetadataRepository)
     {
-        _seoMetadataRepository = seoMetadataRepository;
+        _seoMetadataRepository = seoMetadataRepository
+            ?? throw new ArgumentNullException(nameof(seoMetadataRepository));
     }
 
     public async Task<Result<PagedQueryResult<GetSeoMetadataListResponse>>> ExecuteAsync(
         GetSeoMetadataListRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         try
         {
+            int page = request.Page <= 0 ? 1 : request.Page;
+            int pageSize = request.PageSize <= 0 ? 20 : request.PageSize;
+
+            if (pageSize > 200)
+            {
+                pageSize = 200;
+            }
+
             SeoMetadataListQuery query = new()
             {
-                ArticleId = request.ArticleId,
+                Skip = (page - 1) * pageSize,
+                Take = pageSize,
+                Scope = request.Scope,
+                ResourceType = request.ResourceType,
+                ResourcePublicId = request.ResourcePublicId,
+                IsManualOverride = request.IsManualOverride,
                 UpdatedByUserId = request.UpdatedByUserId,
                 Keyword = request.Keyword,
-                Page = request.Page,
-                PageSize = request.PageSize,
-                SortBy = request.SortBy,
-                SortDirection = request.SortDirection
+                SortBy = string.IsNullOrWhiteSpace(request.SortBy)
+                    ? "UpdatedAtUtc"
+                    : request.SortBy,
+                SortDirection = string.IsNullOrWhiteSpace(request.SortDirection)
+                    ? "DESC"
+                    : request.SortDirection
             };
 
             PagedQueryResult<SeoMetadataListResultItem> result =
@@ -51,18 +70,37 @@ public sealed class GetSeoMetadataListUseCase : IGetSeoMetadataListUseCase
                     .Select(item => new GetSeoMetadataListResponse
                     {
                         SeoId = item.SeoId,
-                        ArticleId = item.ArticleId,
+
+                        Scope = item.Scope,
+                        ResourceType = item.ResourceType,
+                        ResourcePublicId = item.ResourcePublicId,
+
+                        Slug = item.Slug,
                         CanonicalUrl = item.CanonicalUrl,
+
                         MetaTitle = item.MetaTitle,
                         MetaDescription = item.MetaDescription,
+
                         OgTitle = item.OgTitle,
                         OgDescription = item.OgDescription,
                         OgImageUrl = item.OgImageUrl,
+
                         TwitterTitle = item.TwitterTitle,
                         TwitterDescription = item.TwitterDescription,
                         TwitterImageUrl = item.TwitterImageUrl,
+
+                        Robots = item.Robots,
+
+                        IsManualOverride = item.IsManualOverride,
+
+                        SourceAggregateVersion = item.SourceAggregateVersion,
+                        LastAppliedMessageId = item.LastAppliedMessageId,
+                        LastSyncedAtUtc = item.LastSyncedAtUtc,
+
                         Version = item.Version,
-                        UpdatedAt = item.UpdatedAt,
+
+                        CreatedAtUtc = item.CreatedAtUtc,
+                        UpdatedAtUtc = item.UpdatedAtUtc,
                         UpdatedByUserId = item.UpdatedByUserId
                     })
                     .ToArray()
@@ -86,8 +124,11 @@ public sealed class GetSeoMetadataListUseCase : IGetSeoMetadataListUseCase
     {
         return exception.Code switch
         {
-            "SEO.SEO_METADATA_INVALID_ARTICLE_ID" => SeoErrors.SeoMetadata.InvalidArticleId,
+            "SEO.INVALID_SCOPE" => SeoErrors.SeoMetadata.InvalidScope,
+            "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
+            "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
             "SEO.SEO_METADATA_INVALID_VERSION" => SeoErrors.SeoMetadata.InvalidVersion,
+            "SEO.SEO_METADATA_INVALID_UPDATED_AT" => SeoErrors.SeoMetadata.InvalidUpdatedAt,
             _ => SeoErrors.ValidationFailed
         };
     }
@@ -96,6 +137,10 @@ public sealed class GetSeoMetadataListUseCase : IGetSeoMetadataListUseCase
     {
         return exception.Code switch
         {
+            "SEO.INVALID_SCOPE" => SeoErrors.SeoMetadata.InvalidScope,
+            "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
+            "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
+            "SEO.STORE_UNAVAILABLE" => SeoErrors.Infrastructure.StoreUnavailable,
             _ => SeoErrors.ValidationFailed
         };
     }
