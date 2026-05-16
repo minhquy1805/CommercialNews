@@ -3,26 +3,26 @@ using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Seo.Application.Contracts.SlugRegistry.Requests;
 using Seo.Application.Contracts.SlugRegistry.Responses;
 using Seo.Application.Errors;
-using Seo.Application.Models.Results;
 using Seo.Application.Ports.Persistence;
 using Seo.Domain.Constants;
+using Seo.Domain.Entities;
 using Seo.Domain.Exceptions;
 
-namespace Seo.Application.UseCases.SlugRoutes.ResolveByScopeAndSlug;
+namespace Seo.Application.UseCases.SlugRoutes.CheckSlugAvailability;
 
-public sealed class ResolveByScopeAndSlugUseCase : IResolveByScopeAndSlugUseCase
+public sealed class CheckSlugAvailabilityUseCase : ICheckSlugAvailabilityUseCase
 {
     private readonly ISlugRegistryRepository _slugRegistryRepository;
 
-    public ResolveByScopeAndSlugUseCase(
+    public CheckSlugAvailabilityUseCase(
         ISlugRegistryRepository slugRegistryRepository)
     {
         _slugRegistryRepository = slugRegistryRepository
             ?? throw new ArgumentNullException(nameof(slugRegistryRepository));
     }
 
-    public async Task<Result<ResolveByScopeAndSlugResponse>> ExecuteAsync(
-        ResolveByScopeAndSlugRequest request,
+    public async Task<Result<CheckSlugAvailabilityResponse>> ExecuteAsync(
+        CheckSlugAvailabilityRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -35,13 +35,13 @@ public sealed class ResolveByScopeAndSlugUseCase : IResolveByScopeAndSlugUseCase
 
             if (!SeoScopes.IsValid(scope))
             {
-                return Result<ResolveByScopeAndSlugResponse>.Failure(
+                return Result<CheckSlugAvailabilityResponse>.Failure(
                     SeoErrors.SlugRegistry.InvalidScope);
             }
 
             if (string.IsNullOrWhiteSpace(request.Slug))
             {
-                return Result<ResolveByScopeAndSlugResponse>.Failure(
+                return Result<CheckSlugAvailabilityResponse>.Failure(
                     SeoErrors.SlugRegistry.SlugRequired);
             }
 
@@ -49,44 +49,76 @@ public sealed class ResolveByScopeAndSlugUseCase : IResolveByScopeAndSlugUseCase
 
             if (slug.Length > 200)
             {
-                return Result<ResolveByScopeAndSlugResponse>.Failure(
+                return Result<CheckSlugAvailabilityResponse>.Failure(
                     SeoErrors.SlugRegistry.SlugTooLong);
             }
 
-            ResolvedSlugRouteResult? result =
-                await _slugRegistryRepository.ResolveByScopeAndSlugAsync(
-                    scope,
-                    slug,
-                    cancellationToken);
+            string? requestedResourceType = string.IsNullOrWhiteSpace(request.ResourceType)
+                ? null
+                : request.ResourceType.Trim();
 
-            if (result is null)
+            string? requestedResourcePublicId = string.IsNullOrWhiteSpace(request.ResourcePublicId)
+                ? null
+                : request.ResourcePublicId.Trim();
+
+            if (requestedResourceType is not null &&
+                !SeoResourceTypes.IsValid(requestedResourceType))
             {
-                return Result<ResolveByScopeAndSlugResponse>.Failure(
-                    SeoErrors.SlugRegistry.SafeNotFound);
+                return Result<CheckSlugAvailabilityResponse>.Failure(
+                    SeoErrors.Resource.InvalidResourceType);
             }
 
-            return Result<ResolveByScopeAndSlugResponse>.Success(
-                new ResolveByScopeAndSlugResponse
+            if (requestedResourcePublicId is not null &&
+                requestedResourcePublicId.Length != 26)
+            {
+                return Result<CheckSlugAvailabilityResponse>.Failure(
+                    SeoErrors.Resource.InvalidResourcePublicId);
+            }
+
+            SlugRegistry? existing = await _slugRegistryRepository.GetByScopeAndSlugAsync(
+                scope,
+                slug,
+                onlyActive: true,
+                cancellationToken);
+
+            if (existing is null)
+            {
+                return Result<CheckSlugAvailabilityResponse>.Success(
+                    new CheckSlugAvailabilityResponse
+                    {
+                        Scope = scope,
+                        Slug = slug,
+                        IsAvailable = true,
+                        BelongsToCurrentResource = false
+                    });
+            }
+
+            bool belongsToCurrentResource =
+                requestedResourceType is not null &&
+                requestedResourcePublicId is not null &&
+                string.Equals(existing.ResourceType, requestedResourceType, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(existing.ResourcePublicId, requestedResourcePublicId, StringComparison.OrdinalIgnoreCase);
+
+            return Result<CheckSlugAvailabilityResponse>.Success(
+                new CheckSlugAvailabilityResponse
                 {
-                    Scope = result.Scope,
-                    Slug = result.Slug,
-                    ResourceType = result.ResourceType,
-                    ResourcePublicId = result.ResourcePublicId,
-                    CanonicalUrl = result.CanonicalUrl,
-                    IsIndexable = result.IsIndexable,
-                    Status = result.Status,
-                    SourceAggregateVersion = result.SourceAggregateVersion,
-                    Version = result.Version
+                    Scope = scope,
+                    Slug = slug,
+                    IsAvailable = belongsToCurrentResource,
+                    BelongsToCurrentResource = belongsToCurrentResource,
+                    ExistingResourceType = existing.ResourceType,
+                    ExistingResourcePublicId = existing.ResourcePublicId,
+                    ExistingSlugId = existing.SlugId
                 });
         }
         catch (PersistenceException exception)
         {
-            return Result<ResolveByScopeAndSlugResponse>.Failure(
+            return Result<CheckSlugAvailabilityResponse>.Failure(
                 MapPersistenceException(exception));
         }
         catch (SeoDomainException exception)
         {
-            return Result<ResolveByScopeAndSlugResponse>.Failure(
+            return Result<CheckSlugAvailabilityResponse>.Failure(
                 MapDomainException(exception));
         }
     }
@@ -108,6 +140,7 @@ public sealed class ResolveByScopeAndSlugUseCase : IResolveByScopeAndSlugUseCase
             "SEO.SLUG_REGISTRY_INVALID_UPDATED_AT" => SeoErrors.SlugRegistry.InvalidUpdatedAt,
 
             "SEO.CANONICAL_URL_TOO_LONG" => SeoErrors.SlugRegistry.CanonicalUrlTooLong,
+
             "SEO.INVALID_SOURCE_AGGREGATE_VERSION" => SeoErrors.Sync.InvalidSourceAggregateVersion,
             "SEO.INVALID_LAST_APPLIED_MESSAGE_ID" => SeoErrors.Sync.InvalidLastAppliedMessageId,
 

@@ -16,13 +16,16 @@ public sealed class GetSlugRegistryByIdUseCase : IGetSlugRegistryByIdUseCase
     public GetSlugRegistryByIdUseCase(
         ISlugRegistryRepository slugRegistryRepository)
     {
-        _slugRegistryRepository = slugRegistryRepository;
+        _slugRegistryRepository = slugRegistryRepository
+            ?? throw new ArgumentNullException(nameof(slugRegistryRepository));
     }
 
     public async Task<Result<GetSlugRegistryByIdResponse>> ExecuteAsync(
         GetSlugRegistryByIdRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         try
         {
             if (request.SlugId <= 0)
@@ -45,16 +48,28 @@ public sealed class GetSlugRegistryByIdUseCase : IGetSlugRegistryByIdUseCase
                 new GetSlugRegistryByIdResponse
                 {
                     SlugId = existing.SlugId,
-                    ArticleId = existing.ArticleId,
-                    Slug = existing.Slug,
+
                     Scope = existing.Scope,
+                    Slug = existing.Slug,
+
+                    ResourceType = existing.ResourceType,
+                    ResourcePublicId = existing.ResourcePublicId,
+
                     CanonicalUrl = existing.CanonicalUrl,
+
                     IsIndexable = existing.IsIndexable,
                     IsActive = existing.IsActive,
+
+                    SourceAggregateVersion = existing.SourceAggregateVersion,
+                    LastAppliedMessageId = existing.LastAppliedMessageId,
+                    LastSyncedAtUtc = existing.LastSyncedAtUtc,
+
                     Version = existing.Version,
-                    CreatedAt = existing.CreatedAt,
+
+                    CreatedAtUtc = existing.CreatedAtUtc,
                     CreatedByUserId = existing.CreatedByUserId,
-                    UpdatedAt = existing.UpdatedAt,
+
+                    UpdatedAtUtc = existing.UpdatedAtUtc,
                     UpdatedByUserId = existing.UpdatedByUserId
                 });
         }
@@ -75,9 +90,22 @@ public sealed class GetSlugRegistryByIdUseCase : IGetSlugRegistryByIdUseCase
         return exception.Code switch
         {
             "SEO.SLUG_REGISTRY_INVALID_SLUG_ID" => SeoErrors.SlugRegistry.InvalidSlugId,
-            "SEO.SLUG_REGISTRY_INVALID_ARTICLE_ID" => SeoErrors.SlugRegistry.InvalidArticleId,
+
             "SEO.INVALID_SCOPE" => SeoErrors.SlugRegistry.InvalidScope,
+            "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
+            "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
+
+            "SEO.INVALID_SLUG" => SeoErrors.SlugRegistry.SlugRequired,
+            "SEO.SLUG_TOO_LONG" => SeoErrors.SlugRegistry.SlugTooLong,
+
             "SEO.CANONICAL_URL_TOO_LONG" => SeoErrors.SlugRegistry.CanonicalUrlTooLong,
+
+            "SEO.SLUG_REGISTRY_INVALID_VERSION" => SeoErrors.SlugRegistry.InvalidVersion,
+            "SEO.SLUG_REGISTRY_INVALID_UPDATED_AT" => SeoErrors.SlugRegistry.InvalidUpdatedAt,
+
+            "SEO.INVALID_SOURCE_AGGREGATE_VERSION" => SeoErrors.Sync.InvalidSourceAggregateVersion,
+            "SEO.INVALID_LAST_APPLIED_MESSAGE_ID" => SeoErrors.Sync.InvalidLastAppliedMessageId,
+
             _ => SeoErrors.ValidationFailed
         };
     }
@@ -86,6 +114,12 @@ public sealed class GetSlugRegistryByIdUseCase : IGetSlugRegistryByIdUseCase
     {
         return exception.Code switch
         {
+            "SEO.INVALID_SCOPE" => SeoErrors.SlugRegistry.InvalidScope,
+            "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
+            "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
+            "SEO.INVALID_SLUG" => SeoErrors.SlugRegistry.SlugRequired,
+            "SEO.STORE_UNAVAILABLE" => SeoErrors.Infrastructure.StoreUnavailable,
+
             _ => SeoErrors.ValidationFailed
         };
     }
