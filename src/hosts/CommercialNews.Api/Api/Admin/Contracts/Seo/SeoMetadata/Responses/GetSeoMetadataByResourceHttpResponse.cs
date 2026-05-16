@@ -1,9 +1,7 @@
 namespace CommercialNews.Api.Api.Admin.Contracts.Seo.SeoMetadata.Responses;
 
-public sealed class GetSeoMetadataByIdHttpResponse
+public sealed class GetSeoMetadataByResourceHttpResponse
 {
-    public long SeoId { get; init; }
-
     public string Scope { get; init; } = string.Empty;
     public string ResourceType { get; init; } = string.Empty;
     public string ResourcePublicId { get; init; } = string.Empty;
@@ -24,15 +22,11 @@ public sealed class GetSeoMetadataByIdHttpResponse
 
     public string? Robots { get; init; }
 
-    public bool IsManualOverride { get; init; }
+    public bool? IsManualOverride { get; init; }
 
     public long? SourceAggregateVersion { get; init; }
     public string? LastAppliedMessageId { get; init; }
     public DateTime? LastSyncedAtUtc { get; init; }
 
     public int Version { get; init; }
-
-    public DateTime CreatedAtUtc { get; init; }
-    public DateTime UpdatedAtUtc { get; init; }
-    public long? UpdatedByUserId { get; init; }
 }
