@@ -2,11 +2,11 @@ using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Seo.Application.Contracts.SlugRegistry.Requests;
 using Seo.Application.Contracts.SlugRegistry.Responses;
 
-namespace Seo.Application.UseCases.SlugRoutes.UpdateSlugRegistry;
+namespace Seo.Application.UseCases.SlugRoutes.CheckSlugAvailability;
 
-public interface IUpdateSlugRegistryUseCase
+public interface ICheckSlugAvailabilityUseCase
 {
-    Task<Result<UpdateSlugRegistryResponse>> ExecuteAsync(
-        UpdateSlugRegistryRequest request,
+    Task<Result<CheckSlugAvailabilityResponse>> ExecuteAsync(
+        CheckSlugAvailabilityRequest request,
         CancellationToken cancellationToken = default);
 }
