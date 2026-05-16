@@ -9,106 +9,41 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Seo.Application.Contracts.SeoMetadata.Requests;
 using Seo.Application.Contracts.SeoMetadata.Responses;
-using Seo.Application.UseCases.SeoSettings.CreateSeoMetadata;
 using Seo.Application.UseCases.SeoSettings.GetArticleSeoSettings;
-using Seo.Application.UseCases.SeoSettings.GetSeoMetadataByArticleId;
 using Seo.Application.UseCases.SeoSettings.GetSeoMetadataById;
+using Seo.Application.UseCases.SeoSettings.GetSeoMetadataByResource;
 using Seo.Application.UseCases.SeoSettings.GetSeoMetadataList;
-using Seo.Application.UseCases.SeoSettings.UpdateSeoMetadata;
 using Seo.Application.UseCases.SeoSettings.UpsertArticleSeoSettings;
 
 namespace CommercialNews.Api.Api.Admin.Controllers.Seo;
 
 [Authorize]
 [ApiController]
-[Route("api/v1/admin/seo/metadata")]
+[Route("api/v1/admin/seo")]
 public sealed class SeoMetadataAdminController : ControllerBase
 {
-    private const string GetSeoMetadataByIdRouteName = "AdminSeoMetadata.GetById";
-
-    private readonly ICreateSeoMetadataUseCase _createSeoMetadataUseCase;
     private readonly IGetSeoMetadataByIdUseCase _getSeoMetadataByIdUseCase;
-    private readonly IGetSeoMetadataByArticleIdUseCase _getSeoMetadataByArticleIdUseCase;
+    private readonly IGetSeoMetadataByResourceUseCase _getSeoMetadataByResourceUseCase;
     private readonly IGetSeoMetadataListUseCase _getSeoMetadataListUseCase;
-    private readonly IUpdateSeoMetadataUseCase _updateSeoMetadataUseCase;
     private readonly IGetArticleSeoSettingsUseCase _getArticleSeoSettingsUseCase;
     private readonly IUpsertArticleSeoSettingsUseCase _upsertArticleSeoSettingsUseCase;
 
     public SeoMetadataAdminController(
-        ICreateSeoMetadataUseCase createSeoMetadataUseCase,
         IGetSeoMetadataByIdUseCase getSeoMetadataByIdUseCase,
-        IGetSeoMetadataByArticleIdUseCase getSeoMetadataByArticleIdUseCase,
+        IGetSeoMetadataByResourceUseCase getSeoMetadataByResourceUseCase,
         IGetSeoMetadataListUseCase getSeoMetadataListUseCase,
-        IUpdateSeoMetadataUseCase updateSeoMetadataUseCase,
         IGetArticleSeoSettingsUseCase getArticleSeoSettingsUseCase,
         IUpsertArticleSeoSettingsUseCase upsertArticleSeoSettingsUseCase)
     {
-        _createSeoMetadataUseCase = createSeoMetadataUseCase;
         _getSeoMetadataByIdUseCase = getSeoMetadataByIdUseCase;
-        _getSeoMetadataByArticleIdUseCase = getSeoMetadataByArticleIdUseCase;
+        _getSeoMetadataByResourceUseCase = getSeoMetadataByResourceUseCase;
         _getSeoMetadataListUseCase = getSeoMetadataListUseCase;
-        _updateSeoMetadataUseCase = updateSeoMetadataUseCase;
         _getArticleSeoSettingsUseCase = getArticleSeoSettingsUseCase;
         _upsertArticleSeoSettingsUseCase = upsertArticleSeoSettingsUseCase;
     }
 
-    [Authorize(Policy = AuthorizationPolicies.SeoMetadataCreate)]
-    [HttpPost]
-    [ProducesResponseType(typeof(CreateSeoMetadataHttpResponse), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> CreateAsync(
-        [FromBody] CreateSeoMetadataHttpRequest request,
-        CancellationToken cancellationToken)
-    {
-        var useCaseRequest = new CreateSeoMetadataRequest
-        {
-            ArticleId = request.ArticleId,
-            CanonicalUrl = request.CanonicalUrl,
-            MetaTitle = request.MetaTitle,
-            MetaDescription = request.MetaDescription,
-            OgTitle = request.OgTitle,
-            OgDescription = request.OgDescription,
-            OgImageUrl = request.OgImageUrl,
-            TwitterTitle = request.TwitterTitle,
-            TwitterDescription = request.TwitterDescription,
-            TwitterImageUrl = request.TwitterImageUrl
-        };
-
-        Result<CreateSeoMetadataResponse> result =
-            await _createSeoMetadataUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
-
-        if (result.IsFailure)
-        {
-            return this.ToActionResult(Result<CreateSeoMetadataHttpResponse>.Failure(result.Error!));
-        }
-
-        var response = new CreateSeoMetadataHttpResponse
-        {
-            SeoId = result.Value!.SeoId,
-            ArticleId = result.Value.ArticleId,
-            CanonicalUrl = result.Value.CanonicalUrl,
-            MetaTitle = result.Value.MetaTitle,
-            MetaDescription = result.Value.MetaDescription,
-            OgTitle = result.Value.OgTitle,
-            OgDescription = result.Value.OgDescription,
-            OgImageUrl = result.Value.OgImageUrl,
-            TwitterTitle = result.Value.TwitterTitle,
-            TwitterDescription = result.Value.TwitterDescription,
-            TwitterImageUrl = result.Value.TwitterImageUrl,
-            Version = result.Value.Version,
-            UpdatedAt = result.Value.UpdatedAt,
-            UpdatedByUserId = result.Value.UpdatedByUserId
-        };
-
-        return CreatedAtRoute(
-            GetSeoMetadataByIdRouteName,
-            new { seoId = response.SeoId },
-            response);
-    }
-
     [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
-    [HttpGet("{seoId:long}", Name = GetSeoMetadataByIdRouteName)]
+    [HttpGet("metadata/{seoId:long}")]
     [ProducesResponseType(typeof(GetSeoMetadataByIdHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
@@ -129,83 +64,63 @@ public sealed class SeoMetadataAdminController : ControllerBase
             return this.ToActionResult(Result<GetSeoMetadataByIdHttpResponse>.Failure(result.Error!));
         }
 
-        var response = new GetSeoMetadataByIdHttpResponse
-        {
-            SeoId = result.Value!.SeoId,
-            ArticleId = result.Value.ArticleId,
-            CanonicalUrl = result.Value.CanonicalUrl,
-            MetaTitle = result.Value.MetaTitle,
-            MetaDescription = result.Value.MetaDescription,
-            OgTitle = result.Value.OgTitle,
-            OgDescription = result.Value.OgDescription,
-            OgImageUrl = result.Value.OgImageUrl,
-            TwitterTitle = result.Value.TwitterTitle,
-            TwitterDescription = result.Value.TwitterDescription,
-            TwitterImageUrl = result.Value.TwitterImageUrl,
-            Version = result.Value.Version,
-            UpdatedAt = result.Value.UpdatedAt,
-            UpdatedByUserId = result.Value.UpdatedByUserId
-        };
-
-        return this.ToActionResult(Result<GetSeoMetadataByIdHttpResponse>.Success(response));
+        return this.ToActionResult(
+            Result<GetSeoMetadataByIdHttpResponse>.Success(Map(result.Value!)));
     }
 
     [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
-    [HttpGet("by-article/{articleId:long}")]
-    [ProducesResponseType(typeof(GetSeoMetadataByArticleIdHttpResponse), StatusCodes.Status200OK)]
+    [HttpGet("metadata/by-resource")]
+    [ProducesResponseType(typeof(GetSeoMetadataByResourceHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetByArticleIdAsync(
-        [FromRoute] long articleId,
+    public async Task<IActionResult> GetByResourceAsync(
+        [FromQuery] string resourceType,
+        [FromQuery] string resourcePublicId,
+        [FromQuery] string? scope,
         CancellationToken cancellationToken)
     {
-        var useCaseRequest = new GetSeoMetadataByArticleIdRequest
+        var useCaseRequest = new GetSeoMetadataByResourceRequest
         {
-            ArticleId = articleId
+            Scope = scope,
+            ResourceType = resourceType,
+            ResourcePublicId = resourcePublicId
         };
 
-        Result<GetSeoMetadataByArticleIdResponse> result =
-            await _getSeoMetadataByArticleIdUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+        Result<GetSeoMetadataByResourceResponse> result =
+            await _getSeoMetadataByResourceUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
 
         if (result.IsFailure)
         {
-            return this.ToActionResult(Result<GetSeoMetadataByArticleIdHttpResponse>.Failure(result.Error!));
+            return this.ToActionResult(Result<GetSeoMetadataByResourceHttpResponse>.Failure(result.Error!));
         }
 
-        var response = new GetSeoMetadataByArticleIdHttpResponse
-        {
-            ResourceType = result.Value!.ResourceType,
-            ResourceId = result.Value.ResourceId,
-            Slug = result.Value.Slug,
-            CanonicalUrl = result.Value.CanonicalUrl,
-            MetaTitle = result.Value.MetaTitle,
-            MetaDescription = result.Value.MetaDescription,
-            OgTitle = result.Value.OgTitle,
-            OgDescription = result.Value.OgDescription,
-            OgImageUrl = result.Value.OgImageUrl,
-            Version = result.Value.Version
-        };
-
-        return this.ToActionResult(Result<GetSeoMetadataByArticleIdHttpResponse>.Success(response));
+        return this.ToActionResult(
+            Result<GetSeoMetadataByResourceHttpResponse>.Success(Map(result.Value!)));
     }
 
     [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
-    [HttpGet]
+    [HttpGet("metadata")]
     [ProducesResponseType(typeof(GetSeoMetadataListHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetPagedAsync(
-        [FromQuery] long? articleId = null,
+        [FromQuery] string? scope = null,
+        [FromQuery] string? resourceType = null,
+        [FromQuery] string? resourcePublicId = null,
+        [FromQuery] bool? isManualOverride = null,
         [FromQuery] long? updatedByUserId = null,
         [FromQuery] string? keyword = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
-        [FromQuery] string sortBy = "UpdatedAt",
+        [FromQuery] string sortBy = "UpdatedAtUtc",
         [FromQuery] string sortDirection = "DESC",
         CancellationToken cancellationToken = default)
     {
         var useCaseRequest = new GetSeoMetadataListRequest
         {
-            ArticleId = articleId,
+            Scope = scope,
+            ResourceType = resourceType,
+            ResourcePublicId = resourcePublicId,
+            IsManualOverride = isManualOverride,
             UpdatedByUserId = updatedByUserId,
             Keyword = keyword,
             Page = page,
@@ -224,23 +139,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
 
         var response = new GetSeoMetadataListHttpResponse
         {
-            Items = result.Value!.Items.Select(static item => new GetSeoMetadataListItemHttpResponse
-            {
-                SeoId = item.SeoId,
-                ArticleId = item.ArticleId,
-                CanonicalUrl = item.CanonicalUrl,
-                MetaTitle = item.MetaTitle,
-                MetaDescription = item.MetaDescription,
-                OgTitle = item.OgTitle,
-                OgDescription = item.OgDescription,
-                OgImageUrl = item.OgImageUrl,
-                TwitterTitle = item.TwitterTitle,
-                TwitterDescription = item.TwitterDescription,
-                TwitterImageUrl = item.TwitterImageUrl,
-                Version = item.Version,
-                UpdatedAt = item.UpdatedAt,
-                UpdatedByUserId = item.UpdatedByUserId
-            }).ToArray(),
+            Items = result.Value!.Items.Select(Map).ToArray(),
             Page = result.Value.Page,
             PageSize = result.Value.PageSize,
             TotalItems = result.Value.TotalItems
@@ -249,121 +148,44 @@ public sealed class SeoMetadataAdminController : ControllerBase
         return this.ToActionResult(Result<GetSeoMetadataListHttpResponse>.Success(response));
     }
 
-    [Authorize(Policy = AuthorizationPolicies.SeoMetadataUpdate)]
-    [HttpPut("{seoId:long}")]
-    [ProducesResponseType(typeof(UpdateSeoMetadataHttpResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-    public async Task<IActionResult> UpdateAsync(
-        [FromRoute] long seoId,
-        [FromBody] UpdateSeoMetadataHttpRequest request,
-        CancellationToken cancellationToken)
-    {
-        var useCaseRequest = new UpdateSeoMetadataRequest
-        {
-            SeoId = seoId,
-            CanonicalUrl = request.CanonicalUrl,
-            MetaTitle = request.MetaTitle,
-            MetaDescription = request.MetaDescription,
-            OgTitle = request.OgTitle,
-            OgDescription = request.OgDescription,
-            OgImageUrl = request.OgImageUrl,
-            TwitterTitle = request.TwitterTitle,
-            TwitterDescription = request.TwitterDescription,
-            TwitterImageUrl = request.TwitterImageUrl,
-            ExpectedVersion = request.ExpectedVersion
-        };
-
-        Result<UpdateSeoMetadataResponse> result =
-            await _updateSeoMetadataUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
-
-        if (result.IsFailure)
-        {
-            return this.ToActionResult(Result<UpdateSeoMetadataHttpResponse>.Failure(result.Error!));
-        }
-
-        var response = new UpdateSeoMetadataHttpResponse
-        {
-            SeoId = result.Value!.SeoId,
-            ArticleId = result.Value.ArticleId,
-            CanonicalUrl = result.Value.CanonicalUrl,
-            MetaTitle = result.Value.MetaTitle,
-            MetaDescription = result.Value.MetaDescription,
-            OgTitle = result.Value.OgTitle,
-            OgDescription = result.Value.OgDescription,
-            OgImageUrl = result.Value.OgImageUrl,
-            TwitterTitle = result.Value.TwitterTitle,
-            TwitterDescription = result.Value.TwitterDescription,
-            TwitterImageUrl = result.Value.TwitterImageUrl,
-            Version = result.Value.Version,
-            UpdatedAt = result.Value.UpdatedAt,
-            UpdatedByUserId = result.Value.UpdatedByUserId
-        };
-
-        return this.ToActionResult(Result<UpdateSeoMetadataHttpResponse>.Success(response));
-    }
-
     [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
-    [HttpGet("articles/{articleId:long}/settings")]
+    [HttpGet("articles/{articlePublicId}")]
     [ProducesResponseType(typeof(GetArticleSeoSettingsHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetArticleSettingsAsync(
-        [FromRoute] long articleId,
+        [FromRoute] string articlePublicId,
+        [FromQuery] string? scope,
         CancellationToken cancellationToken)
     {
-        var useCaseRequest = new GetArticleSeoSettingsRequest
-        {
-            ArticleId = articleId
-        };
-
         Result<GetArticleSeoSettingsResponse> result =
-            await _getArticleSeoSettingsUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+            await _getArticleSeoSettingsUseCase.ExecuteAsync(articlePublicId, scope, cancellationToken);
 
         if (result.IsFailure)
         {
             return this.ToActionResult(Result<GetArticleSeoSettingsHttpResponse>.Failure(result.Error!));
         }
 
-        var response = new GetArticleSeoSettingsHttpResponse
-        {
-            ArticleId = result.Value!.ArticleId,
-            Scope = result.Value.Scope,
-            Slug = result.Value.Slug,
-            CanonicalUrl = result.Value.CanonicalUrl,
-            MetaTitle = result.Value.MetaTitle,
-            MetaDescription = result.Value.MetaDescription,
-            OgTitle = result.Value.OgTitle,
-            OgDescription = result.Value.OgDescription,
-            OgImageUrl = result.Value.OgImageUrl,
-            TwitterTitle = result.Value.TwitterTitle,
-            TwitterDescription = result.Value.TwitterDescription,
-            TwitterImageUrl = result.Value.TwitterImageUrl,
-            IsIndexable = result.Value.IsIndexable,
-            IsActive = result.Value.IsActive,
-            Version = result.Value.Version
-        };
-
-        return this.ToActionResult(Result<GetArticleSeoSettingsHttpResponse>.Success(response));
+        return this.ToActionResult(
+            Result<GetArticleSeoSettingsHttpResponse>.Success(Map(result.Value!)));
     }
 
     [Authorize(Policy = AuthorizationPolicies.SeoMetadataUpdate)]
-    [HttpPut("articles/{articleId:long}/settings")]
+    [HttpPut("articles/{articlePublicId}")]
     [ProducesResponseType(typeof(UpsertArticleSeoSettingsHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status412PreconditionFailed)]
     public async Task<IActionResult> UpsertArticleSettingsAsync(
-        [FromRoute] long articleId,
+        [FromRoute] string articlePublicId,
         [FromBody] UpsertArticleSeoSettingsHttpRequest request,
         CancellationToken cancellationToken)
     {
         var useCaseRequest = new UpsertArticleSeoSettingsRequest
         {
-            ArticleId = articleId,
-            Slug = request.Slug,
             Scope = request.Scope,
+            Slug = request.Slug,
             CanonicalUrl = request.CanonicalUrl,
             MetaTitle = request.MetaTitle,
             MetaDescription = request.MetaDescription,
@@ -373,6 +195,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
             TwitterTitle = request.TwitterTitle,
             TwitterDescription = request.TwitterDescription,
             TwitterImageUrl = request.TwitterImageUrl,
+            Robots = request.Robots,
             IsIndexable = request.IsIndexable,
             IsActive = request.IsActive,
             ExpectedSlugVersion = request.ExpectedSlugVersion,
@@ -380,33 +203,162 @@ public sealed class SeoMetadataAdminController : ControllerBase
         };
 
         Result<UpsertArticleSeoSettingsResponse> result =
-            await _upsertArticleSeoSettingsUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+            await _upsertArticleSeoSettingsUseCase.ExecuteAsync(
+                articlePublicId,
+                useCaseRequest,
+                cancellationToken);
 
         if (result.IsFailure)
         {
             return this.ToActionResult(Result<UpsertArticleSeoSettingsHttpResponse>.Failure(result.Error!));
         }
 
-        var response = new UpsertArticleSeoSettingsHttpResponse
-        {
-            Updated = result.Value!.Updated,
-            ArticleId = result.Value.ArticleId,
-            Scope = result.Value.Scope,
-            Slug = result.Value.Slug,
-            CanonicalUrl = result.Value.CanonicalUrl,
-            MetaTitle = result.Value.MetaTitle,
-            MetaDescription = result.Value.MetaDescription,
-            OgTitle = result.Value.OgTitle,
-            OgDescription = result.Value.OgDescription,
-            OgImageUrl = result.Value.OgImageUrl,
-            TwitterTitle = result.Value.TwitterTitle,
-            TwitterDescription = result.Value.TwitterDescription,
-            TwitterImageUrl = result.Value.TwitterImageUrl,
-            IsIndexable = result.Value.IsIndexable,
-            IsActive = result.Value.IsActive,
-            Version = result.Value.Version
-        };
+        return this.ToActionResult(
+            Result<UpsertArticleSeoSettingsHttpResponse>.Success(Map(result.Value!)));
+    }
 
-        return this.ToActionResult(Result<UpsertArticleSeoSettingsHttpResponse>.Success(response));
+    private static GetSeoMetadataByIdHttpResponse Map(GetSeoMetadataByIdResponse source)
+    {
+        return new GetSeoMetadataByIdHttpResponse
+        {
+            SeoId = source.SeoId,
+            Scope = source.Scope,
+            ResourceType = source.ResourceType,
+            ResourcePublicId = source.ResourcePublicId,
+            Slug = source.Slug,
+            CanonicalUrl = source.CanonicalUrl,
+            MetaTitle = source.MetaTitle,
+            MetaDescription = source.MetaDescription,
+            OgTitle = source.OgTitle,
+            OgDescription = source.OgDescription,
+            OgImageUrl = source.OgImageUrl,
+            TwitterTitle = source.TwitterTitle,
+            TwitterDescription = source.TwitterDescription,
+            TwitterImageUrl = source.TwitterImageUrl,
+            Robots = source.Robots,
+            IsManualOverride = source.IsManualOverride,
+            SourceAggregateVersion = source.SourceAggregateVersion,
+            LastAppliedMessageId = source.LastAppliedMessageId,
+            LastSyncedAtUtc = source.LastSyncedAtUtc,
+            Version = source.Version,
+            CreatedAtUtc = source.CreatedAtUtc,
+            UpdatedAtUtc = source.UpdatedAtUtc,
+            UpdatedByUserId = source.UpdatedByUserId
+        };
+    }
+
+    private static GetSeoMetadataByResourceHttpResponse Map(GetSeoMetadataByResourceResponse source)
+    {
+        return new GetSeoMetadataByResourceHttpResponse
+        {
+            Scope = source.Scope,
+            ResourceType = source.ResourceType,
+            ResourcePublicId = source.ResourcePublicId,
+            Slug = source.Slug,
+            CanonicalUrl = source.CanonicalUrl,
+            MetaTitle = source.MetaTitle,
+            MetaDescription = source.MetaDescription,
+            OgTitle = source.OgTitle,
+            OgDescription = source.OgDescription,
+            OgImageUrl = source.OgImageUrl,
+            TwitterTitle = source.TwitterTitle,
+            TwitterDescription = source.TwitterDescription,
+            TwitterImageUrl = source.TwitterImageUrl,
+            Robots = source.Robots,
+            IsManualOverride = source.IsManualOverride,
+            SourceAggregateVersion = source.SourceAggregateVersion,
+            LastAppliedMessageId = source.LastAppliedMessageId,
+            LastSyncedAtUtc = source.LastSyncedAtUtc,
+            Version = source.Version
+        };
+    }
+
+    private static GetSeoMetadataListItemHttpResponse Map(GetSeoMetadataListResponse source)
+    {
+        return new GetSeoMetadataListItemHttpResponse
+        {
+            SeoId = source.SeoId,
+            Scope = source.Scope,
+            ResourceType = source.ResourceType,
+            ResourcePublicId = source.ResourcePublicId,
+            Slug = source.Slug,
+            CanonicalUrl = source.CanonicalUrl,
+            MetaTitle = source.MetaTitle,
+            MetaDescription = source.MetaDescription,
+            OgTitle = source.OgTitle,
+            OgDescription = source.OgDescription,
+            OgImageUrl = source.OgImageUrl,
+            TwitterTitle = source.TwitterTitle,
+            TwitterDescription = source.TwitterDescription,
+            TwitterImageUrl = source.TwitterImageUrl,
+            Robots = source.Robots,
+            IsManualOverride = source.IsManualOverride,
+            SourceAggregateVersion = source.SourceAggregateVersion,
+            LastAppliedMessageId = source.LastAppliedMessageId,
+            LastSyncedAtUtc = source.LastSyncedAtUtc,
+            Version = source.Version,
+            CreatedAtUtc = source.CreatedAtUtc,
+            UpdatedAtUtc = source.UpdatedAtUtc,
+            UpdatedByUserId = source.UpdatedByUserId
+        };
+    }
+
+    private static GetArticleSeoSettingsHttpResponse Map(GetArticleSeoSettingsResponse source)
+    {
+        return new GetArticleSeoSettingsHttpResponse
+        {
+            ArticlePublicId = source.ArticlePublicId,
+            Scope = source.Scope,
+            ResourceType = source.ResourceType,
+            ResourcePublicId = source.ResourcePublicId,
+            Slug = source.Slug,
+            CanonicalUrl = source.CanonicalUrl,
+            MetaTitle = source.MetaTitle,
+            MetaDescription = source.MetaDescription,
+            OgTitle = source.OgTitle,
+            OgDescription = source.OgDescription,
+            OgImageUrl = source.OgImageUrl,
+            TwitterTitle = source.TwitterTitle,
+            TwitterDescription = source.TwitterDescription,
+            TwitterImageUrl = source.TwitterImageUrl,
+            Robots = source.Robots,
+            IsManualOverride = source.IsManualOverride,
+            IsIndexable = source.IsIndexable,
+            IsActive = source.IsActive,
+            SourceAggregateVersion = source.SourceAggregateVersion,
+            LastAppliedMessageId = source.LastAppliedMessageId,
+            LastSyncedAtUtc = source.LastSyncedAtUtc,
+            Version = source.Version
+        };
+    }
+
+    private static UpsertArticleSeoSettingsHttpResponse Map(UpsertArticleSeoSettingsResponse source)
+    {
+        return new UpsertArticleSeoSettingsHttpResponse
+        {
+            Updated = source.Updated,
+            ArticlePublicId = source.ArticlePublicId,
+            Scope = source.Scope,
+            ResourceType = source.ResourceType,
+            ResourcePublicId = source.ResourcePublicId,
+            Slug = source.Slug,
+            CanonicalUrl = source.CanonicalUrl,
+            MetaTitle = source.MetaTitle,
+            MetaDescription = source.MetaDescription,
+            OgTitle = source.OgTitle,
+            OgDescription = source.OgDescription,
+            OgImageUrl = source.OgImageUrl,
+            TwitterTitle = source.TwitterTitle,
+            TwitterDescription = source.TwitterDescription,
+            TwitterImageUrl = source.TwitterImageUrl,
+            Robots = source.Robots,
+            IsManualOverride = source.IsManualOverride,
+            IsIndexable = source.IsIndexable,
+            IsActive = source.IsActive,
+            SourceAggregateVersion = source.SourceAggregateVersion,
+            LastAppliedMessageId = source.LastAppliedMessageId,
+            LastSyncedAtUtc = source.LastSyncedAtUtc,
+            Version = source.Version
+        };
     }
 }
