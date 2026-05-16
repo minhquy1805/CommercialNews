@@ -1,10 +1,8 @@
+using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
+
 namespace Seo.Application.Ports.Persistence;
 
-public interface ISeoUnitOfWork
+public interface ISeoUnitOfWork : ISqlUnitOfWork
 {
-    Task BeginTransactionAsync(CancellationToken cancellationToken = default);
-
-    Task CommitAsync(CancellationToken cancellationToken = default);
-
-    Task RollbackAsync(CancellationToken cancellationToken = default);
+    
 }

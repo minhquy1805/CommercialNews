@@ -1,15 +1,13 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
-using Seo.Application.Models.QueryModels;
+using Seo.Application.Models.Commands;
+using Seo.Application.Models.Queries;
+using Seo.Application.Models.Results;
 using Seo.Domain.Entities;
 
 namespace Seo.Application.Ports.Persistence;
 
 public interface ISlugRegistryRepository
 {
-    Task<long> InsertAsync(
-        SlugRegistry slugRegistry,
-        CancellationToken cancellationToken = default);
-
     Task<SlugRegistry?> GetByIdAsync(
         long slugId,
         CancellationToken cancellationToken = default);
@@ -20,30 +18,26 @@ public interface ISlugRegistryRepository
         bool? onlyActive = null,
         CancellationToken cancellationToken = default);
 
-    Task<int> UpdateAsync(
-        SlugRegistry slugRegistry,
-        int expectedVersion,
-        CancellationToken cancellationToken = default);
-
-    Task<int> ActivateAsync(
-        long slugId,
-        long? updatedByUserId,
-        int expectedVersion,
-        CancellationToken cancellationToken = default);
-
-    Task<int> DeactivateAsync(
-        long slugId,
-        long? updatedByUserId,
-        int expectedVersion,
-        CancellationToken cancellationToken = default);
-
-    Task<IReadOnlyList<SlugRegistryListResultItem>> SelectByArticleIdAsync(
-        long articleId,
-        string? scope = null,
+    Task<SlugRegistry?> GetByResourceAsync(
+        string scope,
+        string resourceType,
+        string resourcePublicId,
         bool? onlyActive = null,
         CancellationToken cancellationToken = default);
 
-    Task<ResolveSeoRouteResult?> ResolveByScopeAndSlugAsync(
+    Task<SlugRegistry?> UpsertAsync(
+        SlugRegistryUpsertCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task<SeoApplyResultModel> ApplyContentVisibilityAsync(
+        ApplyContentVisibilityCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task<SlugRegistry?> DeactivateByResourceAsync(
+        SlugRegistryDeactivateByResourceCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task<ResolvedSlugRouteResult?> ResolveByScopeAndSlugAsync(
         string scope,
         string slug,
         CancellationToken cancellationToken = default);
