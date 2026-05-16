@@ -1,4 +1,4 @@
-namespace Seo.Domain.Enums;
+namespace Seo.Domain.Constants;
 
 public static class SeoScopes
 {
@@ -11,11 +11,7 @@ public static class SeoScopes
 
     public static bool IsValid(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        return All.Contains(value);
+        return !string.IsNullOrWhiteSpace(value)
+            && All.Contains(value.Trim());
     }
 }
