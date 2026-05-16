@@ -1,6 +1,6 @@
 namespace CommercialNews.Api.Api.Admin.Contracts.Seo.SlugRoutes.Responses;
 
-public sealed class GetSlugRouteByIdHttpResponse
+public sealed class GetSlugRouteByResourceHttpResponse
 {
     public long SlugId { get; init; }
 
