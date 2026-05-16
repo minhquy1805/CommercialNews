@@ -1,34 +1,40 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
-using Seo.Application.Models.QueryModels;
+using Seo.Application.Models.Commands;
+using Seo.Application.Models.Queries;
+using Seo.Application.Models.Results;
 using Seo.Domain.Entities;
 
 namespace Seo.Application.Ports.Persistence;
 
 public interface ISeoMetadataRepository
 {
-    Task<long> InsertAsync(
-        SeoMetadata seoMetadata,
-        CancellationToken cancellationToken = default);
-
     Task<SeoMetadata?> GetByIdAsync(
         long seoId,
         CancellationToken cancellationToken = default);
 
-    Task<SeoMetadata?> GetByArticleIdAsync(
-        long articleId,
+    Task<SeoMetadata?> GetByResourceAsync(
+        string scope,
+        string resourceType,
+        string resourcePublicId,
         CancellationToken cancellationToken = default);
 
-    Task<int> UpdateAsync(
-        SeoMetadata seoMetadata,
-        int expectedVersion,
+    Task<SeoMetadata?> UpsertAsync(
+        SeoMetadataUpsertCommand command,
         CancellationToken cancellationToken = default);
 
-    Task<SeoMetadataResult?> SelectMetadataByArticleIdAsync(
-        long articleId,
+    Task<SeoApplyResultModel> ApplyContentDefaultsAsync(
+        ApplyContentMetadataDefaultsCommand command,
         CancellationToken cancellationToken = default);
 
-    Task<ArticleSeoSettingsResult?> GetArticleSeoSettingsByArticleIdAsync(
-        long articleId,
+    Task<SeoMetadataResult?> SelectMetadataByResourceAsync(
+        string scope,
+        string resourceType,
+        string resourcePublicId,
+        CancellationToken cancellationToken = default);
+
+    Task<ArticleSeoSettingsResult?> GetArticleSeoSettingsByArticlePublicIdAsync(
+        string articlePublicId,
+        string scope,
         CancellationToken cancellationToken = default);
 
     Task<PagedQueryResult<SeoMetadataListResultItem>> SelectSkipAndTakeAsync(
