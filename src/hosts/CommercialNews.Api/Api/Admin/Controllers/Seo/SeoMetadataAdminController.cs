@@ -148,7 +148,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
         return this.ToActionResult(Result<GetSeoMetadataListHttpResponse>.Success(response));
     }
 
-    [Authorize(Policy = AuthorizationPolicies.SeoMetadataRead)]
+    [Authorize(Policy = AuthorizationPolicies.SeoArticleSettingsRead)]
     [HttpGet("articles/{articlePublicId}")]
     [ProducesResponseType(typeof(GetArticleSeoSettingsHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -170,7 +170,7 @@ public sealed class SeoMetadataAdminController : ControllerBase
             Result<GetArticleSeoSettingsHttpResponse>.Success(Map(result.Value!)));
     }
 
-    [Authorize(Policy = AuthorizationPolicies.SeoMetadataUpdate)]
+    [Authorize(Policy = AuthorizationPolicies.SeoArticleSettingsUpsert)]
     [HttpPut("articles/{articlePublicId}")]
     [ProducesResponseType(typeof(UpsertArticleSeoSettingsHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]

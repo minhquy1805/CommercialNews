@@ -41,19 +41,35 @@ public static class PermissionKeys
     {
         public static class Metadata
         {
-            public const string Create = "seo:metadata:create";
             public const string Read = "seo:metadata:read";
             public const string Update = "seo:metadata:update";
         }
 
+        public static class ArticleSettings
+        {
+            public const string Read = Metadata.Read;
+            public const string Upsert = Metadata.Update;
+        }
+
         public static class SlugRoutes
         {
-            public const string Create = "seo:slug-routes:create";
             public const string Read = "seo:slug-routes:read";
+            public const string Generate = "seo:slug-routes:generate";
+
+            public const string Create = "seo:slug-routes:create";
             public const string Update = "seo:slug-routes:update";
             public const string Activate = "seo:slug-routes:activate";
             public const string Deactivate = "seo:slug-routes:deactivate";
-            public const string Generate = "seo:slug-routes:generate";
+        }
+
+        public static class SlugAvailability
+        {
+            public const string Read = SlugRoutes.Read;
+        }
+
+        public static class SlugGeneration
+        {
+            public const string Generate = SlugRoutes.Generate;
         }
     }
 

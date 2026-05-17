@@ -125,22 +125,16 @@ public static class SystemPermissions
             Description: "Restore deleted tags"),
 
         new(
-            Key: PermissionKeys.Seo.Metadata.Create,
-            Module: "Seo",
-            Action: "Create",
-            Description: "Create SEO metadata"),
-
-        new(
-            Key: PermissionKeys.Seo.Metadata.Read,
+            Key: PermissionKeys.Seo.ArticleSettings.Read,
             Module: "Seo",
             Action: "Read",
             Description: "Read SEO metadata and article SEO settings"),
 
         new(
-            Key: PermissionKeys.Seo.Metadata.Update,
+            Key: PermissionKeys.Seo.ArticleSettings.Upsert,
             Module: "Seo",
-            Action: "Update",
-            Description: "Update SEO metadata and article SEO settings"),
+            Action: "Upsert",
+            Description: "Upsert article SEO settings"),
 
         new(
             Key: PermissionKeys.Seo.SlugRoutes.Create,
@@ -152,7 +146,7 @@ public static class SystemPermissions
             Key: PermissionKeys.Seo.SlugRoutes.Read,
             Module: "Seo",
             Action: "Read",
-            Description: "Read slug routes"),
+            Description: "Read slug routes and check slug availability"),
 
         new(
             Key: PermissionKeys.Seo.SlugRoutes.Update,
@@ -173,7 +167,7 @@ public static class SystemPermissions
             Description: "Deactivate slug routes"),
 
         new(
-            Key: PermissionKeys.Seo.SlugRoutes.Generate,
+            Key: PermissionKeys.Seo.SlugGeneration.Generate,
             Module: "Seo",
             Action: "Generate",
             Description: "Generate slug suggestions"),

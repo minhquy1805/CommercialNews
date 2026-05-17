@@ -30,16 +30,15 @@ public static class DefaultRolePermissions
                 PermissionKeys.Content.Tags.Delete,
                 PermissionKeys.Content.Tags.Restore,
 
-                PermissionKeys.Seo.Metadata.Create,
-                PermissionKeys.Seo.Metadata.Read,
-                PermissionKeys.Seo.Metadata.Update,
+                PermissionKeys.Seo.ArticleSettings.Read,
+                PermissionKeys.Seo.ArticleSettings.Upsert,
 
                 PermissionKeys.Seo.SlugRoutes.Create,
                 PermissionKeys.Seo.SlugRoutes.Read,
                 PermissionKeys.Seo.SlugRoutes.Update,
                 PermissionKeys.Seo.SlugRoutes.Activate,
                 PermissionKeys.Seo.SlugRoutes.Deactivate,
-                PermissionKeys.Seo.SlugRoutes.Generate,
+                PermissionKeys.Seo.SlugGeneration.Generate,
 
                 PermissionKeys.Audit.Logs.Read,
                 PermissionKeys.Audit.Logs.ReadDetail,
@@ -89,7 +88,7 @@ public static class DefaultRolePermissions
                 PermissionKeys.Content.Categories.Read,
                 PermissionKeys.Content.Tags.Read,
 
-                PermissionKeys.Seo.Metadata.Read,
+                PermissionKeys.Seo.ArticleSettings.Read,
                 PermissionKeys.Seo.SlugRoutes.Read
             },
 
@@ -105,10 +104,9 @@ public static class DefaultRolePermissions
                 PermissionKeys.Content.Categories.Read,
                 PermissionKeys.Content.Tags.Read,
 
-                PermissionKeys.Seo.Metadata.Read,
-                PermissionKeys.Seo.Metadata.Update,
+                PermissionKeys.Seo.ArticleSettings.Read,
                 PermissionKeys.Seo.SlugRoutes.Read,
-                PermissionKeys.Seo.SlugRoutes.Generate
+                PermissionKeys.Seo.SlugGeneration.Generate
             },
 
             [SystemRoles.User] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

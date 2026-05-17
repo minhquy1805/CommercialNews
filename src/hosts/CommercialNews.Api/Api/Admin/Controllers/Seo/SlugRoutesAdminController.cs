@@ -150,7 +150,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
         return this.ToActionResult(Result<GetSlugRouteListHttpResponse>.Success(response));
     }
 
-    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesRead)]
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugAvailabilityRead)]
     [HttpGet("slug-availability")]
     [ProducesResponseType(typeof(CheckSlugAvailabilityHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -181,7 +181,7 @@ public sealed class SlugRoutesAdminController : ControllerBase
             Result<CheckSlugAvailabilityHttpResponse>.Success(Map(result.Value!)));
     }
 
-    [Authorize(Policy = AuthorizationPolicies.SeoSlugRoutesGenerate)]
+    [Authorize(Policy = AuthorizationPolicies.SeoSlugGenerate)]
     [HttpPost("generate-slug")]
     [ProducesResponseType(typeof(GenerateSlugHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
