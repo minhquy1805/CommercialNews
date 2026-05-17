@@ -391,7 +391,7 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
             {
                 return new SeoApplyResultModel
                 {
-                    ApplyResult = "NoRouteToActivate",
+                    ApplyResult = SeoApplyResults.NoRouteToActivate,
                     SourceAggregateVersion = sourceAggregateVersion,
                     LastAppliedMessageId = context.MessageId,
                     LastSyncedAtUtc = context.OccurredAtUtc

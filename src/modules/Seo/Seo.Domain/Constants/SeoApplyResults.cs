@@ -4,6 +4,7 @@ public static class SeoApplyResults
 {
     public const string Applied = "Applied";
     public const string StaleIgnored = "StaleIgnored";
+    public const string NoRouteToActivate = "NoRouteToActivate";
     public const string NoRouteToDeactivate = "NoRouteToDeactivate";
     public const string NotApplied = "NotApplied";
 
@@ -11,6 +12,7 @@ public static class SeoApplyResults
     {
         Applied,
         StaleIgnored,
+        NoRouteToActivate,
         NoRouteToDeactivate,
         NotApplied
     };
