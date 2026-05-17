@@ -9,4 +9,8 @@ public sealed class GenerateSlugHttpResponse
     public string SuggestedSlug { get; init; } = string.Empty;
 
     public bool IsUnique { get; init; }
+
+    public string? ExistingResourceType { get; init; }
+
+    public string? ExistingResourcePublicId { get; init; }
 }

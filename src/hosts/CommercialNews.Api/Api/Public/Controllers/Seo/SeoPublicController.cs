@@ -7,7 +7,7 @@ using Seo.Application.Contracts.SeoMetadata.Requests;
 using Seo.Application.Contracts.SeoMetadata.Responses;
 using Seo.Application.Contracts.SlugRegistry.Requests;
 using Seo.Application.Contracts.SlugRegistry.Responses;
-using Seo.Application.UseCases.SeoSettings.GetSeoMetadataByArticleId;
+using Seo.Application.UseCases.SeoSettings.GetSeoMetadataByResource;
 using Seo.Application.UseCases.SlugRoutes.ResolveByScopeAndSlug;
 
 namespace CommercialNews.Api.Api.Public.Controllers.Seo;
@@ -17,14 +17,14 @@ namespace CommercialNews.Api.Api.Public.Controllers.Seo;
 public sealed class SeoPublicController : ControllerBase
 {
     private readonly IResolveByScopeAndSlugUseCase _resolveByScopeAndSlugUseCase;
-    private readonly IGetSeoMetadataByArticleIdUseCase _getSeoMetadataByArticleIdUseCase;
+    private readonly IGetSeoMetadataByResourceUseCase _getSeoMetadataByResourceUseCase;
 
     public SeoPublicController(
         IResolveByScopeAndSlugUseCase resolveByScopeAndSlugUseCase,
-        IGetSeoMetadataByArticleIdUseCase getSeoMetadataByArticleIdUseCase)
+        IGetSeoMetadataByResourceUseCase getSeoMetadataByResourceUseCase)
     {
         _resolveByScopeAndSlugUseCase = resolveByScopeAndSlugUseCase;
-        _getSeoMetadataByArticleIdUseCase = getSeoMetadataByArticleIdUseCase;
+        _getSeoMetadataByResourceUseCase = getSeoMetadataByResourceUseCase;
     }
 
     [HttpGet("resolve")]
@@ -32,9 +32,9 @@ public sealed class SeoPublicController : ControllerBase
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ResolveAsync(
-        [FromQuery] string scope,
         [FromQuery] string slug,
-        CancellationToken cancellationToken)
+        [FromQuery] string? scope = null,
+        CancellationToken cancellationToken = default)
     {
         var useCaseRequest = new ResolveByScopeAndSlugRequest
         {
@@ -50,19 +50,8 @@ public sealed class SeoPublicController : ControllerBase
             return this.ToActionResult(Result<ResolveSeoHttpResponse>.Failure(result.Error!));
         }
 
-        var response = new ResolveSeoHttpResponse
-        {
-            Scope = result.Value!.Scope,
-            Slug = result.Value.Slug,
-            ResourceType = result.Value.ResourceType,
-            ResourceId = result.Value.ResourceId,
-            CanonicalUrl = result.Value.CanonicalUrl,
-            IsIndexable = result.Value.IsIndexable,
-            Status = result.Value.Status,
-            Version = result.Value.Version
-        };
-
-        return this.ToActionResult(Result<ResolveSeoHttpResponse>.Success(response));
+        return this.ToActionResult(
+            Result<ResolveSeoHttpResponse>.Success(Map(result.Value!)));
     }
 
     [HttpGet("metadata")]
@@ -70,36 +59,64 @@ public sealed class SeoPublicController : ControllerBase
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetMetadataAsync(
-        [FromQuery] long articleId,
+        [FromQuery] string resourceType,
+        [FromQuery] string resourcePublicId,
+        [FromQuery] string? scope,
         CancellationToken cancellationToken)
     {
-        var useCaseRequest = new GetSeoMetadataByArticleIdRequest
+        var useCaseRequest = new GetSeoMetadataByResourceRequest
         {
-            ArticleId = articleId
+            Scope = scope,
+            ResourceType = resourceType,
+            ResourcePublicId = resourcePublicId
         };
 
-        Result<GetSeoMetadataByArticleIdResponse> result =
-            await _getSeoMetadataByArticleIdUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+        Result<GetSeoMetadataByResourceResponse> result =
+            await _getSeoMetadataByResourceUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
 
         if (result.IsFailure)
         {
             return this.ToActionResult(Result<GetSeoMetadataHttpResponse>.Failure(result.Error!));
         }
 
-        var response = new GetSeoMetadataHttpResponse
-        {
-            ResourceType = result.Value!.ResourceType,
-            ResourceId = result.Value.ResourceId,
-            Slug = result.Value.Slug,
-            CanonicalUrl = result.Value.CanonicalUrl,
-            MetaTitle = result.Value.MetaTitle,
-            MetaDescription = result.Value.MetaDescription,
-            OgTitle = result.Value.OgTitle,
-            OgDescription = result.Value.OgDescription,
-            OgImageUrl = result.Value.OgImageUrl,
-            Version = result.Value.Version
-        };
+        return this.ToActionResult(
+            Result<GetSeoMetadataHttpResponse>.Success(Map(result.Value!)));
+    }
 
-        return this.ToActionResult(Result<GetSeoMetadataHttpResponse>.Success(response));
+    private static ResolveSeoHttpResponse Map(ResolveByScopeAndSlugResponse source)
+    {
+        return new ResolveSeoHttpResponse
+        {
+            Scope = source.Scope,
+            Slug = source.Slug,
+            ResourceType = source.ResourceType,
+            ResourcePublicId = source.ResourcePublicId,
+            CanonicalUrl = source.CanonicalUrl,
+            IsIndexable = source.IsIndexable,
+            Status = source.Status,
+            Version = source.Version
+        };
+    }
+
+    private static GetSeoMetadataHttpResponse Map(GetSeoMetadataByResourceResponse source)
+    {
+        return new GetSeoMetadataHttpResponse
+        {
+            Scope = source.Scope,
+            ResourceType = source.ResourceType,
+            ResourcePublicId = source.ResourcePublicId,
+            Slug = source.Slug,
+            CanonicalUrl = source.CanonicalUrl,
+            MetaTitle = source.MetaTitle,
+            MetaDescription = source.MetaDescription,
+            OgTitle = source.OgTitle,
+            OgDescription = source.OgDescription,
+            OgImageUrl = source.OgImageUrl,
+            TwitterTitle = source.TwitterTitle,
+            TwitterDescription = source.TwitterDescription,
+            TwitterImageUrl = source.TwitterImageUrl,
+            Robots = source.Robots,
+            Version = source.Version
+        };
     }
 }

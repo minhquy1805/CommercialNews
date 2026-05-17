@@ -1,44 +1,48 @@
 using Microsoft.Extensions.DependencyInjection;
-using Seo.Application.UseCases.SeoSettings.CreateSeoMetadata;
+using Seo.Application.Consumers.Content;
 using Seo.Application.UseCases.SeoSettings.GetArticleSeoSettings;
-using Seo.Application.UseCases.SeoSettings.GetSeoMetadataByArticleId;
 using Seo.Application.UseCases.SeoSettings.GetSeoMetadataById;
+using Seo.Application.UseCases.SeoSettings.GetSeoMetadataByResource;
 using Seo.Application.UseCases.SeoSettings.GetSeoMetadataList;
-using Seo.Application.UseCases.SeoSettings.UpdateSeoMetadata;
 using Seo.Application.UseCases.SeoSettings.UpsertArticleSeoSettings;
-using Seo.Application.UseCases.SlugRoutes.ActivateSlugRegistry;
-using Seo.Application.UseCases.SlugRoutes.CreateSlugRegistry;
-using Seo.Application.UseCases.SlugRoutes.DeactivateSlugRegistry;
+using Seo.Application.UseCases.SlugRoutes.CheckSlugAvailability;
 using Seo.Application.UseCases.SlugRoutes.GenerateSlug;
-using Seo.Application.UseCases.SlugRoutes.GetSlugRegistryByArticleId;
 using Seo.Application.UseCases.SlugRoutes.GetSlugRegistryById;
+using Seo.Application.UseCases.SlugRoutes.GetSlugRegistryByResource;
 using Seo.Application.UseCases.SlugRoutes.GetSlugRegistryList;
 using Seo.Application.UseCases.SlugRoutes.ResolveByScopeAndSlug;
-using Seo.Application.UseCases.SlugRoutes.UpdateSlugRegistry;
 
 namespace Seo.Application.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
+    public static IServiceCollection AddSeoConsumerApplication(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IContentSeoEventApplyService, ContentSeoEventApplyService>();
+
+        return services;
+    }
+
     public static IServiceCollection AddSeoApplication(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddSeoConsumerApplication();
+
+        // Slug routes
         services.AddScoped<IResolveByScopeAndSlugUseCase, ResolveByScopeAndSlugUseCase>();
         services.AddScoped<IGetSlugRegistryByIdUseCase, GetSlugRegistryByIdUseCase>();
-        services.AddScoped<IGetSlugRegistryByArticleIdUseCase, GetSlugRegistryByArticleIdUseCase>();
+        services.AddScoped<IGetSlugRegistryByResourceUseCase, GetSlugRegistryByResourceUseCase>();
         services.AddScoped<IGetSlugRegistryListUseCase, GetSlugRegistryListUseCase>();
-        services.AddScoped<ICreateSlugRegistryUseCase, CreateSlugRegistryUseCase>();
-        services.AddScoped<IUpdateSlugRegistryUseCase, UpdateSlugRegistryUseCase>();
-        services.AddScoped<IActivateSlugRegistryUseCase, ActivateSlugRegistryUseCase>();
-        services.AddScoped<IDeactivateSlugRegistryUseCase, DeactivateSlugRegistryUseCase>();
+        services.AddScoped<ICheckSlugAvailabilityUseCase, CheckSlugAvailabilityUseCase>();
         services.AddScoped<IGenerateSlugUseCase, GenerateSlugUseCase>();
 
+        // SEO metadata / settings
         services.AddScoped<IGetSeoMetadataByIdUseCase, GetSeoMetadataByIdUseCase>();
-        services.AddScoped<IGetSeoMetadataByArticleIdUseCase, GetSeoMetadataByArticleIdUseCase>();
+        services.AddScoped<IGetSeoMetadataByResourceUseCase, GetSeoMetadataByResourceUseCase>();
         services.AddScoped<IGetSeoMetadataListUseCase, GetSeoMetadataListUseCase>();
-        services.AddScoped<ICreateSeoMetadataUseCase, CreateSeoMetadataUseCase>();
-        services.AddScoped<IUpdateSeoMetadataUseCase, UpdateSeoMetadataUseCase>();
         services.AddScoped<IGetArticleSeoSettingsUseCase, GetArticleSeoSettingsUseCase>();
         services.AddScoped<IUpsertArticleSeoSettingsUseCase, UpsertArticleSeoSettingsUseCase>();
 

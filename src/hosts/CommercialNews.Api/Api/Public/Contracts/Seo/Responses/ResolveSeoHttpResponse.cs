@@ -7,7 +7,8 @@ public sealed class ResolveSeoHttpResponse
     public string Slug { get; init; } = string.Empty;
 
     public string ResourceType { get; init; } = string.Empty;
-    public long ResourceId { get; init; }
+
+    public string ResourcePublicId { get; init; } = string.Empty;
 
     public string? CanonicalUrl { get; init; }
 

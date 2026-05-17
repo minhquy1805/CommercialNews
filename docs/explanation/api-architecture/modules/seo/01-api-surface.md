@@ -29,7 +29,7 @@ This endpoint is designed to remain fast and should not depend on heavy metadata
   "scope": "public",
   "slug": "some-article-slug",
   "resourceType": "Article",
-  "resourceId": "string",
+  "resourcePublicId": "string",
   "canonicalUrl": "/articles/some-article-slug",
   "indexable": true,
   "status": "Resolved",
@@ -46,9 +46,10 @@ Safe not-found (must not leak drafts/unpublished or distinguish “missing route
 * Must be fast and cache-friendly (policy defined in Reading/edge docs).
 * Must not require fetching full SEO metadata.
 * Route resolution is not the final authority for public exposure.
-* Reading/Public Query must still validate Content truth before returning public content.
+* Reading/Public Query must still validate Content truth by public resource identity before returning public content.
 * Cache hit alone is not sufficient authority; stale routing must lose to truth-backed visibility checks.
 * If uncertainty exists, prefer safe not-found / safe deny behavior over stale routing confidence.
+* Public routing responses must expose stable public identifiers, not internal database primary keys.
 
 ### GET `/metadata`
 
@@ -57,14 +58,16 @@ Fetch SEO metadata for a resource (not the hot routing table).
 **Query**
 
 * `resourceType` (required): `Article`
-* `resourceId` (required)
+* `resourcePublicId` (required)
+* `scope` (optional, default: `public`)
 
 **Response (200)**
 
 ```json
 {
+  "scope": "public",
   "resourceType": "Article",
-  "resourceId": "string",
+  "resourcePublicId": "string",
   "slug": "some-article-slug",
   "canonicalUrl": "/articles/some-article-slug",
   "metaTitle": "string",
@@ -89,8 +92,9 @@ Fetch SEO metadata for a resource (not the hot routing table).
 Base path (Admin): `/api/v1/admin/seo`
 
 > All admin SEO endpoints require Bearer auth + explicit authorization policies.
+> Article identifiers in SEO admin APIs are `articlePublicId` values, not internal database primary keys.
 
-### GET `/articles/{articleId}`
+### GET `/articles/{articlePublicId}`
 
 Get SEO settings for an article.
 
@@ -98,7 +102,7 @@ Get SEO settings for an article.
 
 ```json
 {
-  "articleId": "string",
+  "articlePublicId": "string",
   "scope": "public",
   "slug": "some-article-slug",
   "canonicalUrl": "/articles/some-article-slug",
@@ -107,11 +111,13 @@ Get SEO settings for an article.
   "ogTitle": "string",
   "ogDescription": "string",
   "ogImageUrl": "string",
-  "version": 12
+  "isManualOverride": true,
+  "sourceAggregateVersion": 12,
+  "version": 13
 }
 ```
 
-### PUT `/articles/{articleId}`
+### PUT `/articles/{articlePublicId}`
 
 Upsert SEO metadata for an article.
 
@@ -125,6 +131,7 @@ Upsert SEO metadata for an article.
 
 ```json
 {
+  "scope": "public",
   "slug": "optional-slug",
   "canonicalUrl": "optional",
   "metaTitle": "optional",
@@ -140,6 +147,9 @@ Upsert SEO metadata for an article.
 ```json
 {
   "updated": true,
+  "articlePublicId": "string",
+  "scope": "public",
+  "isManualOverride": true,
   "version": 13
 }
 ```
@@ -149,13 +159,38 @@ Upsert SEO metadata for an article.
 * Must enforce slug uniqueness (by scope) at the SEO truth boundary.
 * Slug stability policy applies (title change does not auto-change slug).
 * Should enforce stale-write protection via version/rowversion/compare-and-set semantics according to module policy.
+* If omitted in V1, `scope` defaults to `public`.
+* Admin-edited SEO metadata must be treated as a manual override unless the request explicitly opts into an allowed auto-sync overwrite policy.
+* Auto-sync from Content events must not overwrite manually edited SEO metadata unless explicitly allowed by policy.
 * SEO truth change + local version advancement + outbox record (if needed) must commit atomically.
 * Write success is defined by SEO truth commit only.
 * Cache invalidation, search/index refresh, and downstream projections remain post-commit async effects.
 
+**Important error cases**
+
+* `400 Bad Request`: invalid slug format, invalid canonical URL, invalid metadata length.
+* `401 Unauthorized`: missing or invalid authentication.
+* `403 Forbidden`: authenticated caller lacks SEO permission.
+* `404 Not Found`: article/resource not found.
+* `409 Conflict`: slug already owned by another resource in the same scope.
+* `412 Precondition Failed`: stale version or `If-Match` mismatch.
+* `429 Too Many Requests`: admin anomaly protection or utility endpoint abuse.
+
+**Async effects**
+
+SEO event emission is optional in V1. If adopted, SEO truth change and the outbox record must commit atomically.
+
+Admin SEO writes may emit SEO integration events such as:
+
+* `seo.slug_route_changed`
+* `seo.metadata_updated`
+* `seo.slug_route_deactivated`
+
+These events are post-commit side effects consumed by Audit, cache invalidation, sitemap/search refresh, or future indexing workflows.
+
 ### POST `/generate-slug` (optional)
 
-Generate a slug from a title and ensure uniqueness (utility endpoint).
+Suggest a slug from a title and check current uniqueness (utility endpoint).
 
 **Request**
 
@@ -171,7 +206,9 @@ Generate a slug from a title and ensure uniqueness (utility endpoint).
 ```json
 {
   "slug": "my-new-article",
-  "isUnique": true
+  "isUnique": true,
+  "conflictResourceType": null,
+  "conflictResourcePublicId": null
 }
 ```
 
@@ -180,6 +217,35 @@ Generate a slug from a title and ensure uniqueness (utility endpoint).
 * This endpoint is a utility/helper only.
 * Returned uniqueness is advisory until a truth-bound SEO write commits successfully.
 * Clients must not treat generated slug availability as reserved ownership unless reservation semantics are explicitly introduced later.
+
+### GET `/slug-availability` (optional)
+
+Check whether a slug is currently available for admin editing workflows.
+
+**Query**
+
+* `scope` (required): e.g. `public`
+* `slug` (required)
+* `resourceType` (optional): `Article`
+* `resourcePublicId` (optional): exclude the current owner when editing an existing resource
+
+**Response (200)**
+
+```json
+{
+  "scope": "public",
+  "slug": "some-article-slug",
+  "isAvailable": true,
+  "conflictResourceType": null,
+  "conflictResourcePublicId": null
+}
+```
+
+**Rules**
+
+* This endpoint is advisory only and does not reserve slug ownership.
+* Final slug ownership is determined by the truth-bound SEO write commit.
+* If `resourceType` and `resourcePublicId` identify the current owner, the existing slug may be reported as available for that edit flow.
 
 ---
 

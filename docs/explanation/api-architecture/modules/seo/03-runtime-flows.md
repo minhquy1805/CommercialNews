@@ -2,7 +2,7 @@
 
 Supports arc42 scenarios:
 - Scenario 3: public user opens article by slug
-- SEO side effects from Scenario 1–2 (publish/unpublish)
+- SEO side effects from Scenario 1–2 (publish/unpublish/archive/soft-delete/restore)
 
 Related:
 - `../../../../architecture/arc42/04-runtime-view-v1.md`
@@ -62,8 +62,8 @@ Resolve slug to target safely and quickly, without turning stale routing into pu
 2. Reading module calls `GET /api/v1/seo/resolve?scope=public&slug=...`.
 3. SEO attempts cache-first route lookup if enabled.
 4. On miss or suspected staleness, SEO falls back to SEO truth store.
-5. SEO returns `resourceId` + `canonicalUrl` + indexable/status flags.
-6. Reading uses `resourceId` to fetch content and render response.
+5. SEO returns `resourcePublicId` + `canonicalUrl` + indexable/status flags.
+6. Reading uses `resourcePublicId` to fetch Content/Reading truth and render response.
 7. Reading still validates Content truth before public response is returned.
 
 ### Runtime rules
@@ -99,18 +99,21 @@ Make routing and metadata converge after Content truth publishes an article.
 
 ### Async flow
 1. Content publishes an article (sync).
-2. Content emits `ArticlePublished`.
-3. SEO consumes the event:
-   - ensures routing entry exists
-   - ensures canonical/meta defaults are correct
-   - applies version-aware route/metadata updates
-4. SEO emits `SeoUpdated` for cache invalidation/projections (optional).
+2. Content emits `content.article_published`.
+3. SEO consumer receives `content.article_published`.
+4. SEO checks message-level dedupe by `MessageId`.
+5. SEO checks `AggregateVersion` against stored `SourceAggregateVersion` for the `AggregateId` / `ResourcePublicId`.
+6. SEO applies idempotent upsert for `SlugRegistry` / `SeoMetadata`.
+7. SEO records `LastAppliedMessageId`, `SourceAggregateVersion`, and `LastSyncedAtUtc`.
+8. SEO may emit SEO integration events for cache/sitemap/search refresh if adopted, such as:
+   - `seo.slug_route_changed`
+   - `seo.metadata_updated`
 
 ### Runtime stream semantics
-- `ArticlePublished` is a truth-following event for SEO, not a replacement for Content truth.
+- `content.article_published` is a truth-following event for SEO, not a replacement for Content truth.
 - SEO consumers should use:
   - `MessageId` for dedupe
-  - `(ArticleId, Version)` for ordered apply or stale-event rejection
+  - `(AggregateId / ResourcePublicId, AggregateVersion)` for ordered apply or stale-event rejection
 - Duplicate delivery must converge safely.
 - Stale publish events must not overwrite newer SEO truth or newer derived serving state.
 
@@ -135,28 +138,38 @@ Make routing and metadata converge after Content truth publishes an article.
 
 ---
 
-## Flow C — Unpublish/archive triggers de-indexability (async)
+## Flow C — Unpublish/archive/soft-delete triggers de-indexability (async)
 
 ### Goal
-Ensure SEO-derived behavior converges after Content truth removes public visibility.
+Ensure SEO-derived behavior converges after Content truth removes or changes public visibility.
 
 ### Async flow
-1. Content unpublishes/archives (sync; source of truth changes immediately).
-2. Content emits `ArticleUnpublished`/`ArticleArchived`.
-3. SEO consumes the event:
-   - marks non-indexable by policy and/or removes routing entry (ADR hook)
-   - invalidates or updates route-serving derived state
-4. SEO emits `SeoUpdated`.
+1. Content unpublishes/archives/soft-deletes/restores (sync; source of truth changes immediately).
+2. Content emits one of:
+   - `content.article_unpublished`
+   - `content.article_archived`
+   - `content.article_soft_deleted`
+   - `content.article_restored`
+3. SEO checks message-level dedupe by `MessageId`.
+4. SEO rejects or ignores stale `AggregateVersion` values for the `AggregateId` / `ResourcePublicId`.
+5. SEO deactivates the route or marks it non-indexable idempotently when Content truth removes public visibility.
+6. For restore events, SEO re-checks Content truth and does not automatically make content indexable unless the article is currently publicly visible.
+7. SEO records `LastAppliedMessageId`, `SourceAggregateVersion`, and `LastSyncedAtUtc`.
+8. SEO may emit SEO integration events if adopted, such as:
+   - `seo.slug_route_deactivated`
+   - `seo.slug_route_changed`
+   - `seo.metadata_updated`
 
 ### Runtime stream semantics
-- `ArticleUnpublished` / `ArticleArchived` are ordering-sensitive for downstream SEO state.
-- Older publish-derived state must not win after a later unpublish/archive.
+- `content.article_unpublished`, `content.article_archived`, `content.article_soft_deleted`, and `content.article_restored` are ordering-sensitive for downstream SEO state.
+- Older publish-derived state must not win after a later unpublish/archive/soft-delete/restore.
 - Consumers should prefer version-aware update or truth resync over arrival-order trust.
 
 ### Non-negotiable
-- Even if SEO processing lags, public read must not expose unpublished content (Content remains source of truth).
+- Even if SEO processing lags, public read must not expose unpublished, archived, or soft-deleted content (Content remains source of truth).
 - Stale route cache presence must not defeat truth-backed visibility denial.
 - A stale or replayed publish event must not resurrect now-non-public content in SEO-derived state.
+- Restored content must not automatically become indexable unless Content truth says the article is publicly visible.
 
 ### Batch / rebuild hooks
 - Reconciliation workflows may later:
@@ -165,7 +178,8 @@ Ensure SEO-derived behavior converges after Content truth removes public visibil
   - verify non-indexability convergence after delayed processing
 
 ### Runtime rules
-- Unpublish/archive truth wins immediately.
+- Unpublish/archive/soft-delete truth wins immediately.
+- Restore truth only reopens SEO-derived route/indexability when Content truth confirms public visibility.
 - SEO serving lag is operationally important, not truth-authoritative.
 - Safe deny beats stale routing confidence.
 
@@ -180,8 +194,9 @@ Safely mutate SEO-owned truth without stale overwrite or uniqueness drift.
 1. Admin submits slug or metadata change.
 2. SEO validates command semantics and conflict rules.
 3. SEO updates routing truth and/or metadata truth.
-4. SEO writes Outbox in the same transaction if downstream invalidation/update is needed.
+4. SEO writes Outbox in the same transaction if downstream invalidation/update events are adopted.
 5. SEO returns success based on SEO truth commit only.
+6. After commit, relay/workers may publish SEO integration events such as `seo.slug_route_changed`, `seo.slug_route_deactivated`, or `seo.metadata_updated`.
 
 ### Rules
 - `(Scope, Slug)` active uniqueness is enforced at SEO truth boundary.
@@ -194,7 +209,7 @@ Safely mutate SEO-owned truth without stale overwrite or uniqueness drift.
 - Slug conflict: clear conflict response.
 - Stale admin update: explicit conflict/reject if optimistic concurrency is used.
 - Broker/cache failure after commit: SEO truth still succeeds; downstream lag is repaired asynchronously.
-- Duplicate or replayed `SeoUpdated` downstream must not regress current SEO-serving state.
+- Duplicate or replayed SEO integration events downstream must not regress current SEO-serving state.
 
 ---
 
@@ -295,7 +310,7 @@ SEO runtime in V1 is governed by ten rules:
 1. SEO owns routing truth and metadata truth, but not publication truth.  
 2. Slug resolution is hot-path critical, but still subordinate to Content visibility checks.  
 3. Cache is acceleration only; DB fallback is mandatory.  
-4. Async publish/unpublish reactions must be idempotent and version-aware.  
+4. Async publish/unpublish/archive/soft-delete/restore reactions must be idempotent and version-aware.
 5. Duplicate delivery, replay, and stale event arrival are normal and must converge safely.  
 6. Batch workflows may rebuild, reconcile, and repair derived SEO-serving outputs.  
 7. Partial candidate output must not be published as complete active state.  

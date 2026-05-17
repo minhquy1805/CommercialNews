@@ -5,17 +5,19 @@
   - Create supporting indexes for SEO truth tables in CommercialNews V1.
   - Optimize:
       * public slug resolve hot path
-      * admin SEO get/upsert by article
-      * metadata lookup by article
+      * admin SEO get/upsert by resource public identity
+      * metadata lookup by resource
       * active route maintenance / deactivation / switch
       * conflict-safe slug ownership
+      * async Content-event apply checks
+      * admin investigation / recent updates
   - Idempotent: safe to re-run.
 
   Notes:
   - Truth remains in [seo] tables.
   - Redis/cache/search/projections are outside this file.
-  - Keep indexes focused on known V1 access patterns; avoid speculative over-indexing.
   - Visibility is still enforced by Content truth after SEO route resolution.
+  - SEO V1 uses ResourceType + ResourcePublicId, not internal Content ArticleId.
 */
 
 SET ANSI_NULLS ON;
@@ -57,23 +59,32 @@ GO
    1) [seo].[SeoMetadata]
    ========================================================= */
 
-/* Admin/article SEO lookup by article */
+/*
+  Admin/resource SEO metadata lookup.
+  UQ_SeoMetadata_Scope_Resource already exists from 001_tables.sql:
+  ([Scope], [ResourceType], [ResourcePublicId])
+
+  This covering index is useful for read-heavy admin/API responses.
+*/
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_SeoMetadata_ArticleId'
+    WHERE name = N'IX_SeoMetadata_Scope_ResourcePublicId_Covering'
       AND object_id = OBJECT_ID(N'[seo].[SeoMetadata]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_SeoMetadata_ArticleId]
+    CREATE NONCLUSTERED INDEX [IX_SeoMetadata_Scope_ResourcePublicId_Covering]
     ON [seo].[SeoMetadata]
     (
-        [ArticleId] ASC
+        [Scope] ASC,
+        [ResourceType] ASC,
+        [ResourcePublicId] ASC
     )
     INCLUDE
     (
         [SeoId],
+        [Slug],
         [CanonicalUrl],
         [MetaTitle],
         [MetaDescription],
@@ -83,16 +94,21 @@ BEGIN
         [TwitterTitle],
         [TwitterDescription],
         [TwitterImageUrl],
+        [Robots],
+        [IsManualOverride],
+        [SourceAggregateVersion],
+        [LastAppliedMessageId],
+        [LastSyncedAtUtc],
         [Version],
-        [UpdatedAt],
+        [UpdatedAtUtc],
         [UpdatedByUserId]
     );
 
-    PRINT N'Created index: [IX_SeoMetadata_ArticleId]';
+    PRINT N'Created index: [IX_SeoMetadata_Scope_ResourcePublicId_Covering]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_SeoMetadata_ArticleId]';
+    PRINT N'Index exists: [IX_SeoMetadata_Scope_ResourcePublicId_Covering]';
 END
 GO
 
@@ -101,31 +117,35 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_SeoMetadata_UpdatedAt_SeoId'
+    WHERE name = N'IX_SeoMetadata_UpdatedAtUtc_SeoId'
       AND object_id = OBJECT_ID(N'[seo].[SeoMetadata]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_SeoMetadata_UpdatedAt_SeoId]
+    CREATE NONCLUSTERED INDEX [IX_SeoMetadata_UpdatedAtUtc_SeoId]
     ON [seo].[SeoMetadata]
     (
-        [UpdatedAt] DESC,
+        [UpdatedAtUtc] DESC,
         [SeoId] DESC
     )
     INCLUDE
     (
-        [ArticleId],
+        [Scope],
+        [ResourceType],
+        [ResourcePublicId],
+        [Slug],
         [Version],
+        [IsManualOverride],
         [UpdatedByUserId],
         [CanonicalUrl],
         [MetaTitle],
         [MetaDescription]
     );
 
-    PRINT N'Created index: [IX_SeoMetadata_UpdatedAt_SeoId]';
+    PRINT N'Created index: [IX_SeoMetadata_UpdatedAtUtc_SeoId]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_SeoMetadata_UpdatedAt_SeoId]';
+    PRINT N'Index exists: [IX_SeoMetadata_UpdatedAtUtc_SeoId]';
 END
 GO
 
@@ -134,37 +154,140 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_SeoMetadata_UpdatedByUserId_UpdatedAt'
+    WHERE name = N'IX_SeoMetadata_UpdatedByUserId_UpdatedAtUtc'
       AND object_id = OBJECT_ID(N'[seo].[SeoMetadata]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_SeoMetadata_UpdatedByUserId_UpdatedAt]
+    CREATE NONCLUSTERED INDEX [IX_SeoMetadata_UpdatedByUserId_UpdatedAtUtc]
     ON [seo].[SeoMetadata]
     (
         [UpdatedByUserId] ASC,
-        [UpdatedAt] DESC,
+        [UpdatedAtUtc] DESC,
         [SeoId] DESC
     )
     INCLUDE
     (
-        [ArticleId],
+        [Scope],
+        [ResourceType],
+        [ResourcePublicId],
+        [Slug],
         [Version],
+        [IsManualOverride],
         [CanonicalUrl],
         [MetaTitle],
         [MetaDescription]
     );
 
-    PRINT N'Created index: [IX_SeoMetadata_UpdatedByUserId_UpdatedAt]';
+    PRINT N'Created index: [IX_SeoMetadata_UpdatedByUserId_UpdatedAtUtc]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_SeoMetadata_UpdatedByUserId_UpdatedAt]';
+    PRINT N'Index exists: [IX_SeoMetadata_UpdatedByUserId_UpdatedAtUtc]';
+END
+GO
+
+/* Manual override investigation / Content auto-sync skip analysis */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_SeoMetadata_IsManualOverride_UpdatedAtUtc'
+      AND object_id = OBJECT_ID(N'[seo].[SeoMetadata]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_SeoMetadata_IsManualOverride_UpdatedAtUtc]
+    ON [seo].[SeoMetadata]
+    (
+        [IsManualOverride] ASC,
+        [UpdatedAtUtc] DESC,
+        [SeoId] DESC
+    )
+    INCLUDE
+    (
+        [Scope],
+        [ResourceType],
+        [ResourcePublicId],
+        [Slug],
+        [Version],
+        [SourceAggregateVersion],
+        [LastSyncedAtUtc],
+        [MetaTitle],
+        [MetaDescription]
+    );
+
+    PRINT N'Created index: [IX_SeoMetadata_IsManualOverride_UpdatedAtUtc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_SeoMetadata_IsManualOverride_UpdatedAtUtc]';
+END
+GO
+
+/* Async apply / sync lag investigation */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_SeoMetadata_SourceAggregateVersion_LastSyncedAtUtc'
+      AND object_id = OBJECT_ID(N'[seo].[SeoMetadata]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_SeoMetadata_SourceAggregateVersion_LastSyncedAtUtc]
+    ON [seo].[SeoMetadata]
+    (
+        [SourceAggregateVersion] DESC,
+        [LastSyncedAtUtc] DESC,
+        [SeoId] DESC
+    )
+    INCLUDE
+    (
+        [Scope],
+        [ResourceType],
+        [ResourcePublicId],
+        [LastAppliedMessageId],
+        [Version],
+        [IsManualOverride]
+    );
+
+    PRINT N'Created index: [IX_SeoMetadata_SourceAggregateVersion_LastSyncedAtUtc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_SeoMetadata_SourceAggregateVersion_LastSyncedAtUtc]';
 END
 GO
 
 /* =========================================================
    2) [seo].[SlugRegistry]
    ========================================================= */
+
+/*
+  V1 policy: active slugs must be unique by Scope + Slug.
+  This is the critical conflict-safety index for public route ownership.
+*/
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'UX_SlugRegistry_Scope_Slug_Active'
+      AND object_id = OBJECT_ID(N'[seo].[SlugRegistry]')
+)
+BEGIN
+    CREATE UNIQUE NONCLUSTERED INDEX [UX_SlugRegistry_Scope_Slug_Active]
+    ON [seo].[SlugRegistry]
+    (
+        [Scope] ASC,
+        [Slug] ASC
+    )
+    WHERE [IsActive] = 1;
+
+    PRINT N'Created index: [UX_SlugRegistry_Scope_Slug_Active]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [UX_SlugRegistry_Scope_Slug_Active]';
+END
+GO
 
 /* Public hot path: resolve active public route by scope + slug */
 IF NOT EXISTS
@@ -184,12 +307,16 @@ BEGIN
     INCLUDE
     (
         [SlugId],
-        [ArticleId],
+        [ResourceType],
+        [ResourcePublicId],
         [CanonicalUrl],
         [IsIndexable],
         [IsActive],
+        [SourceAggregateVersion],
+        [LastAppliedMessageId],
+        [LastSyncedAtUtc],
         [Version],
-        [UpdatedAt]
+        [UpdatedAtUtc]
     )
     WHERE [IsActive] = 1;
 
@@ -201,65 +328,48 @@ BEGIN
 END
 GO
 
-/* Admin/article SEO route lookup and active route maintenance */
+/*
+  Admin/resource SEO route lookup and active route maintenance.
+  UQ_SlugRegistry_Scope_Resource already exists from 001_tables.sql:
+  ([Scope], [ResourceType], [ResourcePublicId])
+*/
 IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_SlugRegistry_ArticleId_Scope_IsActive_UpdatedAt'
+    WHERE name = N'IX_SlugRegistry_Scope_ResourcePublicId_Covering'
       AND object_id = OBJECT_ID(N'[seo].[SlugRegistry]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_ArticleId_Scope_IsActive_UpdatedAt]
+    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_Scope_ResourcePublicId_Covering]
     ON [seo].[SlugRegistry]
     (
-        [ArticleId] ASC,
         [Scope] ASC,
-        [IsActive] ASC,
-        [UpdatedAt] DESC,
-        [SlugId] DESC
+        [ResourceType] ASC,
+        [ResourcePublicId] ASC
     )
     INCLUDE
     (
+        [SlugId],
         [Slug],
         [CanonicalUrl],
         [IsIndexable],
+        [IsActive],
+        [SourceAggregateVersion],
+        [LastAppliedMessageId],
+        [LastSyncedAtUtc],
         [Version],
-        [CreatedAt],
+        [CreatedAtUtc],
         [CreatedByUserId],
+        [UpdatedAtUtc],
         [UpdatedByUserId]
     );
 
-    PRINT N'Created index: [IX_SlugRegistry_ArticleId_Scope_IsActive_UpdatedAt]';
+    PRINT N'Created index: [IX_SlugRegistry_Scope_ResourcePublicId_Covering]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_SlugRegistry_ArticleId_Scope_IsActive_UpdatedAt]';
-END
-GO
-
-/* V1 policy: one active slug per article per scope */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = N'UX_SlugRegistry_ArticleId_Scope_Active'
-      AND object_id = OBJECT_ID(N'[seo].[SlugRegistry]')
-)
-BEGIN
-    CREATE UNIQUE NONCLUSTERED INDEX [UX_SlugRegistry_ArticleId_Scope_Active]
-    ON [seo].[SlugRegistry]
-    (
-        [ArticleId] ASC,
-        [Scope] ASC
-    )
-    WHERE [IsActive] = 1;
-
-    PRINT N'Created index: [UX_SlugRegistry_ArticleId_Scope_Active]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [UX_SlugRegistry_ArticleId_Scope_Active]';
+    PRINT N'Index exists: [IX_SlugRegistry_Scope_ResourcePublicId_Covering]';
 END
 GO
 
@@ -268,32 +378,35 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_SlugRegistry_IsActive_IsIndexable_UpdatedAt'
+    WHERE name = N'IX_SlugRegistry_IsActive_IsIndexable_UpdatedAtUtc'
       AND object_id = OBJECT_ID(N'[seo].[SlugRegistry]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_IsActive_IsIndexable_UpdatedAt]
+    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_IsActive_IsIndexable_UpdatedAtUtc]
     ON [seo].[SlugRegistry]
     (
         [IsActive] ASC,
         [IsIndexable] ASC,
-        [UpdatedAt] DESC,
+        [UpdatedAtUtc] DESC,
         [SlugId] DESC
     )
     INCLUDE
     (
-        [ArticleId],
         [Scope],
         [Slug],
+        [ResourceType],
+        [ResourcePublicId],
         [CanonicalUrl],
+        [SourceAggregateVersion],
+        [LastSyncedAtUtc],
         [Version]
     );
 
-    PRINT N'Created index: [IX_SlugRegistry_IsActive_IsIndexable_UpdatedAt]';
+    PRINT N'Created index: [IX_SlugRegistry_IsActive_IsIndexable_UpdatedAtUtc]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_SlugRegistry_IsActive_IsIndexable_UpdatedAt]';
+    PRINT N'Index exists: [IX_SlugRegistry_IsActive_IsIndexable_UpdatedAtUtc]';
 END
 GO
 
@@ -302,32 +415,35 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_SlugRegistry_UpdatedByUserId_UpdatedAt'
+    WHERE name = N'IX_SlugRegistry_UpdatedByUserId_UpdatedAtUtc'
       AND object_id = OBJECT_ID(N'[seo].[SlugRegistry]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_UpdatedByUserId_UpdatedAt]
+    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_UpdatedByUserId_UpdatedAtUtc]
     ON [seo].[SlugRegistry]
     (
         [UpdatedByUserId] ASC,
-        [UpdatedAt] DESC,
+        [UpdatedAtUtc] DESC,
         [SlugId] DESC
     )
     INCLUDE
     (
-        [ArticleId],
         [Scope],
         [Slug],
+        [ResourceType],
+        [ResourcePublicId],
         [IsActive],
         [IsIndexable],
-        [Version]
+        [Version],
+        [SourceAggregateVersion],
+        [LastSyncedAtUtc]
     );
 
-    PRINT N'Created index: [IX_SlugRegistry_UpdatedByUserId_UpdatedAt]';
+    PRINT N'Created index: [IX_SlugRegistry_UpdatedByUserId_UpdatedAtUtc]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_SlugRegistry_UpdatedByUserId_UpdatedAt]';
+    PRINT N'Index exists: [IX_SlugRegistry_UpdatedByUserId_UpdatedAtUtc]';
 END
 GO
 
@@ -336,30 +452,68 @@ IF NOT EXISTS
 (
     SELECT 1
     FROM sys.indexes
-    WHERE name = N'IX_SlugRegistry_CreatedByUserId_CreatedAt'
+    WHERE name = N'IX_SlugRegistry_CreatedByUserId_CreatedAtUtc'
       AND object_id = OBJECT_ID(N'[seo].[SlugRegistry]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_CreatedByUserId_CreatedAt]
+    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_CreatedByUserId_CreatedAtUtc]
     ON [seo].[SlugRegistry]
     (
         [CreatedByUserId] ASC,
-        [CreatedAt] DESC,
+        [CreatedAtUtc] DESC,
         [SlugId] DESC
     )
     INCLUDE
     (
-        [ArticleId],
         [Scope],
         [Slug],
+        [ResourceType],
+        [ResourcePublicId],
         [IsActive],
+        [IsIndexable],
         [Version]
     );
 
-    PRINT N'Created index: [IX_SlugRegistry_CreatedByUserId_CreatedAt]';
+    PRINT N'Created index: [IX_SlugRegistry_CreatedByUserId_CreatedAtUtc]';
 END
 ELSE
 BEGIN
-    PRINT N'Index exists: [IX_SlugRegistry_CreatedByUserId_CreatedAt]';
+    PRINT N'Index exists: [IX_SlugRegistry_CreatedByUserId_CreatedAtUtc]';
+END
+GO
+
+/* Async apply / sync lag investigation */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_SlugRegistry_SourceAggregateVersion_LastSyncedAtUtc'
+      AND object_id = OBJECT_ID(N'[seo].[SlugRegistry]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_SlugRegistry_SourceAggregateVersion_LastSyncedAtUtc]
+    ON [seo].[SlugRegistry]
+    (
+        [SourceAggregateVersion] DESC,
+        [LastSyncedAtUtc] DESC,
+        [SlugId] DESC
+    )
+    INCLUDE
+    (
+        [Scope],
+        [Slug],
+        [ResourceType],
+        [ResourcePublicId],
+        [IsActive],
+        [IsIndexable],
+        [LastAppliedMessageId],
+        [Version]
+    );
+
+    PRINT N'Created index: [IX_SlugRegistry_SourceAggregateVersion_LastSyncedAtUtc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_SlugRegistry_SourceAggregateVersion_LastSyncedAtUtc]';
 END
 GO

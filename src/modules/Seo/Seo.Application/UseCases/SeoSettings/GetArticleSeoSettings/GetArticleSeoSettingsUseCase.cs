@@ -1,10 +1,10 @@
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Seo.Application.Contracts.SeoMetadata.Requests;
 using Seo.Application.Contracts.SeoMetadata.Responses;
 using Seo.Application.Errors;
-using Seo.Application.Models.QueryModels;
+using Seo.Application.Models.Results;
 using Seo.Application.Ports.Persistence;
+using Seo.Domain.Constants;
 using Seo.Domain.Exceptions;
 
 namespace Seo.Application.UseCases.SeoSettings.GetArticleSeoSettings;
@@ -16,25 +16,38 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
     public GetArticleSeoSettingsUseCase(
         ISeoMetadataRepository seoMetadataRepository)
     {
-        _seoMetadataRepository = seoMetadataRepository;
+        _seoMetadataRepository = seoMetadataRepository
+            ?? throw new ArgumentNullException(nameof(seoMetadataRepository));
     }
 
     public async Task<Result<GetArticleSeoSettingsResponse>> ExecuteAsync(
-        GetArticleSeoSettingsRequest request,
+        string articlePublicId,
+        string? scope = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
-            if (request.ArticleId <= 0)
+            if (string.IsNullOrWhiteSpace(articlePublicId) || articlePublicId.Trim().Length != 26)
             {
                 return Result<GetArticleSeoSettingsResponse>.Failure(
-                    SeoErrors.Article.InvalidArticleId);
+                    SeoErrors.Article.InvalidArticlePublicId);
+            }
+
+            string normalizedScope = string.IsNullOrWhiteSpace(scope)
+                ? SeoScopes.Public
+                : scope.Trim();
+
+            if (!SeoScopes.IsValid(normalizedScope))
+            {
+                return Result<GetArticleSeoSettingsResponse>.Failure(
+                    SeoErrors.SlugRegistry.InvalidScope);
             }
 
             ArticleSeoSettingsResult? result =
-                await _seoMetadataRepository.GetArticleSeoSettingsByArticleIdAsync(
-                    request.ArticleId,
-                    cancellationToken);
+                await _seoMetadataRepository.GetArticleSeoSettingsByArticlePublicIdAsync(
+                    articlePublicId: articlePublicId.Trim(),
+                    scope: normalizedScope,
+                    cancellationToken: cancellationToken);
 
             if (result is null)
             {
@@ -45,8 +58,9 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
             return Result<GetArticleSeoSettingsResponse>.Success(
                 new GetArticleSeoSettingsResponse
                 {
-                    ArticleId = result.ArticleId,
                     Scope = result.Scope,
+                    ResourceType = result.ResourceType,
+                    ResourcePublicId = result.ResourcePublicId,
                     Slug = result.Slug,
                     CanonicalUrl = result.CanonicalUrl,
                     MetaTitle = result.MetaTitle,
@@ -57,8 +71,13 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
                     TwitterTitle = result.TwitterTitle,
                     TwitterDescription = result.TwitterDescription,
                     TwitterImageUrl = result.TwitterImageUrl,
+                    Robots = result.Robots,
+                    IsManualOverride = result.IsManualOverride,
                     IsIndexable = result.IsIndexable,
                     IsActive = result.IsActive,
+                    SourceAggregateVersion = result.SourceAggregateVersion,
+                    LastAppliedMessageId = result.LastAppliedMessageId,
+                    LastSyncedAtUtc = result.LastSyncedAtUtc,
                     Version = result.Version
                 });
         }
@@ -78,9 +97,9 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
     {
         return exception.Code switch
         {
-            "SEO.ARTICLE_INVALID_ARTICLE_ID" => SeoErrors.Article.InvalidArticleId,
-            "SEO.SEO_METADATA_INVALID_ARTICLE_ID" => SeoErrors.SeoMetadata.InvalidArticleId,
-            "SEO.SLUG_REGISTRY_INVALID_ARTICLE_ID" => SeoErrors.SlugRegistry.InvalidArticleId,
+            "SEO.INVALID_SCOPE" => SeoErrors.SlugRegistry.InvalidScope,
+            "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
+            "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
             _ => SeoErrors.ValidationFailed
         };
     }
@@ -89,6 +108,10 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
     {
         return exception.Code switch
         {
+            "SEO.INVALID_SCOPE" => SeoErrors.SlugRegistry.InvalidScope,
+            "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
+            "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
+            "SEO.STORE_UNAVAILABLE" => SeoErrors.Infrastructure.StoreUnavailable,
             _ => SeoErrors.ValidationFailed
         };
     }
