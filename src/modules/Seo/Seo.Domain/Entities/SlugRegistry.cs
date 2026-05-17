@@ -1,4 +1,4 @@
-using Seo.Domain.Enums;
+using Seo.Domain.Constants;
 using Seo.Domain.Exceptions;
 
 namespace Seo.Domain.Entities;
@@ -7,21 +7,27 @@ public sealed class SlugRegistry
 {
     public long SlugId { get; private set; }
 
-    public long ArticleId { get; private set; }
+    public string Scope { get; private set; } = default!;
+    public string Slug { get; private set; } = default!;
 
-    public string Slug { get; private set; } = null!;
-    public string Scope { get; private set; } = null!;
+    public string ResourceType { get; private set; } = default!;
+    public string ResourcePublicId { get; private set; } = default!;
+
     public string? CanonicalUrl { get; private set; }
 
     public bool IsIndexable { get; private set; }
     public bool IsActive { get; private set; }
 
+    public long? SourceAggregateVersion { get; private set; }
+    public string? LastAppliedMessageId { get; private set; }
+    public DateTime? LastSyncedAtUtc { get; private set; }
+
     public int Version { get; private set; }
 
-    public DateTime CreatedAt { get; private set; }
+    public DateTime CreatedAtUtc { get; private set; }
     public long? CreatedByUserId { get; private set; }
 
-    public DateTime UpdatedAt { get; private set; }
+    public DateTime UpdatedAtUtc { get; private set; }
     public long? UpdatedByUserId { get; private set; }
 
     private SlugRegistry()
@@ -29,48 +35,56 @@ public sealed class SlugRegistry
     }
 
     public static SlugRegistry Create(
-        long articleId,
+        string? scope,
         string slug,
-        string scope,
+        string resourceType,
+        string resourcePublicId,
         string? canonicalUrl,
         bool isIndexable,
         bool isActive,
         DateTime nowUtc,
         long? actorUserId)
     {
-        ValidateArticleId(articleId);
+        var normalizedScope = NormalizeScope(scope);
+
         ValidateSlug(slug);
-        ValidateScope(scope);
+        ValidateResourceType(resourceType);
+        ValidateResourcePublicId(resourcePublicId);
         ValidateCanonicalUrl(canonicalUrl);
 
         return new SlugRegistry
         {
-            ArticleId = articleId,
+            Scope = normalizedScope,
             Slug = NormalizeRequired(slug),
-            Scope = NormalizeRequired(scope),
+            ResourceType = resourceType.Trim(),
+            ResourcePublicId = resourcePublicId.Trim(),
             CanonicalUrl = NormalizeOptional(canonicalUrl),
             IsIndexable = isIndexable,
             IsActive = isActive,
-            CreatedAt = nowUtc,
+            Version = 1,
+            CreatedAtUtc = nowUtc,
             CreatedByUserId = actorUserId,
-            UpdatedAt = nowUtc,
-            UpdatedByUserId = actorUserId,
-            Version = 1
+            UpdatedAtUtc = nowUtc,
+            UpdatedByUserId = actorUserId
         };
     }
 
     public static SlugRegistry Rehydrate(
         long slugId,
-        long articleId,
-        string slug,
         string scope,
+        string slug,
+        string resourceType,
+        string resourcePublicId,
         string? canonicalUrl,
         bool isIndexable,
         bool isActive,
+        long? sourceAggregateVersion,
+        string? lastAppliedMessageId,
+        DateTime? lastSyncedAtUtc,
         int version,
-        DateTime createdAt,
+        DateTime createdAtUtc,
         long? createdByUserId,
-        DateTime updatedAt,
+        DateTime updatedAtUtc,
         long? updatedByUserId)
     {
         if (slugId <= 0)
@@ -87,54 +101,68 @@ public sealed class SlugRegistry
                 "Slug registry version must be greater than zero.");
         }
 
-        ValidateArticleId(articleId);
-        ValidateSlug(slug);
-        ValidateScope(scope);
-        ValidateCanonicalUrl(canonicalUrl);
-
-        if (updatedAt < createdAt)
+        if (updatedAtUtc < createdAtUtc)
         {
             throw new SeoDomainException(
                 "SEO.SLUG_REGISTRY_INVALID_UPDATED_AT",
-                "UpdatedAt must be greater than or equal to CreatedAt.");
+                "Updated time is invalid for the current slug route state.");
         }
+
+        ValidateScope(scope);
+        ValidateSlug(slug);
+        ValidateResourceType(resourceType);
+        ValidateResourcePublicId(resourcePublicId);
+        ValidateCanonicalUrl(canonicalUrl);
+        ValidateSourceAggregateVersion(sourceAggregateVersion);
+        ValidateLastAppliedMessageId(lastAppliedMessageId);
 
         return new SlugRegistry
         {
             SlugId = slugId,
-            ArticleId = articleId,
-            Slug = NormalizeRequired(slug),
             Scope = NormalizeRequired(scope),
+            Slug = NormalizeRequired(slug),
+            ResourceType = resourceType.Trim(),
+            ResourcePublicId = resourcePublicId.Trim(),
             CanonicalUrl = NormalizeOptional(canonicalUrl),
             IsIndexable = isIndexable,
             IsActive = isActive,
+            SourceAggregateVersion = sourceAggregateVersion,
+            LastAppliedMessageId = NormalizeOptional(lastAppliedMessageId),
+            LastSyncedAtUtc = lastSyncedAtUtc,
             Version = version,
-            CreatedAt = createdAt,
+            CreatedAtUtc = createdAtUtc,
             CreatedByUserId = createdByUserId,
-            UpdatedAt = updatedAt,
+            UpdatedAtUtc = updatedAtUtc,
             UpdatedByUserId = updatedByUserId
         };
     }
 
     public void UpdateRouting(
         string slug,
-        string scope,
+        string? scope,
+        string resourceType,
+        string resourcePublicId,
         string? canonicalUrl,
         bool isIndexable,
         bool isActive,
         DateTime nowUtc,
         long? actorUserId)
     {
+        var normalizedScope = NormalizeScope(scope);
+
         ValidateSlug(slug);
-        ValidateScope(scope);
+        ValidateResourceType(resourceType);
+        ValidateResourcePublicId(resourcePublicId);
         ValidateCanonicalUrl(canonicalUrl);
 
+        Scope = normalizedScope;
         Slug = NormalizeRequired(slug);
-        Scope = NormalizeRequired(scope);
+        ResourceType = resourceType.Trim();
+        ResourcePublicId = resourcePublicId.Trim();
         CanonicalUrl = NormalizeOptional(canonicalUrl);
         IsIndexable = isIndexable;
         IsActive = isActive;
-        UpdatedAt = nowUtc;
+        UpdatedAtUtc = nowUtc;
         UpdatedByUserId = actorUserId;
         Version++;
     }
@@ -152,7 +180,7 @@ public sealed class SlugRegistry
 
         Slug = NormalizeRequired(slug);
         CanonicalUrl = NormalizeOptional(canonicalUrl);
-        UpdatedAt = nowUtc;
+        UpdatedAtUtc = nowUtc;
         UpdatedByUserId = actorUserId;
         Version++;
     }
@@ -165,7 +193,7 @@ public sealed class SlugRegistry
         ValidateCanonicalUrl(canonicalUrl);
 
         CanonicalUrl = NormalizeOptional(canonicalUrl);
-        UpdatedAt = nowUtc;
+        UpdatedAtUtc = nowUtc;
         UpdatedByUserId = actorUserId;
         Version++;
     }
@@ -178,7 +206,7 @@ public sealed class SlugRegistry
         }
 
         IsIndexable = true;
-        UpdatedAt = nowUtc;
+        UpdatedAtUtc = nowUtc;
         UpdatedByUserId = actorUserId;
         Version++;
     }
@@ -191,7 +219,7 @@ public sealed class SlugRegistry
         }
 
         IsIndexable = false;
-        UpdatedAt = nowUtc;
+        UpdatedAtUtc = nowUtc;
         UpdatedByUserId = actorUserId;
         Version++;
     }
@@ -206,7 +234,7 @@ public sealed class SlugRegistry
         }
 
         IsActive = true;
-        UpdatedAt = nowUtc;
+        UpdatedAtUtc = nowUtc;
         UpdatedByUserId = actorUserId;
         Version++;
     }
@@ -221,8 +249,52 @@ public sealed class SlugRegistry
         }
 
         IsActive = false;
-        UpdatedAt = nowUtc;
+        IsIndexable = false;
+        UpdatedAtUtc = nowUtc;
         UpdatedByUserId = actorUserId;
+        Version++;
+    }
+
+    public void ApplyContentVisibility(
+        string? slug,
+        string? canonicalUrl,
+        bool isIndexable,
+        bool isActive,
+        long sourceAggregateVersion,
+        string lastAppliedMessageId,
+        DateTime lastSyncedAtUtc,
+        DateTime nowUtc)
+    {
+        ValidateSourceAggregateVersion(sourceAggregateVersion);
+        ValidateLastAppliedMessageId(lastAppliedMessageId);
+
+        if (isActive)
+        {
+            ValidateSlug(slug ?? Slug);
+        }
+
+        ValidateCanonicalUrl(canonicalUrl);
+
+        if (SourceAggregateVersion is not null &&
+            sourceAggregateVersion <= SourceAggregateVersion.Value)
+        {
+            throw new SeoDomainException(
+                "SEO.EVENT_STALE_IGNORED",
+                "The incoming content event is stale and cannot be applied.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(slug))
+        {
+            Slug = NormalizeRequired(slug);
+        }
+
+        CanonicalUrl = NormalizeOptional(canonicalUrl);
+        IsIndexable = isIndexable;
+        IsActive = isActive;
+        SourceAggregateVersion = sourceAggregateVersion;
+        LastAppliedMessageId = lastAppliedMessageId.Trim();
+        LastSyncedAtUtc = lastSyncedAtUtc;
+        UpdatedAtUtc = nowUtc;
         Version++;
     }
 
@@ -236,17 +308,31 @@ public sealed class SlugRegistry
         }
     }
 
-    private static void ValidateArticleId(long articleId)
+    private static string NormalizeScope(string? scope)
     {
-        if (articleId <= 0)
+        if (string.IsNullOrWhiteSpace(scope))
+        {
+            return SeoScopes.Public;
+        }
+
+        var normalized = scope.Trim();
+
+        ValidateScope(normalized);
+
+        return normalized;
+    }
+
+    private static void ValidateScope(string? scope)
+    {
+        if (!SeoScopes.IsValid(scope))
         {
             throw new SeoDomainException(
-                "SEO.SLUG_REGISTRY_INVALID_ARTICLE_ID",
-                "Article id must be greater than zero.");
+                "SEO.INVALID_SCOPE",
+                "Scope is invalid.");
         }
     }
 
-    private static void ValidateSlug(string slug)
+    private static void ValidateSlug(string? slug)
     {
         if (string.IsNullOrWhiteSpace(slug))
         {
@@ -263,13 +349,30 @@ public sealed class SlugRegistry
         }
     }
 
-    private static void ValidateScope(string scope)
+    private static void ValidateResourceType(string? resourceType)
     {
-        if (!SeoScopes.IsValid(scope))
+        if (!SeoResourceTypes.IsValid(resourceType))
         {
             throw new SeoDomainException(
-                "SEO.INVALID_SCOPE",
-                "Scope is invalid.");
+                "SEO.INVALID_RESOURCE_TYPE",
+                "Resource type is invalid.");
+        }
+    }
+
+    private static void ValidateResourcePublicId(string? resourcePublicId)
+    {
+        if (string.IsNullOrWhiteSpace(resourcePublicId))
+        {
+            throw new SeoDomainException(
+                "SEO.INVALID_RESOURCE_PUBLIC_ID",
+                "Resource public id is required.");
+        }
+
+        if (resourcePublicId.Trim().Length != 26)
+        {
+            throw new SeoDomainException(
+                "SEO.INVALID_RESOURCE_PUBLIC_ID",
+                "Resource public id must be 26 characters.");
         }
     }
 
@@ -280,6 +383,31 @@ public sealed class SlugRegistry
             throw new SeoDomainException(
                 "SEO.CANONICAL_URL_TOO_LONG",
                 "Canonical URL must not exceed 500 characters.");
+        }
+    }
+
+    private static void ValidateSourceAggregateVersion(long? sourceAggregateVersion)
+    {
+        if (sourceAggregateVersion is not null && sourceAggregateVersion <= 0)
+        {
+            throw new SeoDomainException(
+                "SEO.INVALID_SOURCE_AGGREGATE_VERSION",
+                "Source aggregate version must be greater than zero.");
+        }
+    }
+
+    private static void ValidateLastAppliedMessageId(string? lastAppliedMessageId)
+    {
+        if (string.IsNullOrWhiteSpace(lastAppliedMessageId))
+        {
+            return;
+        }
+
+        if (lastAppliedMessageId.Trim().Length != 26)
+        {
+            throw new SeoDomainException(
+                "SEO.INVALID_LAST_APPLIED_MESSAGE_ID",
+                "Last applied message id must be 26 characters.");
         }
     }
 

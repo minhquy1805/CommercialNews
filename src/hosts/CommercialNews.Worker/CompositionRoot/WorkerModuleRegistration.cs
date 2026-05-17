@@ -24,6 +24,11 @@ using Notifications.Application.DependencyInjection;
 using Notifications.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Outbox.Handlers.Content;
 using CommercialNews.Worker.Audit.Handlers.Content;
+using CommercialNews.Worker.Seo.Handlers;
+using CommercialNews.Worker.Seo.Handlers.Content;
+using CommercialNews.Worker.Seo.Consumers;
+using Seo.Application.DependencyInjection;
+using Seo.Infrastructure.DependencyInjection;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -46,6 +51,9 @@ public static class WorkerModuleRegistration
 
         services.AddAuditApplication();
         services.AddAuditInfrastructure();
+
+        services.AddSeoConsumerApplication();
+        services.AddSeoInfrastructure();
 
         services.AddOptions<OutboxWorkerOptions>()
             .Bind(configuration.GetSection("Workers:Outbox"));
@@ -116,6 +124,11 @@ public static class WorkerModuleRegistration
         services.Configure<AuditRabbitMqConsumerOptions>(
             configuration.GetSection(AuditRabbitMqConsumerOptions.SectionName));
 
+        services.Configure<SeoRabbitMqConsumerOptions>(
+            configuration.GetSection(SeoRabbitMqConsumerOptions.SectionName));
+
+        services.AddHostedService<SeoRabbitMqConsumerService>();
+
         services.AddScoped<AuditIntegrationEventDispatcher>();
 
         services.AddScoped<IAuditIntegrationEventHandler, AuthorizationUserRoleAssignedAuditHandler>();
@@ -150,6 +163,15 @@ public static class WorkerModuleRegistration
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleUnpublishedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleArchivedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleSoftDeletedAuditHandler>();
+
+        services.AddScoped<SeoIntegrationEventDispatcher>();
+
+        services.AddScoped<ISeoIntegrationEventHandler, ContentArticleCreatedSeoHandler>();
+        services.AddScoped<ISeoIntegrationEventHandler, ContentArticleUpdatedSeoHandler>();
+        services.AddScoped<ISeoIntegrationEventHandler, ContentArticlePublishedSeoHandler>();
+        services.AddScoped<ISeoIntegrationEventHandler, ContentArticleUnpublishedSeoHandler>();
+        services.AddScoped<ISeoIntegrationEventHandler, ContentArticleArchivedSeoHandler>();
+        services.AddScoped<ISeoIntegrationEventHandler, ContentArticleSoftDeletedSeoHandler>();
 
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));

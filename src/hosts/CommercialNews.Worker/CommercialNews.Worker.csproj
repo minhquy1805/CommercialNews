@@ -40,6 +40,9 @@
 
     <ProjectReference Include="..\..\modules\Audit\Audit.Application\Audit.Application.csproj" />
     <ProjectReference Include="..\..\modules\Audit\Audit.Infrastructure\Audit.Infrastructure.csproj" />
+
+    <ProjectReference Include="..\..\modules\Seo\Seo.Application\Seo.Application.csproj" />
+    <ProjectReference Include="..\..\modules\Seo\Seo.Infrastructure\Seo.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

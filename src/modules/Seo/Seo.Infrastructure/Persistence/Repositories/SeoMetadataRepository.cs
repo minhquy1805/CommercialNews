@@ -2,7 +2,9 @@ using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Microsoft.Data.SqlClient;
-using Seo.Application.Models.QueryModels;
+using Seo.Application.Models.Commands;
+using Seo.Application.Models.Queries;
+using Seo.Application.Models.Results;
 using Seo.Application.Ports.Persistence;
 using Seo.Domain.Entities;
 using Seo.Infrastructure.Persistence.Exceptions;
@@ -12,12 +14,12 @@ namespace Seo.Infrastructure.Persistence.Repositories;
 
 public sealed class SeoMetadataRepository : ISeoMetadataRepository
 {
-    private const string SeoMetadataInsertProc = "[seo].[Seo_SeoMetadata_Insert]";
-    private const string SeoMetadataUpdateProc = "[seo].[Seo_SeoMetadata_Update]";
+    private const string SeoMetadataUpsertProc = "[seo].[Seo_SeoMetadata_Upsert]";
+    private const string SeoMetadataApplyContentDefaultsProc = "[seo].[Seo_SeoMetadata_ApplyContentDefaults]";
     private const string SeoMetadataSelectByIdProc = "[seo].[Seo_SeoMetadata_SelectById]";
-    private const string SeoMetadataSelectByArticleIdProc = "[seo].[Seo_SeoMetadata_SelectByArticleId]";
-    private const string SeoMetadataSelectMetadataByArticleIdProc = "[seo].[Seo_SelectMetadataByArticleId]";
-    private const string SeoMetadataGetArticleSeoSettingsByArticleIdProc = "[seo].[Seo_SelectArticleSeoByArticleId]";
+    private const string SeoMetadataSelectByResourceProc = "[seo].[Seo_SeoMetadata_SelectByResource]";
+    private const string SeoMetadataSelectMetadataByResourceProc = "[seo].[Seo_SelectMetadataByResource]";
+    private const string SeoMetadataGetArticleSeoSettingsByArticlePublicIdProc = "[seo].[Seo_SelectArticleSeoByArticlePublicId]";
     private const string SeoMetadataSelectSkipAndTakeProc = "[seo].[Seo_SeoMetadata_SelectSkipAndTake]";
 
     private readonly SeoUnitOfWork _unitOfWork;
@@ -32,46 +34,6 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _sqlConnectionFactory = sqlConnectionFactory ?? throw new ArgumentNullException(nameof(sqlConnectionFactory));
         _sqlExceptionTranslator = sqlExceptionTranslator ?? throw new ArgumentNullException(nameof(sqlExceptionTranslator));
-    }
-
-    public async Task<long> InsertAsync(
-        SeoMetadata seoMetadata,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(seoMetadata);
-
-        try
-        {
-            using SqlCommand command = CreateTransactionalCommand(SeoMetadataInsertProc);
-
-            command.Parameters.AddRange(
-            [
-                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = seoMetadata.ArticleId },
-                new SqlParameter("@CanonicalUrl", SqlDbType.NVarChar, 500) { Value = ToDbValue(seoMetadata.CanonicalUrl) },
-                new SqlParameter("@MetaTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(seoMetadata.MetaTitle) },
-                new SqlParameter("@MetaDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(seoMetadata.MetaDescription) },
-                new SqlParameter("@OgTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(seoMetadata.OgTitle) },
-                new SqlParameter("@OgDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(seoMetadata.OgDescription) },
-                new SqlParameter("@OgImageUrl", SqlDbType.NVarChar, 800) { Value = ToDbValue(seoMetadata.OgImageUrl) },
-                new SqlParameter("@TwitterTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(seoMetadata.TwitterTitle) },
-                new SqlParameter("@TwitterDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(seoMetadata.TwitterDescription) },
-                new SqlParameter("@TwitterImageUrl", SqlDbType.NVarChar, 800) { Value = ToDbValue(seoMetadata.TwitterImageUrl) },
-                new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(seoMetadata.UpdatedByUserId) }
-            ]);
-
-            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                throw new InvalidOperationException("Seo_SeoMetadata_Insert did not return a row.");
-            }
-
-            return reader.GetInt64(reader.GetOrdinal("SeoId"));
-        }
-        catch (SqlException exception)
-        {
-            throw _sqlExceptionTranslator.Translate(exception);
-        }
     }
 
     public async Task<SeoMetadata?> GetByIdAsync(
@@ -102,6 +64,10 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
                 return MapSeoMetadata(reader);
             }
         }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
         finally
         {
             if (ownedConnection is not null)
@@ -111,8 +77,10 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         }
     }
 
-    public async Task<SeoMetadata?> GetByArticleIdAsync(
-        long articleId,
+    public async Task<SeoMetadata?> GetByResourceAsync(
+        string scope,
+        string resourceType,
+        string resourcePublicId,
         CancellationToken cancellationToken = default)
     {
         SqlConnection? ownedConnection = null;
@@ -120,14 +88,18 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         try
         {
             (SqlCommand command, SqlConnection? connection) =
-                await CreateReadCommandAsync(SeoMetadataSelectByArticleIdProc, cancellationToken);
+                await CreateReadCommandAsync(SeoMetadataSelectByResourceProc, cancellationToken);
 
             ownedConnection = connection;
 
             using (command)
             {
-                command.Parameters.Add(
-                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId });
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@Scope", SqlDbType.VarChar, 30) { Value = scope },
+                    new SqlParameter("@ResourceType", SqlDbType.VarChar, 50) { Value = resourceType },
+                    new SqlParameter("@ResourcePublicId", SqlDbType.Char, 26) { Value = resourcePublicId }
+                ]);
 
                 using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -139,6 +111,10 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
                 return MapSeoMetadata(reader);
             }
         }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
         finally
         {
             if (ownedConnection is not null)
@@ -148,16 +124,15 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         }
     }
 
-    public async Task<int> UpdateAsync(
-        SeoMetadata seoMetadata,
-        int expectedVersion,
+    public async Task<SeoMetadata?> UpsertAsync(
+        SeoMetadataUpsertCommand model,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(seoMetadata);
+        ArgumentNullException.ThrowIfNull(model);
 
         try
         {
-            using SqlCommand command = CreateTransactionalCommand(SeoMetadataUpdateProc);
+            using SqlCommand command = CreateTransactionalCommand(SeoMetadataUpsertProc);
 
             SqlParameter affectedRowsParameter = new("@AffectedRows", SqlDbType.Int)
             {
@@ -166,26 +141,34 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
 
             command.Parameters.AddRange(
             [
-                new SqlParameter("@SeoId", SqlDbType.BigInt) { Value = seoMetadata.SeoId },
-                new SqlParameter("@CanonicalUrl", SqlDbType.NVarChar, 500) { Value = ToDbValue(seoMetadata.CanonicalUrl) },
-                new SqlParameter("@MetaTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(seoMetadata.MetaTitle) },
-                new SqlParameter("@MetaDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(seoMetadata.MetaDescription) },
-                new SqlParameter("@OgTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(seoMetadata.OgTitle) },
-                new SqlParameter("@OgDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(seoMetadata.OgDescription) },
-                new SqlParameter("@OgImageUrl", SqlDbType.NVarChar, 800) { Value = ToDbValue(seoMetadata.OgImageUrl) },
-                new SqlParameter("@TwitterTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(seoMetadata.TwitterTitle) },
-                new SqlParameter("@TwitterDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(seoMetadata.TwitterDescription) },
-                new SqlParameter("@TwitterImageUrl", SqlDbType.NVarChar, 800) { Value = ToDbValue(seoMetadata.TwitterImageUrl) },
-                new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(seoMetadata.UpdatedByUserId) },
-                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = expectedVersion },
+                new SqlParameter("@Scope", SqlDbType.VarChar, 30) { Value = model.Scope },
+                new SqlParameter("@ResourceType", SqlDbType.VarChar, 50) { Value = model.ResourceType },
+                new SqlParameter("@ResourcePublicId", SqlDbType.Char, 26) { Value = model.ResourcePublicId },
+                new SqlParameter("@Slug", SqlDbType.NVarChar, 200) { Value = ToDbValue(model.Slug) },
+                new SqlParameter("@CanonicalUrl", SqlDbType.NVarChar, 500) { Value = ToDbValue(model.CanonicalUrl) },
+                new SqlParameter("@MetaTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(model.MetaTitle) },
+                new SqlParameter("@MetaDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(model.MetaDescription) },
+                new SqlParameter("@OgTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(model.OgTitle) },
+                new SqlParameter("@OgDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(model.OgDescription) },
+                new SqlParameter("@OgImageUrl", SqlDbType.NVarChar, 800) { Value = ToDbValue(model.OgImageUrl) },
+                new SqlParameter("@TwitterTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(model.TwitterTitle) },
+                new SqlParameter("@TwitterDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(model.TwitterDescription) },
+                new SqlParameter("@TwitterImageUrl", SqlDbType.NVarChar, 800) { Value = ToDbValue(model.TwitterImageUrl) },
+                new SqlParameter("@Robots", SqlDbType.NVarChar, 100) { Value = ToDbValue(model.Robots) },
+                new SqlParameter("@IsManualOverride", SqlDbType.Bit) { Value = model.IsManualOverride },
+                new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(model.UpdatedByUserId) },
+                new SqlParameter("@ExpectedVersion", SqlDbType.Int) { Value = ToDbValue(model.ExpectedVersion) },
                 affectedRowsParameter
             ]);
 
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            return affectedRowsParameter.Value is DBNull
-                ? 0
-                : Convert.ToInt32(affectedRowsParameter.Value);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+
+            return MapSeoMetadata(reader);
         }
         catch (SqlException exception)
         {
@@ -193,8 +176,73 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         }
     }
 
-    public async Task<SeoMetadataResult?> SelectMetadataByArticleIdAsync(
-        long articleId,
+    public async Task<SeoApplyResultModel> ApplyContentDefaultsAsync(
+        ApplyContentMetadataDefaultsCommand model,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(SeoMetadataApplyContentDefaultsProc);
+
+            SqlParameter applyResultParameter = new("@ApplyResult", SqlDbType.VarChar, 30)
+            {
+                Direction = ParameterDirection.Output
+            };
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@Scope", SqlDbType.VarChar, 30) { Value = model.Scope },
+                new SqlParameter("@ResourceType", SqlDbType.VarChar, 50) { Value = model.ResourceType },
+                new SqlParameter("@ResourcePublicId", SqlDbType.Char, 26) { Value = model.ResourcePublicId },
+                new SqlParameter("@Slug", SqlDbType.NVarChar, 200) { Value = ToDbValue(model.Slug) },
+                new SqlParameter("@CanonicalUrl", SqlDbType.NVarChar, 500) { Value = ToDbValue(model.CanonicalUrl) },
+                new SqlParameter("@MetaTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(model.MetaTitle) },
+                new SqlParameter("@MetaDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(model.MetaDescription) },
+                new SqlParameter("@OgTitle", SqlDbType.NVarChar, 300) { Value = ToDbValue(model.OgTitle) },
+                new SqlParameter("@OgDescription", SqlDbType.NVarChar, 500) { Value = ToDbValue(model.OgDescription) },
+                new SqlParameter("@OgImageUrl", SqlDbType.NVarChar, 800) { Value = ToDbValue(model.OgImageUrl) },
+                new SqlParameter("@SourceAggregateVersion", SqlDbType.BigInt) { Value = model.SourceAggregateVersion },
+                new SqlParameter("@LastAppliedMessageId", SqlDbType.Char, 26) { Value = model.LastAppliedMessageId },
+                new SqlParameter("@LastSyncedAtUtc", SqlDbType.DateTime2) { Value = ToDbValue(model.LastSyncedAtUtc) },
+                applyResultParameter
+            ]);
+
+            SeoMetadata? metadata = null;
+
+            using (SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    metadata = MapSeoMetadata(reader);
+                }
+            }
+
+            string applyResult = applyResultParameter.Value is DBNull or null
+                ? string.Empty
+                : Convert.ToString(applyResultParameter.Value) ?? string.Empty;
+
+            return new SeoApplyResultModel
+            {
+                ApplyResult = applyResult,
+                EntityId = metadata?.SeoId,
+                Version = metadata?.Version,
+                SourceAggregateVersion = metadata?.SourceAggregateVersion,
+                LastAppliedMessageId = metadata?.LastAppliedMessageId,
+                LastSyncedAtUtc = metadata?.LastSyncedAtUtc
+            };
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
+    public async Task<SeoMetadataResult?> SelectMetadataByResourceAsync(
+        string scope,
+        string resourceType,
+        string resourcePublicId,
         CancellationToken cancellationToken = default)
     {
         SqlConnection? ownedConnection = null;
@@ -202,14 +250,18 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         try
         {
             (SqlCommand command, SqlConnection? connection) =
-                await CreateReadCommandAsync(SeoMetadataSelectMetadataByArticleIdProc, cancellationToken);
+                await CreateReadCommandAsync(SeoMetadataSelectMetadataByResourceProc, cancellationToken);
 
             ownedConnection = connection;
 
             using (command)
             {
-                command.Parameters.Add(
-                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId });
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@Scope", SqlDbType.VarChar, 30) { Value = scope },
+                    new SqlParameter("@ResourceType", SqlDbType.VarChar, 50) { Value = resourceType },
+                    new SqlParameter("@ResourcePublicId", SqlDbType.Char, 26) { Value = resourcePublicId }
+                ]);
 
                 using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -218,20 +270,12 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
                     return null;
                 }
 
-                return new SeoMetadataResult
-                {
-                    ResourceType = reader.GetString(reader.GetOrdinal("ResourceType")),
-                    ResourceId = reader.GetInt64(reader.GetOrdinal("ResourceId")),
-                    Slug = GetNullableString(reader, "Slug"),
-                    CanonicalUrl = GetNullableString(reader, "CanonicalUrl"),
-                    MetaTitle = GetNullableString(reader, "MetaTitle"),
-                    MetaDescription = GetNullableString(reader, "MetaDescription"),
-                    OgTitle = GetNullableString(reader, "OgTitle"),
-                    OgDescription = GetNullableString(reader, "OgDescription"),
-                    OgImageUrl = GetNullableString(reader, "OgImageUrl"),
-                    Version = reader.GetInt32(reader.GetOrdinal("Version"))
-                };
+                return MapSeoMetadataResult(reader);
             }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
         }
         finally
         {
@@ -242,8 +286,9 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         }
     }
 
-    public async Task<ArticleSeoSettingsResult?> GetArticleSeoSettingsByArticleIdAsync(
-        long articleId,
+    public async Task<ArticleSeoSettingsResult?> GetArticleSeoSettingsByArticlePublicIdAsync(
+        string articlePublicId,
+        string scope,
         CancellationToken cancellationToken = default)
     {
         SqlConnection? ownedConnection = null;
@@ -251,14 +296,17 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         try
         {
             (SqlCommand command, SqlConnection? connection) =
-                await CreateReadCommandAsync(SeoMetadataGetArticleSeoSettingsByArticleIdProc, cancellationToken);
+                await CreateReadCommandAsync(SeoMetadataGetArticleSeoSettingsByArticlePublicIdProc, cancellationToken);
 
             ownedConnection = connection;
 
             using (command)
             {
-                command.Parameters.Add(
-                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = articleId });
+                command.Parameters.AddRange(
+                [
+                    new SqlParameter("@ArticlePublicId", SqlDbType.Char, 26) { Value = articlePublicId },
+                    new SqlParameter("@Scope", SqlDbType.VarChar, 30) { Value = scope }
+                ]);
 
                 using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -269,8 +317,9 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
 
                 return new ArticleSeoSettingsResult
                 {
-                    ArticleId = reader.GetInt64(reader.GetOrdinal("ArticleId")),
-                    Scope = GetNullableString(reader, "Scope"),
+                    Scope = reader.GetString(reader.GetOrdinal("Scope")),
+                    ResourceType = reader.GetString(reader.GetOrdinal("ResourceType")),
+                    ResourcePublicId = reader.GetString(reader.GetOrdinal("ResourcePublicId")),
                     Slug = GetNullableString(reader, "Slug"),
                     CanonicalUrl = GetNullableString(reader, "CanonicalUrl"),
                     MetaTitle = GetNullableString(reader, "MetaTitle"),
@@ -281,11 +330,20 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
                     TwitterTitle = GetNullableString(reader, "TwitterTitle"),
                     TwitterDescription = GetNullableString(reader, "TwitterDescription"),
                     TwitterImageUrl = GetNullableString(reader, "TwitterImageUrl"),
+                    Robots = GetNullableString(reader, "Robots"),
+                    IsManualOverride = GetNullableBoolean(reader, "IsManualOverride"),
                     IsIndexable = GetNullableBoolean(reader, "IsIndexable"),
                     IsActive = GetNullableBoolean(reader, "IsActive"),
+                    SourceAggregateVersion = GetNullableInt64(reader, "SourceAggregateVersion"),
+                    LastAppliedMessageId = GetNullableString(reader, "LastAppliedMessageId"),
+                    LastSyncedAtUtc = GetNullableDateTime(reader, "LastSyncedAtUtc"),
                     Version = reader.GetInt32(reader.GetOrdinal("Version"))
                 };
             }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
         }
         finally
         {
@@ -313,21 +371,25 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
 
             using (command)
             {
-                int page = query.Page <= 0 ? 1 : query.Page;
-                int pageSize = query.PageSize <= 0 ? 20 : query.PageSize;
-
-                int skip = (page - 1) * pageSize;
-                int take = pageSize;
+                int skip = query.Skip < 0 ? 0 : query.Skip;
+                int take = query.Take <= 0 ? 20 : query.Take;
+                if (take > 200)
+                {
+                    take = 200;
+                }
 
                 command.Parameters.AddRange(
                 [
                     new SqlParameter("@Skip", SqlDbType.Int) { Value = skip },
                     new SqlParameter("@Take", SqlDbType.Int) { Value = take },
-                    new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = ToDbValue(query.ArticleId) },
+                    new SqlParameter("@Scope", SqlDbType.VarChar, 30) { Value = ToDbValue(query.Scope) },
+                    new SqlParameter("@ResourceType", SqlDbType.VarChar, 50) { Value = ToDbValue(query.ResourceType) },
+                    new SqlParameter("@ResourcePublicId", SqlDbType.Char, 26) { Value = ToDbValue(query.ResourcePublicId) },
+                    new SqlParameter("@IsManualOverride", SqlDbType.Bit) { Value = ToDbValue(query.IsManualOverride) },
                     new SqlParameter("@UpdatedByUserId", SqlDbType.BigInt) { Value = ToDbValue(query.UpdatedByUserId) },
                     new SqlParameter("@Keyword", SqlDbType.NVarChar, 300) { Value = ToDbValue(query.Keyword) },
-                    new SqlParameter("@SortBy", SqlDbType.NVarChar, 30) { Value = query.SortBy },
-                    new SqlParameter("@SortDirection", SqlDbType.NVarChar, 4) { Value = query.SortDirection }
+                    new SqlParameter("@SortBy", SqlDbType.NVarChar, 30) { Value = query.SortBy ?? "UpdatedAtUtc" },
+                    new SqlParameter("@SortDirection", SqlDbType.NVarChar, 4) { Value = query.SortDirection ?? "DESC" }
                 ]);
 
                 using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -345,7 +407,10 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
                     items.Add(new SeoMetadataListResultItem
                     {
                         SeoId = reader.GetInt64(reader.GetOrdinal("SeoId")),
-                        ArticleId = reader.GetInt64(reader.GetOrdinal("ArticleId")),
+                        Scope = reader.GetString(reader.GetOrdinal("Scope")),
+                        ResourceType = reader.GetString(reader.GetOrdinal("ResourceType")),
+                        ResourcePublicId = reader.GetString(reader.GetOrdinal("ResourcePublicId")),
+                        Slug = GetNullableString(reader, "Slug"),
                         CanonicalUrl = GetNullableString(reader, "CanonicalUrl"),
                         MetaTitle = GetNullableString(reader, "MetaTitle"),
                         MetaDescription = GetNullableString(reader, "MetaDescription"),
@@ -355,7 +420,13 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
                         TwitterTitle = GetNullableString(reader, "TwitterTitle"),
                         TwitterDescription = GetNullableString(reader, "TwitterDescription"),
                         TwitterImageUrl = GetNullableString(reader, "TwitterImageUrl"),
-                        UpdatedAt = reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
+                        Robots = GetNullableString(reader, "Robots"),
+                        IsManualOverride = reader.GetBoolean(reader.GetOrdinal("IsManualOverride")),
+                        SourceAggregateVersion = GetNullableInt64(reader, "SourceAggregateVersion"),
+                        LastAppliedMessageId = GetNullableString(reader, "LastAppliedMessageId"),
+                        LastSyncedAtUtc = GetNullableDateTime(reader, "LastSyncedAtUtc"),
+                        CreatedAtUtc = reader.GetDateTime(reader.GetOrdinal("CreatedAtUtc")),
+                        UpdatedAtUtc = reader.GetDateTime(reader.GetOrdinal("UpdatedAtUtc")),
                         UpdatedByUserId = GetNullableInt64(reader, "UpdatedByUserId"),
                         Version = reader.GetInt32(reader.GetOrdinal("Version"))
                     });
@@ -364,11 +435,15 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
                 return new PagedQueryResult<SeoMetadataListResultItem>
                 {
                     Items = items,
-                    Page = page,
-                    PageSize = pageSize,
+                    Page = (skip / take) + 1,
+                    PageSize = take,
                     TotalItems = totalItems
                 };
             }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
         }
         finally
         {
@@ -418,7 +493,10 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
     {
         return SeoMetadata.Rehydrate(
             seoId: reader.GetInt64(reader.GetOrdinal("SeoId")),
-            articleId: reader.GetInt64(reader.GetOrdinal("ArticleId")),
+            scope: reader.GetString(reader.GetOrdinal("Scope")),
+            resourceType: reader.GetString(reader.GetOrdinal("ResourceType")),
+            resourcePublicId: reader.GetString(reader.GetOrdinal("ResourcePublicId")),
+            slug: GetNullableString(reader, "Slug"),
             canonicalUrl: GetNullableString(reader, "CanonicalUrl"),
             metaTitle: GetNullableString(reader, "MetaTitle"),
             metaDescription: GetNullableString(reader, "MetaDescription"),
@@ -428,28 +506,102 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
             twitterTitle: GetNullableString(reader, "TwitterTitle"),
             twitterDescription: GetNullableString(reader, "TwitterDescription"),
             twitterImageUrl: GetNullableString(reader, "TwitterImageUrl"),
+            robots: GetNullableString(reader, "Robots"),
+            isManualOverride: reader.GetBoolean(reader.GetOrdinal("IsManualOverride")),
+            sourceAggregateVersion: GetNullableInt64(reader, "SourceAggregateVersion"),
+            lastAppliedMessageId: GetNullableString(reader, "LastAppliedMessageId"),
+            lastSyncedAtUtc: GetNullableDateTime(reader, "LastSyncedAtUtc"),
             version: reader.GetInt32(reader.GetOrdinal("Version")),
-            updatedAt: reader.GetDateTime(reader.GetOrdinal("UpdatedAt")),
+            createdAtUtc: reader.GetDateTime(reader.GetOrdinal("CreatedAtUtc")),
+            updatedAtUtc: reader.GetDateTime(reader.GetOrdinal("UpdatedAtUtc")),
             updatedByUserId: GetNullableInt64(reader, "UpdatedByUserId"));
+    }
+
+    private static SeoMetadataResult MapSeoMetadataResult(SqlDataReader reader)
+    {
+        return new SeoMetadataResult
+        {
+            Scope = reader.GetString(reader.GetOrdinal("Scope")),
+            ResourceType = reader.GetString(reader.GetOrdinal("ResourceType")),
+            ResourcePublicId = reader.GetString(reader.GetOrdinal("ResourcePublicId")),
+            Slug = GetNullableString(reader, "Slug"),
+            CanonicalUrl = GetNullableString(reader, "CanonicalUrl"),
+            MetaTitle = GetNullableString(reader, "MetaTitle"),
+            MetaDescription = GetNullableString(reader, "MetaDescription"),
+            OgTitle = GetNullableString(reader, "OgTitle"),
+            OgDescription = GetNullableString(reader, "OgDescription"),
+            OgImageUrl = GetNullableString(reader, "OgImageUrl"),
+            TwitterTitle = GetNullableString(reader, "TwitterTitle"),
+            TwitterDescription = GetNullableString(reader, "TwitterDescription"),
+            TwitterImageUrl = GetNullableString(reader, "TwitterImageUrl"),
+            Robots = GetNullableString(reader, "Robots"),
+            IsManualOverride = GetNullableBoolean(reader, "IsManualOverride"),
+            SourceAggregateVersion = GetNullableInt64(reader, "SourceAggregateVersion"),
+            LastAppliedMessageId = GetNullableString(reader, "LastAppliedMessageId"),
+            LastSyncedAtUtc = GetNullableDateTime(reader, "LastSyncedAtUtc"),
+            Version = reader.GetInt32(reader.GetOrdinal("Version"))
+        };
     }
 
     private static object ToDbValue(object? value) => value ?? DBNull.Value;
 
     private static string? GetNullableString(SqlDataReader reader, string columnName)
     {
-        int ordinal = reader.GetOrdinal(columnName);
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
 
     private static long? GetNullableInt64(SqlDataReader reader, string columnName)
     {
-        int ordinal = reader.GetOrdinal(columnName);
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
     }
 
     private static bool? GetNullableBoolean(SqlDataReader reader, string columnName)
     {
-        int ordinal = reader.GetOrdinal(columnName);
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetBoolean(ordinal);
+    }
+
+    private static DateTime? GetNullableDateTime(SqlDataReader reader, string columnName)
+    {
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
+        return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+    }
+
+    private static int TryGetOrdinal(SqlDataReader reader, string columnName)
+    {
+        for (int index = 0; index < reader.FieldCount; index++)
+        {
+            if (string.Equals(
+                reader.GetName(index),
+                columnName,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 }

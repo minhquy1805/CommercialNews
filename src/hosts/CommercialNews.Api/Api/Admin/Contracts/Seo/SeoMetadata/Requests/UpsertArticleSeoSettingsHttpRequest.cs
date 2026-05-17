@@ -2,8 +2,9 @@ namespace CommercialNews.Api.Api.Admin.Contracts.Seo.SeoMetadata.Requests;
 
 public sealed class UpsertArticleSeoSettingsHttpRequest
 {
+    public string? Scope { get; init; }
+
     public string? Slug { get; init; }
-    public string Scope { get; init; } = string.Empty;
 
     public string? CanonicalUrl { get; init; }
 
@@ -18,7 +19,9 @@ public sealed class UpsertArticleSeoSettingsHttpRequest
     public string? TwitterDescription { get; init; }
     public string? TwitterImageUrl { get; init; }
 
-    public bool IsIndexable { get; init; }
+    public string? Robots { get; init; }
+
+    public bool IsIndexable { get; init; } = true;
     public bool IsActive { get; init; } = true;
 
     public int? ExpectedSlugVersion { get; init; }

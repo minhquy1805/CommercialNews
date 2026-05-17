@@ -5,9 +5,10 @@ using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Seo.Application.Contracts.SeoMetadata.Requests;
 using Seo.Application.Contracts.SeoMetadata.Responses;
 using Seo.Application.Errors;
-using Seo.Application.Models.QueryModels;
+using Seo.Application.Models.Commands;
+using Seo.Application.Models.Results;
 using Seo.Application.Ports.Persistence;
-using Seo.Domain.Entities;
+using Seo.Domain.Constants;
 using Seo.Domain.Exceptions;
 
 namespace Seo.Application.UseCases.SeoSettings.UpsertArticleSeoSettings;
@@ -27,133 +28,67 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext)
     {
-        _seoMetadataRepository = seoMetadataRepository;
-        _slugRegistryRepository = slugRegistryRepository;
-        _unitOfWork = unitOfWork;
-        _dateTimeProvider = dateTimeProvider;
-        _requestContext = requestContext;
+        _seoMetadataRepository = seoMetadataRepository ?? throw new ArgumentNullException(nameof(seoMetadataRepository));
+        _slugRegistryRepository = slugRegistryRepository ?? throw new ArgumentNullException(nameof(slugRegistryRepository));
+        _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+        _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+        _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
     }
 
     public async Task<Result<UpsertArticleSeoSettingsResponse>> ExecuteAsync(
+        string articlePublicId,
         UpsertArticleSeoSettingsRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         try
         {
-            if (request.ArticleId <= 0)
+            if (string.IsNullOrWhiteSpace(articlePublicId) || articlePublicId.Trim().Length != 26)
             {
                 return Result<UpsertArticleSeoSettingsResponse>.Failure(
-                    SeoErrors.Article.InvalidArticleId);
+                    SeoErrors.Article.InvalidArticlePublicId);
             }
 
-            if (string.IsNullOrWhiteSpace(request.Scope))
+            string scope = string.IsNullOrWhiteSpace(request.Scope)
+                ? SeoScopes.Public
+                : request.Scope.Trim();
+
+            if (!SeoScopes.IsValid(scope))
             {
                 return Result<UpsertArticleSeoSettingsResponse>.Failure(
                     SeoErrors.SlugRegistry.InvalidScope);
             }
 
-            DateTime nowUtc = _dateTimeProvider.UtcNow;
-            long? actorUserId = request.UpdatedByUserId ?? _requestContext.CurrentUserId;
+            string resourceType = SeoResourceTypes.Article;
+            string resourcePublicId = articlePublicId.Trim();
+
+            long? actorUserId = request.ActorUserId ?? _requestContext.CurrentUserId;
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                SlugRegistry? slugEntity = null;
-                SeoMetadata? seoMetadataEntity = await _seoMetadataRepository.GetByArticleIdAsync(
-                    request.ArticleId,
-                    cancellationToken);
-
                 if (!string.IsNullOrWhiteSpace(request.Slug))
                 {
-                    IReadOnlyList<SlugRegistryListResultItem> existingRoutes =
-                        await _slugRegistryRepository.SelectByArticleIdAsync(
-                            request.ArticleId,
-                            request.Scope.Trim(),
-                            onlyActive: true,
-                            cancellationToken);
+                    SlugRegistryUpsertCommand slugCommand = new(
+                        Scope: scope,
+                        Slug: request.Slug.Trim(),
+                        ResourceType: resourceType,
+                        ResourcePublicId: resourcePublicId,
+                        CanonicalUrl: request.CanonicalUrl,
+                        IsIndexable: request.IsIndexable,
+                        IsActive: request.IsActive,
+                        ActorUserId: actorUserId,
+                        ExpectedVersion: request.ExpectedSlugVersion);
 
-                    SlugRegistryListResultItem? activeRoute = existingRoutes.FirstOrDefault();
-
-                    if (activeRoute is null)
-                    {
-                        slugEntity = SlugRegistry.Create(
-                            articleId: request.ArticleId,
-                            slug: request.Slug,
-                            scope: request.Scope,
-                            canonicalUrl: request.CanonicalUrl,
-                            isIndexable: request.IsIndexable,
-                            isActive: request.IsActive,
-                            nowUtc: nowUtc,
-                            actorUserId: actorUserId);
-
-                        long slugId = await _slugRegistryRepository.InsertAsync(
-                            slugEntity,
-                            cancellationToken);
-
-                        slugEntity = SlugRegistry.Rehydrate(
-                            slugId: slugId,
-                            articleId: slugEntity.ArticleId,
-                            slug: slugEntity.Slug,
-                            scope: slugEntity.Scope,
-                            canonicalUrl: slugEntity.CanonicalUrl,
-                            isIndexable: slugEntity.IsIndexable,
-                            isActive: slugEntity.IsActive,
-                            version: slugEntity.Version,
-                            createdAt: slugEntity.CreatedAt,
-                            createdByUserId: slugEntity.CreatedByUserId,
-                            updatedAt: slugEntity.UpdatedAt,
-                            updatedByUserId: slugEntity.UpdatedByUserId);
-                    }
-                    else
-                    {
-                        if (!request.ExpectedSlugVersion.HasValue)
-                        {
-                            await _unitOfWork.RollbackAsync(cancellationToken);
-
-                            return Result<UpsertArticleSeoSettingsResponse>.Failure(
-                                SeoErrors.SlugRegistry.VersionMismatch);
-                        }
-
-                        SlugRegistry? persistedRoute = await _slugRegistryRepository.GetByIdAsync(
-                            activeRoute.SlugId,
-                            cancellationToken);
-
-                        if (persistedRoute is null)
-                        {
-                            await _unitOfWork.RollbackAsync(cancellationToken);
-
-                            return Result<UpsertArticleSeoSettingsResponse>.Failure(
-                                SeoErrors.SlugRegistry.NotFound);
-                        }
-
-                        persistedRoute.UpdateRouting(
-                            slug: request.Slug,
-                            scope: request.Scope,
-                            canonicalUrl: request.CanonicalUrl,
-                            isIndexable: request.IsIndexable,
-                            isActive: request.IsActive,
-                            nowUtc: nowUtc,
-                            actorUserId: actorUserId);
-
-                        int affectedRows = await _slugRegistryRepository.UpdateAsync(
-                            persistedRoute,
-                            request.ExpectedSlugVersion.Value,
-                            cancellationToken);
-
-                        if (affectedRows <= 0)
-                        {
-                            await _unitOfWork.RollbackAsync(cancellationToken);
-
-                            return Result<UpsertArticleSeoSettingsResponse>.Failure(
-                                SeoErrors.SlugRegistry.VersionMismatch);
-                        }
-
-                        slugEntity = persistedRoute;
-                    }
+                    await _slugRegistryRepository.UpsertAsync(
+                        slugCommand,
+                        cancellationToken);
                 }
 
                 bool hasMetadataPayload =
+                    !string.IsNullOrWhiteSpace(request.Slug) ||
                     !string.IsNullOrWhiteSpace(request.CanonicalUrl) ||
                     !string.IsNullOrWhiteSpace(request.MetaTitle) ||
                     !string.IsNullOrWhiteSpace(request.MetaDescription) ||
@@ -162,123 +97,81 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
                     !string.IsNullOrWhiteSpace(request.OgImageUrl) ||
                     !string.IsNullOrWhiteSpace(request.TwitterTitle) ||
                     !string.IsNullOrWhiteSpace(request.TwitterDescription) ||
-                    !string.IsNullOrWhiteSpace(request.TwitterImageUrl);
+                    !string.IsNullOrWhiteSpace(request.TwitterImageUrl) ||
+                    !string.IsNullOrWhiteSpace(request.Robots);
 
-                if (seoMetadataEntity is null)
+                if (hasMetadataPayload)
                 {
-                    if (hasMetadataPayload)
-                    {
-                        seoMetadataEntity = SeoMetadata.Create(
-                            articleId: request.ArticleId,
-                            canonicalUrl: request.CanonicalUrl,
-                            metaTitle: request.MetaTitle,
-                            metaDescription: request.MetaDescription,
-                            ogTitle: request.OgTitle,
-                            ogDescription: request.OgDescription,
-                            ogImageUrl: request.OgImageUrl,
-                            twitterTitle: request.TwitterTitle,
-                            twitterDescription: request.TwitterDescription,
-                            twitterImageUrl: request.TwitterImageUrl,
-                            nowUtc: nowUtc,
-                            actorUserId: actorUserId);
+                    SeoMetadataUpsertCommand metadataCommand = new(
+                        Scope: scope,
+                        ResourceType: resourceType,
+                        ResourcePublicId: resourcePublicId,
+                        Slug: request.Slug,
+                        CanonicalUrl: request.CanonicalUrl,
+                        MetaTitle: request.MetaTitle,
+                        MetaDescription: request.MetaDescription,
+                        OgTitle: request.OgTitle,
+                        OgDescription: request.OgDescription,
+                        OgImageUrl: request.OgImageUrl,
+                        TwitterTitle: request.TwitterTitle,
+                        TwitterDescription: request.TwitterDescription,
+                        TwitterImageUrl: request.TwitterImageUrl,
+                        Robots: request.Robots,
+                        IsManualOverride: true,
+                        UpdatedByUserId: actorUserId,
+                        ExpectedVersion: request.ExpectedSeoMetadataVersion);
 
-                        long seoId = await _seoMetadataRepository.InsertAsync(
-                            seoMetadataEntity,
-                            cancellationToken);
-
-                        seoMetadataEntity = SeoMetadata.Rehydrate(
-                            seoId: seoId,
-                            articleId: seoMetadataEntity.ArticleId,
-                            canonicalUrl: seoMetadataEntity.CanonicalUrl,
-                            metaTitle: seoMetadataEntity.MetaTitle,
-                            metaDescription: seoMetadataEntity.MetaDescription,
-                            ogTitle: seoMetadataEntity.OgTitle,
-                            ogDescription: seoMetadataEntity.OgDescription,
-                            ogImageUrl: seoMetadataEntity.OgImageUrl,
-                            twitterTitle: seoMetadataEntity.TwitterTitle,
-                            twitterDescription: seoMetadataEntity.TwitterDescription,
-                            twitterImageUrl: seoMetadataEntity.TwitterImageUrl,
-                            version: seoMetadataEntity.Version,
-                            updatedAt: seoMetadataEntity.UpdatedAt,
-                            updatedByUserId: seoMetadataEntity.UpdatedByUserId);
-                    }
-                }
-                else
-                {
-                    if (!request.ExpectedSeoMetadataVersion.HasValue)
-                    {
-                        await _unitOfWork.RollbackAsync(cancellationToken);
-
-                        return Result<UpsertArticleSeoSettingsResponse>.Failure(
-                            SeoErrors.SeoMetadata.VersionMismatch);
-                    }
-
-                    seoMetadataEntity.Update(
-                        canonicalUrl: request.CanonicalUrl,
-                        metaTitle: request.MetaTitle,
-                        metaDescription: request.MetaDescription,
-                        ogTitle: request.OgTitle,
-                        ogDescription: request.OgDescription,
-                        ogImageUrl: request.OgImageUrl,
-                        twitterTitle: request.TwitterTitle,
-                        twitterDescription: request.TwitterDescription,
-                        twitterImageUrl: request.TwitterImageUrl,
-                        nowUtc: nowUtc,
-                        actorUserId: actorUserId);
-
-                    int affectedRows = await _seoMetadataRepository.UpdateAsync(
-                        seoMetadataEntity,
-                        request.ExpectedSeoMetadataVersion.Value,
+                    await _seoMetadataRepository.UpsertAsync(
+                        metadataCommand,
                         cancellationToken);
-
-                    if (affectedRows <= 0)
-                    {
-                        await _unitOfWork.RollbackAsync(cancellationToken);
-
-                        return Result<UpsertArticleSeoSettingsResponse>.Failure(
-                            SeoErrors.SeoMetadata.VersionMismatch);
-                    }
                 }
 
                 await _unitOfWork.CommitAsync(cancellationToken);
-
-                ArticleSeoSettingsResult? aggregate =
-                    await _seoMetadataRepository.GetArticleSeoSettingsByArticleIdAsync(
-                        request.ArticleId,
-                        cancellationToken);
-
-                if (aggregate is null)
-                {
-                    return Result<UpsertArticleSeoSettingsResponse>.Failure(
-                        SeoErrors.Article.NotFound);
-                }
-
-                return Result<UpsertArticleSeoSettingsResponse>.Success(
-                    new UpsertArticleSeoSettingsResponse
-                    {
-                        Updated = true,
-                        ArticleId = aggregate.ArticleId,
-                        Scope = aggregate.Scope,
-                        Slug = aggregate.Slug,
-                        CanonicalUrl = aggregate.CanonicalUrl,
-                        MetaTitle = aggregate.MetaTitle,
-                        MetaDescription = aggregate.MetaDescription,
-                        OgTitle = aggregate.OgTitle,
-                        OgDescription = aggregate.OgDescription,
-                        OgImageUrl = aggregate.OgImageUrl,
-                        TwitterTitle = aggregate.TwitterTitle,
-                        TwitterDescription = aggregate.TwitterDescription,
-                        TwitterImageUrl = aggregate.TwitterImageUrl,
-                        IsIndexable = aggregate.IsIndexable,
-                        IsActive = aggregate.IsActive,
-                        Version = aggregate.Version
-                    });
             }
             catch
             {
                 await _unitOfWork.RollbackAsync(cancellationToken);
                 throw;
             }
+
+            ArticleSeoSettingsResult? aggregate =
+                await _seoMetadataRepository.GetArticleSeoSettingsByArticlePublicIdAsync(
+                    articlePublicId: resourcePublicId,
+                    scope: scope,
+                    cancellationToken: cancellationToken);
+
+            if (aggregate is null)
+            {
+                return Result<UpsertArticleSeoSettingsResponse>.Failure(
+                    SeoErrors.Article.NotFound);
+            }
+
+            return Result<UpsertArticleSeoSettingsResponse>.Success(
+                new UpsertArticleSeoSettingsResponse
+                {
+                    Updated = true,
+                    Scope = aggregate.Scope,
+                    ResourceType = aggregate.ResourceType,
+                    ResourcePublicId = aggregate.ResourcePublicId,
+                    Slug = aggregate.Slug,
+                    CanonicalUrl = aggregate.CanonicalUrl,
+                    MetaTitle = aggregate.MetaTitle,
+                    MetaDescription = aggregate.MetaDescription,
+                    OgTitle = aggregate.OgTitle,
+                    OgDescription = aggregate.OgDescription,
+                    OgImageUrl = aggregate.OgImageUrl,
+                    TwitterTitle = aggregate.TwitterTitle,
+                    TwitterDescription = aggregate.TwitterDescription,
+                    TwitterImageUrl = aggregate.TwitterImageUrl,
+                    Robots = aggregate.Robots,
+                    IsManualOverride = aggregate.IsManualOverride ?? true,
+                    IsIndexable = aggregate.IsIndexable,
+                    IsActive = aggregate.IsActive,
+                    SourceAggregateVersion = aggregate.SourceAggregateVersion,
+                    LastAppliedMessageId = aggregate.LastAppliedMessageId,
+                    LastSyncedAtUtc = aggregate.LastSyncedAtUtc,
+                    Version = aggregate.Version
+                });
         }
         catch (PersistenceException exception)
         {
@@ -296,23 +189,27 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
     {
         return exception.Code switch
         {
-            "SEO.ARTICLE_INVALID_ARTICLE_ID" => SeoErrors.Article.InvalidArticleId,
-
             "SEO.INVALID_SCOPE" => SeoErrors.SlugRegistry.InvalidScope,
+
+            "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
+            "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
+
             "SEO.INVALID_SLUG" => SeoErrors.SlugRegistry.SlugRequired,
             "SEO.SLUG_TOO_LONG" => SeoErrors.SlugRegistry.SlugTooLong,
             "SEO.SLUG_REGISTRY_INVALID_SLUG_ID" => SeoErrors.SlugRegistry.InvalidSlugId,
-            "SEO.SLUG_REGISTRY_INVALID_ARTICLE_ID" => SeoErrors.SlugRegistry.InvalidArticleId,
             "SEO.SLUG_REGISTRY_INVALID_VERSION" => SeoErrors.SlugRegistry.InvalidVersion,
             "SEO.SLUG_REGISTRY_INVALID_UPDATED_AT" => SeoErrors.SlugRegistry.InvalidUpdatedAt,
             "SEO.SLUG_REGISTRY_ALREADY_ACTIVE" => SeoErrors.SlugRegistry.AlreadyActive,
             "SEO.SLUG_REGISTRY_ALREADY_INACTIVE" => SeoErrors.SlugRegistry.AlreadyInactive,
             "SEO.SLUG_REGISTRY_INACTIVE" => SeoErrors.SlugRegistry.Inactive,
-            "SEO.CANONICAL_URL_TOO_LONG" => SeoErrors.SlugRegistry.CanonicalUrlTooLong,
+
+            "SEO.CANONICAL_URL_TOO_LONG" => SeoErrors.SeoMetadata.CanonicalUrlTooLong,
+            "SEO.INVALID_CANONICAL_URL" => SeoErrors.SeoMetadata.InvalidCanonicalUrl,
 
             "SEO.SEO_METADATA_INVALID_SEO_ID" => SeoErrors.SeoMetadata.InvalidSeoId,
-            "SEO.SEO_METADATA_INVALID_ARTICLE_ID" => SeoErrors.SeoMetadata.InvalidArticleId,
             "SEO.SEO_METADATA_INVALID_VERSION" => SeoErrors.SeoMetadata.InvalidVersion,
+            "SEO.SEO_METADATA_INVALID_UPDATED_AT" => SeoErrors.SeoMetadata.InvalidUpdatedAt,
+
             "SEO.META_TITLE_TOO_LONG" => SeoErrors.SeoMetadata.MetaTitleTooLong,
             "SEO.META_DESCRIPTION_TOO_LONG" => SeoErrors.SeoMetadata.MetaDescriptionTooLong,
             "SEO.OG_TITLE_TOO_LONG" => SeoErrors.SeoMetadata.OgTitleTooLong,
@@ -321,6 +218,12 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
             "SEO.TWITTER_TITLE_TOO_LONG" => SeoErrors.SeoMetadata.TwitterTitleTooLong,
             "SEO.TWITTER_DESCRIPTION_TOO_LONG" => SeoErrors.SeoMetadata.TwitterDescriptionTooLong,
             "SEO.TWITTER_IMAGE_URL_TOO_LONG" => SeoErrors.SeoMetadata.TwitterImageUrlTooLong,
+            "SEO.ROBOTS_TOO_LONG" => SeoErrors.SeoMetadata.RobotsTooLong,
+            "SEO.INVALID_ROBOTS_DIRECTIVE" => SeoErrors.SeoMetadata.InvalidRobotsDirective,
+
+            "SEO.INVALID_SOURCE_AGGREGATE_VERSION" => SeoErrors.Sync.InvalidSourceAggregateVersion,
+            "SEO.INVALID_LAST_APPLIED_MESSAGE_ID" => SeoErrors.Sync.InvalidLastAppliedMessageId,
+            "SEO.EVENT_STALE_IGNORED" => SeoErrors.Sync.EventStaleIgnored,
 
             _ => SeoErrors.ValidationFailed
         };
@@ -331,9 +234,24 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
         return exception.Code switch
         {
             "SEO.SLUG_CONFLICT" => SeoErrors.SlugRegistry.Conflict,
+            "SEO.ACTIVE_ROUTE_ALREADY_EXISTS" => SeoErrors.SlugRegistry.ActiveRouteAlreadyExists,
+            "SEO.ROUTE_OWNERSHIP_CONFLICT" => SeoErrors.SlugRegistry.RouteOwnershipConflict,
+
             "SEO.METADATA_ALREADY_EXISTS" => SeoErrors.SeoMetadata.AlreadyExists,
+            "SEO.METADATA_OWNERSHIP_CONFLICT" => SeoErrors.SeoMetadata.MetadataOwnershipConflict,
+
+            "SEO.INVALID_SCOPE" => SeoErrors.SlugRegistry.InvalidScope,
+            "SEO.INVALID_RESOURCE_TYPE" => SeoErrors.Resource.InvalidResourceType,
+            "SEO.INVALID_RESOURCE_PUBLIC_ID" => SeoErrors.Resource.InvalidResourcePublicId,
+            "SEO.INVALID_SLUG" => SeoErrors.SlugRegistry.SlugRequired,
+            "SEO.INVALID_CANONICAL_URL" => SeoErrors.SeoMetadata.InvalidCanonicalUrl,
+
             "SEO.VERSION_MISMATCH" => SeoErrors.SeoMetadata.VersionMismatch,
             "SEO.STALE_WRITE_CONFLICT" => SeoErrors.SeoMetadata.StaleWriteConflict,
+
+            "SEO.INVALID_SOURCE_AGGREGATE_VERSION" => SeoErrors.Sync.InvalidSourceAggregateVersion,
+            "SEO.INVALID_LAST_APPLIED_MESSAGE_ID" => SeoErrors.Sync.InvalidLastAppliedMessageId,
+
             _ => SeoErrors.ValidationFailed
         };
     }
