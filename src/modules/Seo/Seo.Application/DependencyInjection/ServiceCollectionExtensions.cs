@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Seo.Application.Consumers.Content;
 using Seo.Application.UseCases.SeoSettings.GetArticleSeoSettings;
 using Seo.Application.UseCases.SeoSettings.GetSeoMetadataById;
 using Seo.Application.UseCases.SeoSettings.GetSeoMetadataByResource;
@@ -15,10 +16,22 @@ namespace Seo.Application.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
+    public static IServiceCollection AddSeoConsumerApplication(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IContentSeoEventApplyService, ContentSeoEventApplyService>();
+
+        return services;
+    }
+
     public static IServiceCollection AddSeoApplication(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddSeoConsumerApplication();
+
+        // Slug routes
         services.AddScoped<IResolveByScopeAndSlugUseCase, ResolveByScopeAndSlugUseCase>();
         services.AddScoped<IGetSlugRegistryByIdUseCase, GetSlugRegistryByIdUseCase>();
         services.AddScoped<IGetSlugRegistryByResourceUseCase, GetSlugRegistryByResourceUseCase>();
@@ -26,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICheckSlugAvailabilityUseCase, CheckSlugAvailabilityUseCase>();
         services.AddScoped<IGenerateSlugUseCase, GenerateSlugUseCase>();
 
+        // SEO metadata / settings
         services.AddScoped<IGetSeoMetadataByIdUseCase, GetSeoMetadataByIdUseCase>();
         services.AddScoped<IGetSeoMetadataByResourceUseCase, GetSeoMetadataByResourceUseCase>();
         services.AddScoped<IGetSeoMetadataListUseCase, GetSeoMetadataListUseCase>();
