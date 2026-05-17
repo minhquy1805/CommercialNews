@@ -192,6 +192,29 @@ services:
       RabbitMq__AuditConsumer__RoutingKeys__23: "content.article_unpublished"
       RabbitMq__AuditConsumer__RoutingKeys__24: "content.article_archived"
       RabbitMq__AuditConsumer__RoutingKeys__25: "content.article_soft_deleted"
+
+      RabbitMq__SeoConsumer__HostName: "${RABBITMQ_HOST}"
+      RabbitMq__SeoConsumer__Port: "${RABBITMQ_PORT}"
+      RabbitMq__SeoConsumer__UserName: "${RABBITMQ_USERNAME}"
+      RabbitMq__SeoConsumer__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__SeoConsumer__VirtualHost: "${RABBITMQ_VIRTUAL_HOST}"
+      RabbitMq__SeoConsumer__ExchangeName: "${RABBITMQ_EXCHANGE_NAME}"
+      RabbitMq__SeoConsumer__ExchangeType: "${RABBITMQ_EXCHANGE_TYPE}"
+      RabbitMq__SeoConsumer__QueueName: "${RABBITMQ_SEO_QUEUE_NAME}"
+      RabbitMq__SeoConsumer__DurableQueue: "${RABBITMQ_SEO_DURABLE_QUEUE}"
+      RabbitMq__SeoConsumer__ExclusiveQueue: "${RABBITMQ_SEO_EXCLUSIVE_QUEUE}"
+      RabbitMq__SeoConsumer__AutoDeleteQueue: "${RABBITMQ_SEO_AUTO_DELETE_QUEUE}"
+      RabbitMq__SeoConsumer__PrefetchCount: "${RABBITMQ_SEO_PREFETCH_COUNT}"
+      RabbitMq__SeoConsumer__ConsumerTag: "${RABBITMQ_SEO_CONSUMER_TAG}"
+      RabbitMq__SeoConsumer__ClientProvidedName: "${RABBITMQ_SEO_CLIENT_PROVIDED_NAME}"
+      RabbitMq__SeoConsumer__RequeueOnFailure: "${RABBITMQ_SEO_REQUEUE_ON_FAILURE}"
+
+      RabbitMq__SeoConsumer__RoutingKeys__0: "content.article_created"
+      RabbitMq__SeoConsumer__RoutingKeys__1: "content.article_updated"
+      RabbitMq__SeoConsumer__RoutingKeys__2: "content.article_published"
+      RabbitMq__SeoConsumer__RoutingKeys__3: "content.article_unpublished"
+      RabbitMq__SeoConsumer__RoutingKeys__4: "content.article_archived"
+      RabbitMq__SeoConsumer__RoutingKeys__5: "content.article_soft_deleted"
     depends_on:
       - cn-mssql
       - rabbitmq
