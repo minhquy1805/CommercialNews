@@ -38,6 +38,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         long authorUserId,
         long createdByUserId,
         string status,
+        string? slug,
+        string? canonicalUrl,
+        string? title,
+        string? summary,
+        string? coverImageUrl,
         IReadOnlyCollection<long> tagIds,
         long version,
         DateTime createdAtUtc,
@@ -54,6 +59,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         ValidateRequired(status, nameof(status));
 
         string normalizedArticlePublicId = articlePublicId.Trim();
+        string? normalizedSlug = NormalizeOptional(slug);
+        string? normalizedCanonicalUrl = NormalizeOptional(canonicalUrl);
+        string? normalizedTitle = NormalizeOptional(title);
+        string? normalizedSummary = NormalizeOptional(summary);
+        string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
             normalizedArticlePublicId,
@@ -67,6 +77,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             AuthorUserId: authorUserId,
             CreatedByUserId: createdByUserId,
             Status: status.Trim(),
+            Slug: normalizedSlug,
+            CanonicalUrl: normalizedCanonicalUrl,
+            Title: normalizedTitle,
+            Summary: normalizedSummary,
+            CoverImageUrl: normalizedCoverImageUrl,
             TagIds: tagIds.ToArray(),
             Version: version,
             CreatedAtUtc: createdAtUtc,
@@ -96,6 +111,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         long actorUserId,
         long revisionId,
         string? changeSummary,
+        string? slug,
+        string? canonicalUrl,
+        string? title,
+        string? summary,
+        string? coverImageUrl,
         IReadOnlyCollection<long> tagIds,
         long version,
         DateTime updatedAtUtc,
@@ -112,6 +132,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         ValidatePositiveId(revisionId, nameof(revisionId));
 
         string normalizedArticlePublicId = articlePublicId.Trim();
+        string? normalizedSlug = NormalizeOptional(slug);
+        string? normalizedCanonicalUrl = NormalizeOptional(canonicalUrl);
+        string? normalizedTitle = NormalizeOptional(title);
+        string? normalizedSummary = NormalizeOptional(summary);
+        string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
             normalizedArticlePublicId,
@@ -126,6 +151,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             ActorUserId: actorUserId,
             RevisionId: revisionId,
             ChangeSummary: NormalizeOptional(changeSummary),
+            Slug: normalizedSlug,
+            CanonicalUrl: normalizedCanonicalUrl,
+            Title: normalizedTitle,
+            Summary: normalizedSummary,
+            CoverImageUrl: normalizedCoverImageUrl,
             TagIds: tagIds.ToArray(),
             Version: version,
             UpdatedAtUtc: updatedAtUtc,
@@ -152,6 +182,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string articlePublicId,
         string fromStatus,
         string toStatus,
+        string? slug,
+        string? canonicalUrl,
+        string? title,
+        string? summary,
+        string? coverImageUrl,
         long actorUserId,
         long version,
         DateTime publishedAtUtc,
@@ -170,6 +205,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             publishedAtUtc);
 
         string normalizedArticlePublicId = articlePublicId.Trim();
+        string? normalizedSlug = NormalizeOptional(slug);
+        string? normalizedCanonicalUrl = NormalizeOptional(canonicalUrl);
+        string? normalizedTitle = NormalizeOptional(title);
+        string? normalizedSummary = NormalizeOptional(summary);
+        string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
             normalizedArticlePublicId,
@@ -181,6 +221,11 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             ArticlePublicId: normalizedArticlePublicId,
             FromStatus: fromStatus.Trim(),
             ToStatus: toStatus.Trim(),
+            Slug: normalizedSlug,
+            CanonicalUrl: normalizedCanonicalUrl,
+            Title: normalizedTitle,
+            Summary: normalizedSummary,
+            CoverImageUrl: normalizedCoverImageUrl,
             ActorUserId: actorUserId,
             Version: version,
             PublishedAtUtc: publishedAtUtc,
