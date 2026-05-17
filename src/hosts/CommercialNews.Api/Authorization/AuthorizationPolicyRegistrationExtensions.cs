@@ -199,24 +199,14 @@ public static class AuthorizationPolicyRegistrationExtensions
                     new PermissionRequirement(PermissionKeys.Content.Tags.Restore)));
 
             options.AddPolicy(
-                AuthorizationPolicies.SeoMetadataCreate,
-                policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.Metadata.Create)));
-
-            options.AddPolicy(
                 AuthorizationPolicies.SeoMetadataRead,
                 policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.Metadata.Read)));
+                    new PermissionRequirement(PermissionKeys.Seo.ArticleSettings.Read)));
 
             options.AddPolicy(
                 AuthorizationPolicies.SeoMetadataUpdate,
                 policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.Metadata.Update)));
-
-            options.AddPolicy(
-                AuthorizationPolicies.SeoSlugRoutesCreate,
-                policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Create)));
+                    new PermissionRequirement(PermissionKeys.Seo.ArticleSettings.Upsert)));
 
             options.AddPolicy(
                 AuthorizationPolicies.SeoSlugRoutesRead,
@@ -224,24 +214,9 @@ public static class AuthorizationPolicyRegistrationExtensions
                     new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Read)));
 
             options.AddPolicy(
-                AuthorizationPolicies.SeoSlugRoutesUpdate,
-                policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Update)));
-
-            options.AddPolicy(
-                AuthorizationPolicies.SeoSlugRoutesActivate,
-                policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Activate)));
-
-            options.AddPolicy(
-                AuthorizationPolicies.SeoSlugRoutesDeactivate,
-                policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Deactivate)));
-
-            options.AddPolicy(
                 AuthorizationPolicies.SeoSlugRoutesGenerate,
                 policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Seo.SlugRoutes.Generate)));
+                    new PermissionRequirement(PermissionKeys.Seo.SlugGeneration.Generate)));
 
             options.AddPolicy(
                 AuthorizationPolicies.AuditLogsRead,
