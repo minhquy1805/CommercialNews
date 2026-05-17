@@ -1,3 +1,5 @@
+using Seo.Domain.Constants;
+
 namespace Seo.Application.Contracts.EventApply;
 
 public sealed class SeoApplyOperationResult
@@ -17,16 +19,21 @@ public sealed class SeoApplyOperationResult
     public DateTime? LastSyncedAtUtc { get; init; }
 
     public bool WasApplied =>
-        string.Equals(ApplyResult, "Applied", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(ApplyResult, "Inserted", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(ApplyResult, "Updated", StringComparison.OrdinalIgnoreCase);
+        IsApplyResult(SeoApplyResults.Applied);
 
-    public bool WasDeduped =>
-        string.Equals(ApplyResult, "Deduped", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(ApplyResult, "DuplicateIgnored", StringComparison.OrdinalIgnoreCase);
+    public bool WasDeduped => false;
 
     public bool WasStaleIgnored =>
-        string.Equals(ApplyResult, "StaleIgnored", StringComparison.OrdinalIgnoreCase);
+        IsApplyResult(SeoApplyResults.StaleIgnored);
+
+    public bool WasNoRouteToActivate =>
+        IsApplyResult(SeoApplyResults.NoRouteToActivate);
+
+    public bool WasNoRouteToDeactivate =>
+        IsApplyResult(SeoApplyResults.NoRouteToDeactivate);
+
+    public bool WasNotApplied =>
+        IsApplyResult(SeoApplyResults.NotApplied);
 
     public static SeoApplyOperationResult From(
         string operation,
@@ -42,5 +49,13 @@ public sealed class SeoApplyOperationResult
             LastAppliedMessageId = result.LastAppliedMessageId,
             LastSyncedAtUtc = result.LastSyncedAtUtc
         };
+    }
+
+    private bool IsApplyResult(string expected)
+    {
+        return string.Equals(
+            ApplyResult,
+            expected,
+            StringComparison.OrdinalIgnoreCase);
     }
 }
