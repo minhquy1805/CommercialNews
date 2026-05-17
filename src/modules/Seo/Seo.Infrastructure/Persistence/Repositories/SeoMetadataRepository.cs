@@ -547,25 +547,61 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
 
     private static string? GetNullableString(SqlDataReader reader, string columnName)
     {
-        int ordinal = reader.GetOrdinal(columnName);
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
 
     private static long? GetNullableInt64(SqlDataReader reader, string columnName)
     {
-        int ordinal = reader.GetOrdinal(columnName);
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
     }
 
     private static bool? GetNullableBoolean(SqlDataReader reader, string columnName)
     {
-        int ordinal = reader.GetOrdinal(columnName);
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetBoolean(ordinal);
     }
 
     private static DateTime? GetNullableDateTime(SqlDataReader reader, string columnName)
     {
-        int ordinal = reader.GetOrdinal(columnName);
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
         return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+    }
+
+    private static int TryGetOrdinal(SqlDataReader reader, string columnName)
+    {
+        for (int index = 0; index < reader.FieldCount; index++)
+        {
+            if (string.Equals(
+                reader.GetName(index),
+                columnName,
+                StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 }

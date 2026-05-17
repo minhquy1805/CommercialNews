@@ -400,9 +400,7 @@ public sealed class SlugRegistry
     {
         if (string.IsNullOrWhiteSpace(lastAppliedMessageId))
         {
-            throw new SeoDomainException(
-                "SEO.INVALID_LAST_APPLIED_MESSAGE_ID",
-                "Last applied message id is required.");
+            return;
         }
 
         if (lastAppliedMessageId.Trim().Length != 26)

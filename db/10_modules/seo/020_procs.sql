@@ -950,6 +950,9 @@ BEGIN
         [sm].[TwitterImageUrl],
         [sm].[Robots],
         [sm].[IsManualOverride],
+        COALESCE([sm].[SourceAggregateVersion], [sr].[SourceAggregateVersion]) AS [SourceAggregateVersion],
+        COALESCE([sm].[LastAppliedMessageId], [sr].[LastAppliedMessageId]) AS [LastAppliedMessageId],
+        COALESCE([sm].[LastSyncedAtUtc], [sr].[LastSyncedAtUtc]) AS [LastSyncedAtUtc],
         CASE
             WHEN [sm].[Version] IS NULL AND [sr].[Version] IS NULL THEN 0
             WHEN [sm].[Version] IS NULL THEN [sr].[Version]
@@ -990,9 +993,54 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    EXEC [seo].[Seo_SelectMetadataByResource]
-        @Scope = @Scope,
-        @ResourceType = 'Article',
-        @ResourcePublicId = @ArticlePublicId;
+    SELECT TOP (1)
+        COALESCE([sm].[Scope], [sr].[Scope]) AS [Scope],
+        COALESCE([sm].[ResourceType], [sr].[ResourceType], 'Article') AS [ResourceType],
+        COALESCE([sm].[ResourcePublicId], [sr].[ResourcePublicId], @ArticlePublicId) AS [ResourcePublicId],
+        COALESCE([sm].[Slug], [sr].[Slug]) AS [Slug],
+        COALESCE([sm].[CanonicalUrl], [sr].[CanonicalUrl]) AS [CanonicalUrl],
+
+        [sm].[MetaTitle],
+        [sm].[MetaDescription],
+        [sm].[OgTitle],
+        [sm].[OgDescription],
+        [sm].[OgImageUrl],
+        [sm].[TwitterTitle],
+        [sm].[TwitterDescription],
+        [sm].[TwitterImageUrl],
+        [sm].[Robots],
+        [sm].[IsManualOverride],
+
+        [sr].[IsIndexable],
+        [sr].[IsActive],
+
+        COALESCE([sm].[SourceAggregateVersion], [sr].[SourceAggregateVersion]) AS [SourceAggregateVersion],
+        COALESCE([sm].[LastAppliedMessageId], [sr].[LastAppliedMessageId]) AS [LastAppliedMessageId],
+        COALESCE([sm].[LastSyncedAtUtc], [sr].[LastSyncedAtUtc]) AS [LastSyncedAtUtc],
+
+        CASE
+            WHEN [sm].[Version] IS NULL AND [sr].[Version] IS NULL THEN 0
+            WHEN [sm].[Version] IS NULL THEN [sr].[Version]
+            WHEN [sr].[Version] IS NULL THEN [sm].[Version]
+            WHEN [sm].[Version] >= [sr].[Version] THEN [sm].[Version]
+            ELSE [sr].[Version]
+        END AS [Version]
+    FROM
+    (
+        SELECT
+            @Scope AS [Scope],
+            'Article' AS [ResourceType],
+            @ArticlePublicId AS [ResourcePublicId]
+    ) AS [r]
+    LEFT JOIN [seo].[SeoMetadata] AS [sm]
+        ON [sm].[Scope] = [r].[Scope]
+       AND [sm].[ResourceType] = [r].[ResourceType]
+       AND [sm].[ResourcePublicId] = [r].[ResourcePublicId]
+    LEFT JOIN [seo].[SlugRegistry] AS [sr]
+        ON [sr].[Scope] = [r].[Scope]
+       AND [sr].[ResourceType] = [r].[ResourceType]
+       AND [sr].[ResourcePublicId] = [r].[ResourcePublicId]
+    WHERE [sm].[SeoId] IS NOT NULL
+       OR [sr].[SlugId] IS NOT NULL;
 END
 GO
