@@ -12,9 +12,9 @@ using Media.Application.Ports.Services;
 using Media.Domain.Entities;
 using Media.Domain.Exceptions;
 
-namespace Media.Application.UseCases.MediaAssets.SoftDeleteMedia;
+namespace Media.Application.UseCases.MediaAssets.UpdateMediaAsset;
 
-public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
+public sealed class UpdateMediaAssetUseCase : IUpdateMediaAssetUseCase
 {
     private readonly IMediaAssetRepository _mediaAssetRepository;
     private readonly IMediaUnitOfWork _unitOfWork;
@@ -22,7 +22,7 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
 
-    public SoftDeleteMediaUseCase(
+    public UpdateMediaAssetUseCase(
         IMediaAssetRepository mediaAssetRepository,
         IMediaUnitOfWork unitOfWork,
         IMediaOutboxWriter mediaOutboxWriter,
@@ -45,8 +45,8 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
             ?? throw new ArgumentNullException(nameof(requestContext));
     }
 
-    public async Task<Result<SoftDeleteMediaResponse>> ExecuteAsync(
-        SoftDeleteMediaRequest request,
+    public async Task<Result<UpdateMediaAssetResponse>> ExecuteAsync(
+        UpdateMediaAssetRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -55,7 +55,7 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
         {
             if (request.MediaId <= 0)
             {
-                return Result<SoftDeleteMediaResponse>.Failure(
+                return Result<UpdateMediaAssetResponse>.Failure(
                     MediaErrors.MediaAsset.InvalidMediaId);
             }
 
@@ -64,15 +64,8 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
 
             if (actorUserId is null or <= 0)
             {
-                return Result<SoftDeleteMediaResponse>.Failure(
+                return Result<UpdateMediaAssetResponse>.Failure(
                     MediaErrors.Actor.NotFound);
-            }
-
-            if (request.RestoreUntil.HasValue &&
-                request.RestoreUntil.Value < nowUtc)
-            {
-                return Result<SoftDeleteMediaResponse>.Failure(
-                    MediaErrors.MediaAsset.RestoreUntilInvalid);
             }
 
             MediaAsset? mediaAsset = await _mediaAssetRepository.GetByIdAsync(
@@ -81,62 +74,71 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
 
             if (mediaAsset is null)
             {
-                return Result<SoftDeleteMediaResponse>.Failure(
+                return Result<UpdateMediaAssetResponse>.Failure(
                     MediaErrors.MediaAsset.NotFound);
             }
+
+            if (mediaAsset.IsDeleted)
+            {
+                return Result<UpdateMediaAssetResponse>.Failure(
+                    MediaErrors.MediaAsset.Deleted);
+            }
+
+            // Domain validation for safe metadata update.
+            mediaAsset.UpdateSafeMetadata(
+                altText: request.AltText,
+                metadataJson: request.MetadataJson,
+                nowUtc: nowUtc,
+                actorUserId: actorUserId);
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                MediaAssetMutationResult deleteResult =
-                    await _mediaAssetRepository.SoftDeleteAsync(
-                        new SoftDeleteMediaAssetCommand(
+                MediaAssetMutationResult updateResult =
+                    await _mediaAssetRepository.UpdateMetadataAsync(
+                        new UpdateMediaMetadataCommand(
                             MediaId: request.MediaId,
-                            DeletedBy: actorUserId,
-                            RestoreUntil: request.RestoreUntil),
+                            AltText: mediaAsset.AltText,
+                            MetadataJson: mediaAsset.MetadataJson,
+                            UpdatedBy: actorUserId),
                         cancellationToken);
 
-                if (!deleteResult.Succeeded)
+                if (!updateResult.Succeeded)
                 {
                     await _unitOfWork.RollbackAsync(cancellationToken);
 
-                    return Result<SoftDeleteMediaResponse>.Failure(
-                        MapMutationResultCode(deleteResult.ResultCode));
+                    return Result<UpdateMediaAssetResponse>.Failure(
+                        MapMutationResultCode(updateResult.ResultCode));
                 }
 
-                int newVersion = deleteResult.NewVersion
-                    ?? mediaAsset.Version;
+                int newVersion = updateResult.NewVersion
+                    ?? throw new InvalidOperationException(
+                        "Media_MediaAsset_UpdateMetadata did not return NewVersion.");
 
-                if (deleteResult.AffectedRows > 0)
-                {
-                    await _mediaOutboxWriter.EnqueueMediaAssetSoftDeletedAsync(
-                        unitOfWork: _unitOfWork,
-                        mediaId: mediaAsset.MediaId,
-                        mediaPublicId: mediaAsset.PublicId,
-                        isDeleted: true,
-                        restoreUntil: request.RestoreUntil,
-                        primaryClearedCount: deleteResult.PrimaryClearedCount,
-                        actorUserId: actorUserId.Value,
-                        version: newVersion,
-                        deletedAtUtc: nowUtc,
-                        correlationId: _requestContext.CorrelationId,
-                        cancellationToken: cancellationToken);
-                }
+                await _mediaOutboxWriter.EnqueueMediaAssetUpdatedAsync(
+                    unitOfWork: _unitOfWork,
+                    mediaId: mediaAsset.MediaId,
+                    mediaPublicId: mediaAsset.PublicId,
+                    altText: mediaAsset.AltText,
+                    metadataJson: mediaAsset.MetadataJson,
+                    actorUserId: actorUserId.Value,
+                    version: newVersion,
+                    updatedAtUtc: nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                return Result<SoftDeleteMediaResponse>.Success(
-                    new SoftDeleteMediaResponse
+                return Result<UpdateMediaAssetResponse>.Success(
+                    new UpdateMediaAssetResponse
                     {
                         MediaId = mediaAsset.MediaId,
                         PublicId = mediaAsset.PublicId,
-                        IsDeleted = true,
-                        DeletedAt = nowUtc,
-                        DeletedBy = actorUserId,
-                        RestoreUntil = request.RestoreUntil,
-                        AffectedRows = deleteResult.AffectedRows,
-                        PrimaryClearedCount = deleteResult.PrimaryClearedCount,
+                        AltText = mediaAsset.AltText,
+                        MetadataJson = mediaAsset.MetadataJson,
+                        UpdatedAt = nowUtc,
+                        UpdatedBy = actorUserId,
                         Version = newVersion
                     });
             }
@@ -148,12 +150,12 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
         }
         catch (PersistenceException exception)
         {
-            return Result<SoftDeleteMediaResponse>.Failure(
+            return Result<UpdateMediaAssetResponse>.Failure(
                 MapPersistenceException(exception));
         }
         catch (MediaDomainException exception)
         {
-            return Result<SoftDeleteMediaResponse>.Failure(
+            return Result<UpdateMediaAssetResponse>.Failure(
                 MapDomainException(exception));
         }
     }
@@ -163,7 +165,8 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
         return resultCode switch
         {
             1 => MediaErrors.MediaAsset.NotFound,
-            2 => MediaErrors.MediaAsset.AlreadyDeleted,
+            2 => MediaErrors.MediaAsset.Deleted,
+            3 => MediaErrors.VersionConflict,
             _ => MediaErrors.PersistenceError
         };
     }
@@ -172,14 +175,11 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
     {
         return exception.Code switch
         {
-            "MEDIA.MEDIA_ASSET_INVALID_MEDIA_ID" =>
-                MediaErrors.MediaAsset.InvalidMediaId,
+            "MEDIA.MEDIA_DELETED" =>
+                MediaErrors.MediaAsset.Deleted,
 
-            "MEDIA.MEDIA_ASSET_RESTORE_UNTIL_INVALID" =>
-                MediaErrors.MediaAsset.RestoreUntilInvalid,
-
-            "MEDIA.MEDIA_ASSET_ALREADY_DELETED" =>
-                MediaErrors.MediaAsset.AlreadyDeleted,
+            "MEDIA.MEDIA_ASSET_ALT_TEXT_TOO_LONG" =>
+                MediaErrors.MediaAsset.AltTextTooLong,
 
             _ => MediaErrors.ValidationFailed
         };
@@ -191,6 +191,9 @@ public sealed class SoftDeleteMediaUseCase : ISoftDeleteMediaUseCase
         {
             "MEDIA.MEDIA_NOT_FOUND" =>
                 MediaErrors.MediaAsset.NotFound,
+
+            "MEDIA.MEDIA_DELETED" =>
+                MediaErrors.MediaAsset.Deleted,
 
             "MEDIA.ACTOR_NOT_FOUND" =>
                 MediaErrors.Actor.NotFound,
