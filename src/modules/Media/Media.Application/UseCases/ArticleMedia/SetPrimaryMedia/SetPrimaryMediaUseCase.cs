@@ -1,104 +1,133 @@
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Media.Application.Contracts.ArticleMedia.Requests;
 using Media.Application.Contracts.ArticleMedia.Responses;
 using Media.Application.Errors;
+using Media.Application.Models.Commands;
+using Media.Application.Models.Results;
 using Media.Application.Ports.Persistence;
+using Media.Application.Ports.Services;
 using Media.Domain.Exceptions;
 
 namespace Media.Application.UseCases.ArticleMedia.SetPrimaryMedia;
 
 public sealed class SetPrimaryMediaUseCase : ISetPrimaryMediaUseCase
 {
-    private readonly IMediaAssetRepository _mediaAssetRepository;
     private readonly IArticleMediaRepository _articleMediaRepository;
     private readonly IMediaUnitOfWork _unitOfWork;
+    private readonly IMediaOutboxWriter _mediaOutboxWriter;
+    private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
 
     public SetPrimaryMediaUseCase(
-        IMediaAssetRepository mediaAssetRepository,
         IArticleMediaRepository articleMediaRepository,
         IMediaUnitOfWork unitOfWork,
+        IMediaOutboxWriter mediaOutboxWriter,
+        IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext)
     {
-        _mediaAssetRepository = mediaAssetRepository;
-        _articleMediaRepository = articleMediaRepository;
-        _unitOfWork = unitOfWork;
-        _requestContext = requestContext;
+        _articleMediaRepository = articleMediaRepository
+            ?? throw new ArgumentNullException(nameof(articleMediaRepository));
+
+        _unitOfWork = unitOfWork
+            ?? throw new ArgumentNullException(nameof(unitOfWork));
+
+        _mediaOutboxWriter = mediaOutboxWriter
+            ?? throw new ArgumentNullException(nameof(mediaOutboxWriter));
+
+        _dateTimeProvider = dateTimeProvider
+            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+
+        _requestContext = requestContext
+            ?? throw new ArgumentNullException(nameof(requestContext));
     }
 
     public async Task<Result<SetPrimaryMediaResponse>> ExecuteAsync(
         SetPrimaryMediaRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         try
         {
             if (request.ArticleId <= 0)
             {
-                return Result<SetPrimaryMediaResponse>.Failure(MediaErrors.ArticleMedia.InvalidArticleId);
+                return Result<SetPrimaryMediaResponse>.Failure(
+                    MediaErrors.ArticleMedia.InvalidArticleId);
             }
 
             if (request.MediaId <= 0)
             {
-                return Result<SetPrimaryMediaResponse>.Failure(MediaErrors.ArticleMedia.InvalidMediaId);
+                return Result<SetPrimaryMediaResponse>.Failure(
+                    MediaErrors.ArticleMedia.InvalidMediaId);
             }
 
-            long? actorUserId = request.ActorUserId ?? _requestContext.CurrentUserId;
-
-            var mediaAsset = await _mediaAssetRepository.GetByIdAsync(
-                request.MediaId,
-                cancellationToken);
-
-            if (mediaAsset is null)
+            if (request.ExpectedVersion is null)
             {
-                return Result<SetPrimaryMediaResponse>.Failure(MediaErrors.MediaAsset.NotFound);
+                return Result<SetPrimaryMediaResponse>.Failure(
+                    MediaErrors.ExpectedVersionRequired);
             }
 
-            if (mediaAsset.IsDeleted)
-            {
-                return Result<SetPrimaryMediaResponse>.Failure(MediaErrors.MediaAsset.AlreadyDeleted);
-            }
+            DateTime nowUtc = _dateTimeProvider.UtcNow;
+            long? actorUserId = _requestContext.CurrentUserId;
 
-            var existingPrimary = await _articleMediaRepository.GetPrimaryByArticleIdAsync(
-                request.ArticleId,
-                cancellationToken);
-
-            if (existingPrimary is not null && existingPrimary.MediaId == request.MediaId)
+            if (actorUserId is null or <= 0)
             {
-                return Result<SetPrimaryMediaResponse>.Success(new SetPrimaryMediaResponse
-                {
-                    ArticleId = request.ArticleId,
-                    MediaId = request.MediaId,
-                    PrimarySet = true,
-                    AffectedRows = 0
-                });
+                return Result<SetPrimaryMediaResponse>.Failure(
+                    MediaErrors.Actor.NotFound);
             }
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                int affectedRows = await _articleMediaRepository.SetPrimaryAsync(
-                    request.ArticleId,
-                    request.MediaId,
-                    actorUserId,
-                    cancellationToken);
+                ArticleMediaMutationResult setPrimaryResult =
+                    await _articleMediaRepository.SetPrimaryAsync(
+                        new SetPrimaryArticleMediaCommand(
+                            ArticleId: request.ArticleId,
+                            MediaId: request.MediaId,
+                            ExpectedVersion: request.ExpectedVersion,
+                            UpdatedBy: actorUserId),
+                        cancellationToken);
+
+                if (!setPrimaryResult.Succeeded)
+                {
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+
+                    return Result<SetPrimaryMediaResponse>.Failure(
+                        MapMutationResultCode(setPrimaryResult.ResultCode));
+                }
+
+                int attachmentSetVersion = setPrimaryResult.NewVersion
+                    ?? throw new InvalidOperationException(
+                        "Media_ArticleMedia_SetPrimary did not return NewVersion.");
+
+                if (setPrimaryResult.AffectedRows > 0)
+                {
+                    await _mediaOutboxWriter.EnqueueArticlePrimaryMediaSetAsync(
+                        unitOfWork: _unitOfWork,
+                        articleId: request.ArticleId,
+                        mediaId: request.MediaId,
+                        actorUserId: actorUserId.Value,
+                        attachmentSetVersion: attachmentSetVersion,
+                        primarySetAtUtc: nowUtc,
+                        correlationId: _requestContext.CorrelationId,
+                        cancellationToken: cancellationToken);
+                }
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                if (affectedRows <= 0)
-                {
-                    return Result<SetPrimaryMediaResponse>.Failure(MediaErrors.ArticleMedia.NotFound);
-                }
-
-                return Result<SetPrimaryMediaResponse>.Success(new SetPrimaryMediaResponse
-                {
-                    ArticleId = request.ArticleId,
-                    MediaId = request.MediaId,
-                    PrimarySet = affectedRows > 0,
-                    AffectedRows = affectedRows
-                });
+                return Result<SetPrimaryMediaResponse>.Success(
+                    new SetPrimaryMediaResponse
+                    {
+                        ArticleId = request.ArticleId,
+                        MediaId = request.MediaId,
+                        PrimarySet = setPrimaryResult.AffectedRows > 0,
+                        AffectedRows = setPrimaryResult.AffectedRows,
+                        AttachmentSetVersion = attachmentSetVersion
+                    });
             }
             catch
             {
@@ -108,22 +137,47 @@ public sealed class SetPrimaryMediaUseCase : ISetPrimaryMediaUseCase
         }
         catch (PersistenceException exception)
         {
-            return Result<SetPrimaryMediaResponse>.Failure(MapPersistenceException(exception));
+            return Result<SetPrimaryMediaResponse>.Failure(
+                MapPersistenceException(exception));
         }
         catch (MediaDomainException exception)
         {
-            return Result<SetPrimaryMediaResponse>.Failure(MapDomainException(exception));
+            return Result<SetPrimaryMediaResponse>.Failure(
+                MapDomainException(exception));
         }
+    }
+
+    private static Error MapMutationResultCode(int resultCode)
+    {
+        return resultCode switch
+        {
+            1 => MediaErrors.ArticleMedia.NotFound,
+            2 => MediaErrors.MediaAsset.Deleted,
+            3 => MediaErrors.VersionConflict,
+            6 => MediaErrors.ExpectedVersionRequired,
+            _ => MediaErrors.PersistenceError
+        };
     }
 
     private static Error MapDomainException(MediaDomainException exception)
     {
         return exception.Code switch
         {
-            "MEDIA.ARTICLE_MEDIA_INVALID_ARTICLE_ID" => MediaErrors.ArticleMedia.InvalidArticleId,
-            "MEDIA.ARTICLE_MEDIA_INVALID_MEDIA_ID" => MediaErrors.ArticleMedia.InvalidMediaId,
-            "MEDIA.PRIMARY_CONSTRAINT_VIOLATION" => MediaErrors.ArticleMedia.PrimaryConstraintViolation,
-            "MEDIA.MEDIA_ASSET_ALREADY_DELETED" => MediaErrors.MediaAsset.AlreadyDeleted,
+            "MEDIA.ARTICLE_MEDIA_INVALID_ARTICLE_ID" =>
+                MediaErrors.ArticleMedia.InvalidArticleId,
+
+            "MEDIA.ARTICLE_MEDIA_INVALID_MEDIA_ID" =>
+                MediaErrors.ArticleMedia.InvalidMediaId,
+
+            "MEDIA.EXPECTED_VERSION_REQUIRED" =>
+                MediaErrors.ExpectedVersionRequired,
+
+            "MEDIA.VERSION_CONFLICT" =>
+                MediaErrors.VersionConflict,
+
+            "MEDIA.PRIMARY_CONSTRAINT_VIOLATION" =>
+                MediaErrors.ArticleMedia.PrimaryConstraintViolation,
+
             _ => MediaErrors.ValidationFailed
         };
     }
@@ -132,9 +186,37 @@ public sealed class SetPrimaryMediaUseCase : ISetPrimaryMediaUseCase
     {
         return exception.Code switch
         {
-            "MEDIA.PRIMARY_CONSTRAINT_VIOLATION" => MediaErrors.ArticleMedia.PrimaryConstraintViolation,
-            "MEDIA.ATTACHMENT_NOT_FOUND" => MediaErrors.ArticleMedia.NotFound,
-            _ => MediaErrors.ValidationFailed
+            "MEDIA.ARTICLE_NOT_FOUND" =>
+                MediaErrors.Article.NotFound,
+
+            "MEDIA.MEDIA_NOT_FOUND" =>
+                MediaErrors.MediaAsset.NotFound,
+
+            "MEDIA.MEDIA_DELETED" =>
+                MediaErrors.MediaAsset.Deleted,
+
+            "MEDIA.ATTACHMENT_NOT_FOUND" =>
+                MediaErrors.ArticleMedia.NotFound,
+
+            "MEDIA.PRIMARY_CONSTRAINT_VIOLATION" =>
+                MediaErrors.ArticleMedia.PrimaryConstraintViolation,
+
+            "MEDIA.ACTOR_NOT_FOUND" =>
+                MediaErrors.Actor.NotFound,
+
+            "MEDIA.CONSTRAINT_VIOLATION" =>
+                MediaErrors.ConstraintViolation,
+
+            "MEDIA.CONCURRENT_MODIFICATION" =>
+                MediaErrors.ConcurrentModification,
+
+            "MEDIA.DEPENDENCY_UNAVAILABLE" =>
+                MediaErrors.DependencyUnavailable,
+
+            "MEDIA.PERSISTENCE_ERROR" =>
+                MediaErrors.PersistenceError,
+
+            _ => MediaErrors.PersistenceError
         };
     }
 }

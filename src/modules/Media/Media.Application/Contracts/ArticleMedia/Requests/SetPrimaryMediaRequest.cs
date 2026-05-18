@@ -6,5 +6,5 @@ public sealed class SetPrimaryMediaRequest
 
     public long MediaId { get; init; }
 
-    public long? ActorUserId { get; init; }
+    public int? ExpectedVersion { get; init; }
 }
