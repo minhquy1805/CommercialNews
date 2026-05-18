@@ -30,6 +30,20 @@ public static class DefaultRolePermissions
                 PermissionKeys.Content.Tags.Delete,
                 PermissionKeys.Content.Tags.Restore,
 
+                PermissionKeys.Media.Assets.Create,
+                PermissionKeys.Media.Assets.Read,
+                PermissionKeys.Media.Assets.Update,
+                PermissionKeys.Media.Assets.Delete,
+                PermissionKeys.Media.Assets.Restore,
+                PermissionKeys.Media.Assets.ReadUsage,
+
+                PermissionKeys.Media.ArticleMedia.Read,
+                PermissionKeys.Media.ArticleMedia.ReadState,
+                PermissionKeys.Media.ArticleMedia.Attach,
+                PermissionKeys.Media.ArticleMedia.Detach,
+                PermissionKeys.Media.ArticleMedia.SetPrimary,
+                PermissionKeys.Media.ArticleMedia.Reorder,
+
                 PermissionKeys.Seo.ArticleSettings.Read,
                 PermissionKeys.Seo.ArticleSettings.Upsert,
 
@@ -88,6 +102,16 @@ public static class DefaultRolePermissions
                 PermissionKeys.Content.Categories.Read,
                 PermissionKeys.Content.Tags.Read,
 
+                PermissionKeys.Media.Assets.Read,
+                PermissionKeys.Media.Assets.ReadUsage,
+
+                PermissionKeys.Media.ArticleMedia.Read,
+                PermissionKeys.Media.ArticleMedia.ReadState,
+                PermissionKeys.Media.ArticleMedia.Attach,
+                PermissionKeys.Media.ArticleMedia.Detach,
+                PermissionKeys.Media.ArticleMedia.SetPrimary,
+                PermissionKeys.Media.ArticleMedia.Reorder,
+
                 PermissionKeys.Seo.ArticleSettings.Read,
                 PermissionKeys.Seo.SlugRoutes.Read
             },
@@ -103,6 +127,16 @@ public static class DefaultRolePermissions
 
                 PermissionKeys.Content.Categories.Read,
                 PermissionKeys.Content.Tags.Read,
+
+                PermissionKeys.Media.Assets.Read,
+                PermissionKeys.Media.Assets.ReadUsage,
+
+                PermissionKeys.Media.ArticleMedia.Read,
+                PermissionKeys.Media.ArticleMedia.ReadState,
+                PermissionKeys.Media.ArticleMedia.Attach,
+                PermissionKeys.Media.ArticleMedia.Detach,
+                PermissionKeys.Media.ArticleMedia.SetPrimary,
+                PermissionKeys.Media.ArticleMedia.Reorder,
 
                 PermissionKeys.Seo.ArticleSettings.Read,
                 PermissionKeys.Seo.SlugRoutes.Read,

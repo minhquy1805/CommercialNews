@@ -1,6 +1,6 @@
 namespace CommercialNews.Api.Api.Admin.Contracts.Media.MediaAssets.Responses;
 
-public sealed class GetMediaAssetByIdHttpResponse
+public sealed class GetMediaAssetsItemHttpResponse
 {
     public long MediaId { get; init; }
 
@@ -30,6 +30,8 @@ public sealed class GetMediaAssetByIdHttpResponse
 
     public string? MetadataJson { get; init; }
 
+    public int Version { get; init; }
+
     public DateTime CreatedAt { get; init; }
 
     public long? CreatedBy { get; init; }
@@ -49,6 +51,4 @@ public sealed class GetMediaAssetByIdHttpResponse
     public DateTime? RestoredAt { get; init; }
 
     public long? RestoredBy { get; init; }
-
-    public int Version { get; init; }
 }
