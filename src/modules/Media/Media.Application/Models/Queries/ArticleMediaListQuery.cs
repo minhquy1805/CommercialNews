@@ -1,4 +1,4 @@
-namespace Media.Application.Models.QueryModels;
+namespace Media.Application.Models.Queries;
 
 public sealed class ArticleMediaListQuery
 {
@@ -11,4 +11,7 @@ public sealed class ArticleMediaListQuery
 
     public string SortBy { get; init; } = "SortOrder";
     public string SortDirection { get; init; } = "ASC";
+
+    public int Skip => Page <= 1 ? 0 : (Page - 1) * PageSize;
+    public int Take => PageSize <= 0 ? 20 : PageSize;
 }

@@ -1,4 +1,4 @@
-namespace Media.Application.Models.QueryModels;
+namespace Media.Application.Models.Queries;
 
 public sealed class MediaAssetListQuery
 {
@@ -10,4 +10,7 @@ public sealed class MediaAssetListQuery
 
     public string SortBy { get; init; } = "CreatedAt";
     public string SortDirection { get; init; } = "DESC";
+
+    public int Skip => Page <= 1 ? 0 : (Page - 1) * PageSize;
+    public int Take => PageSize <= 0 ? 20 : PageSize;
 }
