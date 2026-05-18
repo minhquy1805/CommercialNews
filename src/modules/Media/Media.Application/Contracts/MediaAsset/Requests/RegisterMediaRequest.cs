@@ -2,8 +2,6 @@ namespace Media.Application.Contracts.MediaAsset.Requests;
 
 public sealed class RegisterMediaRequest
 {
-    public string PublicId { get; init; } = string.Empty;
-
     public string StorageProvider { get; init; } = string.Empty;
     public string Url { get; init; } = string.Empty;
     public string? StoragePath { get; init; }
@@ -20,6 +18,4 @@ public sealed class RegisterMediaRequest
     public string? AltText { get; init; }
     public string? MetadataJson { get; init; }
     public byte[]? ContentHash { get; init; }
-
-    public long? ActorUserId { get; init; }
 }

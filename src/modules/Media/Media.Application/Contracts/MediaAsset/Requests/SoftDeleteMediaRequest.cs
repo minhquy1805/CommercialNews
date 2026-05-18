@@ -5,6 +5,4 @@ public sealed class SoftDeleteMediaRequest
     public long MediaId { get; init; }
 
     public DateTime? RestoreUntil { get; init; }
-
-    public long? ActorUserId { get; init; }
 }
