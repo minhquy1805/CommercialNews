@@ -32,14 +32,35 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 /*==============================================================*/
-/* TABLE: [media].[MediaAsset]                                  */
+/* DROP EXISTING TABLES - CHILDREN FIRST                         */
 /*==============================================================*/
+IF OBJECT_ID(N'[media].[MediaVariant]', N'U') IS NOT NULL
+BEGIN
+    DROP TABLE [media].[MediaVariant];
+END
+GO
+
+IF OBJECT_ID(N'[media].[ArticleMedia]', N'U') IS NOT NULL
+BEGIN
+    DROP TABLE [media].[ArticleMedia];
+END
+GO
+
+IF OBJECT_ID(N'[media].[ArticleMediaSet]', N'U') IS NOT NULL
+BEGIN
+    DROP TABLE [media].[ArticleMediaSet];
+END
+GO
+
 IF OBJECT_ID(N'[media].[MediaAsset]', N'U') IS NOT NULL
 BEGIN
     DROP TABLE [media].[MediaAsset];
 END
 GO
 
+/*==============================================================*/
+/* TABLE: [media].[MediaAsset]                                  */
+/*==============================================================*/
 CREATE TABLE [media].[MediaAsset]
 (
     [MediaId]            BIGINT IDENTITY(1,1) NOT NULL,
@@ -80,6 +101,8 @@ CREATE TABLE [media].[MediaAsset]
     [DeletedAt]          DATETIME2(3) NULL,
     [DeletedBy]          BIGINT NULL,
     [RestoreUntil]       DATETIME2(3) NULL,
+    [RestoredAt]         DATETIME2(3) NULL,
+    [RestoredBy]         BIGINT NULL,
 
     CONSTRAINT [PK_MediaAsset] PRIMARY KEY CLUSTERED ([MediaId] ASC),
 
@@ -126,6 +149,14 @@ CREATE TABLE [media].[MediaAsset]
             [IsDeleted] = 0
             OR [RestoreUntil] IS NULL
             OR [RestoreUntil] >= [DeletedAt]
+        ),
+
+    CONSTRAINT [CK_MediaAsset_RestoreColumns_Consistency]
+        CHECK
+        (
+            ([RestoredAt] IS NULL AND [RestoredBy] IS NULL)
+            OR
+            ([RestoredAt] IS NOT NULL)
         )
 );
 GO
@@ -144,18 +175,62 @@ BEGIN
     ALTER TABLE [media].[MediaAsset]
     ADD CONSTRAINT [FK_MediaAsset_DeletedBy_UserAccount]
         FOREIGN KEY ([DeletedBy]) REFERENCES [identity].[UserAccount]([UserId]);
+
+    ALTER TABLE [media].[MediaAsset]
+    ADD CONSTRAINT [FK_MediaAsset_RestoredBy_UserAccount]
+        FOREIGN KEY ([RestoredBy]) REFERENCES [identity].[UserAccount]([UserId]);
+END
+GO
+
+/*==============================================================*/
+/* TABLE: [media].[ArticleMediaSet]                             */
+/*==============================================================*/
+CREATE TABLE [media].[ArticleMediaSet]
+(
+    [ArticleId]          BIGINT NOT NULL,
+
+    [Version]            INT NOT NULL
+        CONSTRAINT [DF_ArticleMediaSet_Version] DEFAULT (0),
+
+    [CreatedAt]          DATETIME2(3) NOT NULL
+        CONSTRAINT [DF_ArticleMediaSet_CreatedAt] DEFAULT (SYSUTCDATETIME()),
+    [CreatedBy]          BIGINT NULL,
+
+    [UpdatedAt]          DATETIME2(3) NOT NULL
+        CONSTRAINT [DF_ArticleMediaSet_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
+    [UpdatedBy]          BIGINT NULL,
+
+    CONSTRAINT [PK_ArticleMediaSet] PRIMARY KEY CLUSTERED ([ArticleId] ASC),
+
+    CONSTRAINT [CK_ArticleMediaSet_Version_NonNegative]
+        CHECK ([Version] >= 0)
+);
+GO
+
+/* Optional cross-module FKs for ArticleMediaSet */
+IF OBJECT_ID(N'[content].[Article]', N'U') IS NOT NULL
+BEGIN
+    ALTER TABLE [media].[ArticleMediaSet]
+    ADD CONSTRAINT [FK_ArticleMediaSet_Article]
+        FOREIGN KEY ([ArticleId]) REFERENCES [content].[Article]([ArticleId]);
+END
+GO
+
+IF OBJECT_ID(N'[identity].[UserAccount]', N'U') IS NOT NULL
+BEGIN
+    ALTER TABLE [media].[ArticleMediaSet]
+    ADD CONSTRAINT [FK_ArticleMediaSet_CreatedBy_UserAccount]
+        FOREIGN KEY ([CreatedBy]) REFERENCES [identity].[UserAccount]([UserId]);
+
+    ALTER TABLE [media].[ArticleMediaSet]
+    ADD CONSTRAINT [FK_ArticleMediaSet_UpdatedBy_UserAccount]
+        FOREIGN KEY ([UpdatedBy]) REFERENCES [identity].[UserAccount]([UserId]);
 END
 GO
 
 /*==============================================================*/
 /* TABLE: [media].[ArticleMedia]                                */
 /*==============================================================*/
-IF OBJECT_ID(N'[media].[ArticleMedia]', N'U') IS NOT NULL
-BEGIN
-    DROP TABLE [media].[ArticleMedia];
-END
-GO
-
 CREATE TABLE [media].[ArticleMedia]
 (
     [ArticleMediaId]     BIGINT IDENTITY(1,1) NOT NULL,
@@ -208,18 +283,12 @@ CREATE TABLE [media].[ArticleMedia]
             ([IsDeleted] = 1 AND [DeletedAt] IS NOT NULL)
         ),
 
+    CONSTRAINT [FK_ArticleMedia_ArticleMediaSet]
+        FOREIGN KEY ([ArticleId]) REFERENCES [media].[ArticleMediaSet]([ArticleId]),
+
     CONSTRAINT [FK_ArticleMedia_MediaAsset]
         FOREIGN KEY ([MediaId]) REFERENCES [media].[MediaAsset]([MediaId])
 );
-GO
-
-/* Optional cross-module FKs */
-IF OBJECT_ID(N'[content].[Article]', N'U') IS NOT NULL
-BEGIN
-    ALTER TABLE [media].[ArticleMedia]
-    ADD CONSTRAINT [FK_ArticleMedia_Article]
-        FOREIGN KEY ([ArticleId]) REFERENCES [content].[Article]([ArticleId]);
-END
 GO
 
 IF OBJECT_ID(N'[identity].[UserAccount]', N'U') IS NOT NULL
@@ -241,12 +310,6 @@ GO
 /*==============================================================*/
 /* TABLE: [media].[MediaVariant]  -- V2 HOOK                    */
 /*==============================================================*/
-IF OBJECT_ID(N'[media].[MediaVariant]', N'U') IS NOT NULL
-BEGIN
-    DROP TABLE [media].[MediaVariant];
-END
-GO
-
 CREATE TABLE [media].[MediaVariant]
 (
     [VariantId]          BIGINT IDENTITY(1,1) NOT NULL,
