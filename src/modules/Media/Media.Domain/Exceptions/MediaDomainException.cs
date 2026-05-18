@@ -9,4 +9,10 @@ public sealed class MediaDomainException : Exception
     {
         Code = code;
     }
+
+    public MediaDomainException(string code, string message, Exception innerException)
+        : base(message, innerException)
+    {
+        Code = code;
+    }
 }
