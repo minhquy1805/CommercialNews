@@ -2,11 +2,11 @@ using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Media.Application.Contracts.ArticleMedia.Requests;
 using Media.Application.Contracts.ArticleMedia.Responses;
 
-namespace Media.Application.UseCases.ArticleMedia.RestoreArticleMedia;
+namespace Media.Application.UseCases.ArticleMedia.GetArticleMediaSet;
 
-public interface IRestoreArticleMediaUseCase
+public interface IGetArticleMediaSetUseCase
 {
-    Task<Result<RestoreArticleMediaResponse>> ExecuteAsync(
-        RestoreArticleMediaRequest request,
+    Task<Result<GetArticleMediaSetResponse>> ExecuteAsync(
+        GetArticleMediaSetRequest request,
         CancellationToken cancellationToken = default);
 }

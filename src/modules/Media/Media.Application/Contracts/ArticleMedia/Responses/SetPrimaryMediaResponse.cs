@@ -9,4 +9,6 @@ public sealed class SetPrimaryMediaResponse
     public bool PrimarySet { get; init; }
 
     public int AffectedRows { get; init; }
+
+    public int AttachmentSetVersion { get; init; }
 }

@@ -1,8 +1,8 @@
 namespace Media.Application.Contracts.ArticleMedia.Requests;
 
-public sealed class DetachMediaFromArticleRequest
+public sealed class GetMediaUsageRequest
 {
-    public long ArticleId { get; init; }
-
     public long MediaId { get; init; }
+
+    public bool IncludeDeleted { get; init; }
 }
