@@ -1,4 +1,4 @@
-using Media.Domain.Enums;
+using Media.Domain.Constants;
 using Media.Domain.Exceptions;
 
 namespace Media.Domain.Entities;
@@ -25,18 +25,21 @@ public sealed class MediaAsset
     public string? MetadataJson { get; private set; }
     public byte[]? ContentHash { get; private set; }
 
-    public DateTime CreatedAt { get; private set; }
-    public DateTime UpdatedAt { get; private set; }
+    public int Version { get; private set; }
 
-    public long? CreatedByUserId { get; private set; }
-    public long? UpdatedByUserId { get; private set; }
+    public DateTime CreatedAt { get; private set; }
+    public long? CreatedBy { get; private set; }
+
+    public DateTime UpdatedAt { get; private set; }
+    public long? UpdatedBy { get; private set; }
 
     public bool IsDeleted { get; private set; }
     public DateTime? DeletedAt { get; private set; }
-    public long? DeletedByUserId { get; private set; }
+    public long? DeletedBy { get; private set; }
     public DateTime? RestoreUntil { get; private set; }
 
-    public int Version { get; private set; }
+    public DateTime? RestoredAt { get; private set; }
+    public long? RestoredBy { get; private set; }
 
     private MediaAsset()
     {
@@ -64,13 +67,14 @@ public sealed class MediaAsset
         ValidateStorageProvider(storageProvider);
         ValidateUrl(url);
         ValidateMediaType(mediaType);
+        ValidateStoragePath(storagePath);
+        ValidateFileName(fileName);
+        ValidateMimeType(mimeType);
         ValidateFileSizeBytes(fileSizeBytes);
         ValidateDimension(width, nameof(width));
         ValidateDimension(height, nameof(height));
         ValidateDurationSeconds(durationSeconds);
         ValidateAltText(altText);
-        ValidateFileName(fileName);
-        ValidateMimeType(mimeType);
 
         return new MediaAsset
         {
@@ -88,12 +92,20 @@ public sealed class MediaAsset
             AltText = NormalizeOptional(altText),
             MetadataJson = NormalizeOptional(metadataJson),
             ContentHash = contentHash,
+
+            Version = 1,
+
             CreatedAt = nowUtc,
+            CreatedBy = actorUserId,
             UpdatedAt = nowUtc,
-            CreatedByUserId = actorUserId,
-            UpdatedByUserId = actorUserId,
+            UpdatedBy = actorUserId,
+
             IsDeleted = false,
-            Version = 1
+            DeletedAt = null,
+            DeletedBy = null,
+            RestoreUntil = null,
+            RestoredAt = null,
+            RestoredBy = null
         };
     }
 
@@ -113,15 +125,17 @@ public sealed class MediaAsset
         string? altText,
         string? metadataJson,
         byte[]? contentHash,
+        int version,
         DateTime createdAt,
+        long? createdBy,
         DateTime updatedAt,
-        long? createdByUserId,
-        long? updatedByUserId,
+        long? updatedBy,
         bool isDeleted,
         DateTime? deletedAt,
-        long? deletedByUserId,
+        long? deletedBy,
         DateTime? restoreUntil,
-        int version)
+        DateTime? restoredAt,
+        long? restoredBy)
     {
         if (mediaId <= 0)
         {
@@ -130,37 +144,30 @@ public sealed class MediaAsset
                 "Media asset id must be greater than zero.");
         }
 
-        if (version <= 0)
-        {
-            throw new MediaDomainException(
-                "MEDIA.MEDIA_ASSET_INVALID_VERSION",
-                "Media asset version must be greater than zero.");
-        }
-
         ValidatePublicId(publicId);
         ValidateStorageProvider(storageProvider);
         ValidateUrl(url);
         ValidateMediaType(mediaType);
+        ValidateStoragePath(storagePath);
+        ValidateFileName(fileName);
+        ValidateMimeType(mimeType);
         ValidateFileSizeBytes(fileSizeBytes);
         ValidateDimension(width, nameof(width));
         ValidateDimension(height, nameof(height));
         ValidateDurationSeconds(durationSeconds);
         ValidateAltText(altText);
-        ValidateFileName(fileName);
-        ValidateMimeType(mimeType);
+        ValidateVersion(version);
+        ValidateDeleteState(isDeleted, deletedAt, deletedBy);
+        ValidateRestoreState(restoredAt, restoredBy);
 
-        if (isDeleted && deletedAt is null)
+        if (isDeleted &&
+            restoreUntil.HasValue &&
+            deletedAt.HasValue &&
+            restoreUntil.Value < deletedAt.Value)
         {
             throw new MediaDomainException(
-                "MEDIA.MEDIA_ASSET_DELETED_AT_REQUIRED",
-                "Deleted media asset must have DeletedAt.");
-        }
-
-        if (!isDeleted && deletedAt is not null)
-        {
-            throw new MediaDomainException(
-                "MEDIA.MEDIA_ASSET_DELETED_AT_INVALID",
-                "Active media asset must not have DeletedAt.");
+                "MEDIA.MEDIA_ASSET_RESTORE_UNTIL_INVALID",
+                "RestoreUntil must be greater than or equal to DeletedAt.");
         }
 
         return new MediaAsset
@@ -180,73 +187,56 @@ public sealed class MediaAsset
             AltText = NormalizeOptional(altText),
             MetadataJson = NormalizeOptional(metadataJson),
             ContentHash = contentHash,
+
+            Version = version,
+
             CreatedAt = createdAt,
+            CreatedBy = createdBy,
             UpdatedAt = updatedAt,
-            CreatedByUserId = createdByUserId,
-            UpdatedByUserId = updatedByUserId,
+            UpdatedBy = updatedBy,
+
             IsDeleted = isDeleted,
             DeletedAt = deletedAt,
-            DeletedByUserId = deletedByUserId,
+            DeletedBy = deletedBy,
             RestoreUntil = restoreUntil,
-            Version = version
+            RestoredAt = restoredAt,
+            RestoredBy = restoredBy
         };
     }
 
-    public void UpdateMetadata(
-        string storageProvider,
-        string url,
-        string? storagePath,
-        string? fileName,
-        string mediaType,
-        string? mimeType,
-        long? fileSizeBytes,
-        int? width,
-        int? height,
-        int? durationSeconds,
+    public void UpdateSafeMetadata(
         string? altText,
         string? metadataJson,
-        byte[]? contentHash,
         DateTime nowUtc,
         long? actorUserId)
     {
         EnsureNotDeleted();
 
-        ValidateStorageProvider(storageProvider);
-        ValidateUrl(url);
-        ValidateMediaType(mediaType);
-        ValidateFileSizeBytes(fileSizeBytes);
-        ValidateDimension(width, nameof(width));
-        ValidateDimension(height, nameof(height));
-        ValidateDurationSeconds(durationSeconds);
         ValidateAltText(altText);
-        ValidateFileName(fileName);
-        ValidateMimeType(mimeType);
 
-        StorageProvider = storageProvider.Trim();
-        Url = url.Trim();
-        StoragePath = NormalizeOptional(storagePath);
-        FileName = NormalizeOptional(fileName);
-        MediaType = mediaType.Trim();
-        MimeType = NormalizeOptional(mimeType);
-        FileSizeBytes = fileSizeBytes;
-        Width = width;
-        Height = height;
-        DurationSeconds = durationSeconds;
-        AltText = NormalizeOptional(altText);
-        MetadataJson = NormalizeOptional(metadataJson);
-        ContentHash = contentHash;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        var normalizedAltText = NormalizeOptional(altText);
+        var normalizedMetadataJson = NormalizeOptional(metadataJson);
+
+        if (AltText == normalizedAltText &&
+            MetadataJson == normalizedMetadataJson)
+        {
+            return;
+        }
+
+        AltText = normalizedAltText;
+        MetadataJson = normalizedMetadataJson;
+
+        Touch(nowUtc, actorUserId);
     }
 
-    public void SoftDelete(DateTime nowUtc, long? actorUserId, DateTime? restoreUntil)
+    public void SoftDelete(
+        DateTime nowUtc,
+        long? actorUserId,
+        DateTime? restoreUntil)
     {
         if (IsDeleted)
         {
-            throw new MediaDomainException(
-                "MEDIA.MEDIA_ASSET_ALREADY_DELETED",
-                "Media asset is already deleted.");
+            return;
         }
 
         if (restoreUntil.HasValue && restoreUntil.Value < nowUtc)
@@ -258,20 +248,22 @@ public sealed class MediaAsset
 
         IsDeleted = true;
         DeletedAt = nowUtc;
-        DeletedByUserId = actorUserId;
+        DeletedBy = actorUserId;
         RestoreUntil = restoreUntil;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+
+        RestoredAt = null;
+        RestoredBy = null;
+
+        Touch(nowUtc, actorUserId);
     }
 
-    public void Restore(DateTime nowUtc, long? actorUserId)
+    public void Restore(
+        DateTime nowUtc,
+        long? actorUserId)
     {
         if (!IsDeleted)
         {
-            throw new MediaDomainException(
-                "MEDIA.MEDIA_ASSET_NOT_DELETED",
-                "Media asset is not deleted.");
+            return;
         }
 
         if (RestoreUntil.HasValue && RestoreUntil.Value < nowUtc)
@@ -283,10 +275,21 @@ public sealed class MediaAsset
 
         IsDeleted = false;
         DeletedAt = null;
-        DeletedByUserId = null;
+        DeletedBy = null;
         RestoreUntil = null;
+
+        RestoredAt = nowUtc;
+        RestoredBy = actorUserId;
+
+        Touch(nowUtc, actorUserId);
+    }
+
+    private void Touch(
+        DateTime nowUtc,
+        long? actorUserId)
+    {
         UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
+        UpdatedBy = actorUserId;
         Version++;
     }
 
@@ -295,8 +298,8 @@ public sealed class MediaAsset
         if (IsDeleted)
         {
             throw new MediaDomainException(
-                "MEDIA.MEDIA_ASSET_ALREADY_DELETED",
-                "Media asset is already deleted.");
+                "MEDIA.MEDIA_DELETED",
+                "Deleted media asset cannot be changed.");
         }
     }
 
@@ -348,6 +351,16 @@ public sealed class MediaAsset
             throw new MediaDomainException(
                 "MEDIA.MEDIA_ASSET_URL_TOO_LONG",
                 "Media asset URL must not exceed 800 characters.");
+        }
+    }
+
+    private static void ValidateStoragePath(string? storagePath)
+    {
+        if (!string.IsNullOrWhiteSpace(storagePath) && storagePath.Trim().Length > 800)
+        {
+            throw new MediaDomainException(
+                "MEDIA.MEDIA_ASSET_STORAGE_PATH_TOO_LONG",
+                "Storage path must not exceed 800 characters.");
         }
     }
 
@@ -421,13 +434,59 @@ public sealed class MediaAsset
         }
     }
 
-    private static string? NormalizeOptional(string? value)
+    private static void ValidateVersion(int version)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        if (version <= 0)
         {
-            return null;
+            throw new MediaDomainException(
+                "MEDIA.MEDIA_ASSET_INVALID_VERSION",
+                "Media asset version must be greater than zero.");
+        }
+    }
+
+    private static void ValidateDeleteState(
+        bool isDeleted,
+        DateTime? deletedAt,
+        long? deletedBy)
+    {
+        if (isDeleted && deletedAt is null)
+        {
+            throw new MediaDomainException(
+                "MEDIA.MEDIA_ASSET_DELETED_AT_REQUIRED",
+                "Deleted media asset must have DeletedAt.");
         }
 
-        return value.Trim();
+        if (!isDeleted && deletedAt is not null)
+        {
+            throw new MediaDomainException(
+                "MEDIA.MEDIA_ASSET_DELETED_AT_INVALID",
+                "Active media asset must not have DeletedAt.");
+        }
+
+        if (!isDeleted && deletedBy is not null)
+        {
+            throw new MediaDomainException(
+                "MEDIA.MEDIA_ASSET_DELETED_BY_INVALID",
+                "Active media asset must not have DeletedBy.");
+        }
+    }
+
+    private static void ValidateRestoreState(
+        DateTime? restoredAt,
+        long? restoredBy)
+    {
+        if (restoredAt is null && restoredBy is not null)
+        {
+            throw new MediaDomainException(
+                "MEDIA.MEDIA_ASSET_RESTORED_AT_REQUIRED",
+                "Restored media asset must have RestoredAt when RestoredBy exists.");
+        }
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }

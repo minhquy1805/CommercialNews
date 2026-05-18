@@ -1,4 +1,4 @@
-namespace Media.Domain.Enums;
+namespace Media.Domain.Constants;
 
 public static class MediaTypes
 {
@@ -15,11 +15,6 @@ public static class MediaTypes
 
     public static bool IsValid(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        return All.Contains(value);
+        return !string.IsNullOrWhiteSpace(value) && All.Contains(value);
     }
 }
