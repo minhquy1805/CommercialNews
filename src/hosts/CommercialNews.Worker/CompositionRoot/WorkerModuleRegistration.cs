@@ -30,6 +30,7 @@ using CommercialNews.Worker.Seo.Consumers;
 using Seo.Application.DependencyInjection;
 using Seo.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Outbox.Handlers.Media;
+using CommercialNews.Worker.Audit.Handlers.Media;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -174,6 +175,16 @@ public static class WorkerModuleRegistration
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleUnpublishedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleArchivedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleSoftDeletedAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetRegisteredAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetUpdatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetSoftDeletedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetRestoredAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaAttachedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaDetachedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaReorderedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ArticlePrimaryMediaSetAuditHandler>();
 
         services.AddScoped<SeoIntegrationEventDispatcher>();
 
