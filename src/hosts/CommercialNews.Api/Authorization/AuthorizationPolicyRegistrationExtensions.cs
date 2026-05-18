@@ -199,6 +199,66 @@ public static class AuthorizationPolicyRegistrationExtensions
                     new PermissionRequirement(PermissionKeys.Content.Tags.Restore)));
 
             options.AddPolicy(
+                AuthorizationPolicies.MediaAssetsCreate,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.Assets.Create)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaAssetsRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.Assets.Read)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaAssetsUpdate,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.Assets.Update)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaAssetsDelete,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.Assets.Delete)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaAssetsRestore,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.Assets.Restore)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaAssetsReadUsage,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.Assets.ReadUsage)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaArticleMediaRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.ArticleMedia.Read)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaArticleMediaReadState,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.ArticleMedia.ReadState)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaArticleMediaAttach,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.ArticleMedia.Attach)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaArticleMediaDetach,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.ArticleMedia.Detach)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaArticleMediaSetPrimary,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.ArticleMedia.SetPrimary)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.MediaArticleMediaReorder,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Media.ArticleMedia.Reorder)));
+
+            options.AddPolicy(
                 AuthorizationPolicies.SeoMetadataRead,
                 policy => policy.Requirements.Add(
                     new PermissionRequirement(PermissionKeys.Seo.ArticleSettings.Read)));

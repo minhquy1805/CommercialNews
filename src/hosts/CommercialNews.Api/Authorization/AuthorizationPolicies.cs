@@ -46,6 +46,20 @@ public static class AuthorizationPolicies
     public const string ContentTagsDelete = "Content.Tags.Delete";
     public const string ContentTagsRestore = "Content.Tags.Restore";
 
+    public const string MediaAssetsCreate = "Permission:media:assets:create";
+    public const string MediaAssetsRead = "Permission:media:assets:read";
+    public const string MediaAssetsUpdate = "Permission:media:assets:update";
+    public const string MediaAssetsDelete = "Permission:media:assets:delete";
+    public const string MediaAssetsRestore = "Permission:media:assets:restore";
+    public const string MediaAssetsReadUsage = "Permission:media:assets:read-usage";
+
+    public const string MediaArticleMediaRead = "Permission:media:article-media:read";
+    public const string MediaArticleMediaReadState = "Permission:media:article-media:read-state";
+    public const string MediaArticleMediaAttach = "Permission:media:article-media:attach";
+    public const string MediaArticleMediaDetach = "Permission:media:article-media:detach";
+    public const string MediaArticleMediaSetPrimary = "Permission:media:article-media:set-primary";
+    public const string MediaArticleMediaReorder = "Permission:media:article-media:reorder";
+
     public const string SeoMetadataRead = "Permission:seo:metadata:read";
     public const string SeoMetadataUpdate = "Permission:seo:metadata:update";
     public const string SeoArticleSettingsRead = SeoMetadataRead;
