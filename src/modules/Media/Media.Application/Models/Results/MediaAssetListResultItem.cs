@@ -1,4 +1,4 @@
-namespace Media.Application.Models.QueryModels;
+namespace Media.Application.Models.Results;
 
 public sealed class MediaAssetListResultItem
 {
@@ -19,10 +19,21 @@ public sealed class MediaAssetListResultItem
     public int? DurationSeconds { get; init; }
 
     public string? AltText { get; init; }
+    public string? MetadataJson { get; init; }
+
+    public int Version { get; init; }
 
     public DateTime CreatedAt { get; init; }
+    public long? CreatedBy { get; init; }
+
     public DateTime UpdatedAt { get; init; }
+    public long? UpdatedBy { get; init; }
 
     public bool IsDeleted { get; init; }
-    public int Version { get; init; }
+    public DateTime? DeletedAt { get; init; }
+    public long? DeletedBy { get; init; }
+    public DateTime? RestoreUntil { get; init; }
+
+    public DateTime? RestoredAt { get; init; }
+    public long? RestoredBy { get; init; }
 }

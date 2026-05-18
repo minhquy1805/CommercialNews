@@ -1,40 +1,31 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
-using Media.Application.Models.QueryModels;
+using Media.Application.Models.Commands;
+using Media.Application.Models.Queries;
+using Media.Application.Models.Results;
 using Media.Domain.Entities;
 
 namespace Media.Application.Ports.Persistence;
 
 public interface IArticleMediaRepository
 {
-    Task<(long? ArticleMediaId, int AffectedRows)> AttachAsync(
-        long articleId,
-        long mediaId,
-        bool isPrimary,
-        long? createdByUserId,
+    Task<ArticleMediaAttachResult> AttachAsync(
+        AttachArticleMediaCommand command,
         CancellationToken cancellationToken = default);
 
-    Task<int> DetachAsync(
-        long articleId,
-        long mediaId,
-        long? deletedByUserId,
+    Task<ArticleMediaDetachResult> DetachAsync(
+        DetachArticleMediaCommand command,
         CancellationToken cancellationToken = default);
 
-    Task<int> RestoreAsync(
-        long articleId,
-        long mediaId,
-        long? restoredByUserId,
+    Task<ArticleMediaMutationResult> RestoreAsync(
+        RestoreArticleMediaCommand command,
         CancellationToken cancellationToken = default);
 
-    Task<int> SetPrimaryAsync(
-        long articleId,
-        long mediaId,
-        long? updatedByUserId,
+    Task<ArticleMediaMutationResult> SetPrimaryAsync(
+        SetPrimaryArticleMediaCommand command,
         CancellationToken cancellationToken = default);
 
-    Task<int> ReorderByIdsAsync(
-        long articleId,
-        IReadOnlyList<(long MediaId, int SortOrder)> orders,
-        long? updatedByUserId,
+    Task<ArticleMediaMutationResult> ReorderByIdsAsync(
+        ReorderArticleMediaCommand command,
         CancellationToken cancellationToken = default);
 
     Task<ArticleMedia?> GetByIdAsync(
@@ -49,7 +40,7 @@ public interface IArticleMediaRepository
         ArticleMediaListQuery query,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<ArticleMediaListResultItem>> SelectByMediaIdAsync(
+    Task<IReadOnlyList<ArticleMediaUsageResultItem>> SelectByMediaIdAsync(
         long mediaId,
         bool includeDeleted = false,
         CancellationToken cancellationToken = default);

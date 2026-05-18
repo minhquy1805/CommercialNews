@@ -19,6 +19,7 @@ namespace Media.Infrastructure.DependencyInjection
 
             services.AddScoped<IMediaAssetRepository, MediaAssetRepository>();
             services.AddScoped<IArticleMediaRepository, ArticleMediaRepository>();
+            services.AddScoped<IArticleMediaSetRepository, ArticleMediaSetRepository>();
 
             return services;
         }

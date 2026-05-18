@@ -1,12 +1,13 @@
-namespace Media.Application.Models.QueryModels;
+namespace Media.Application.Models.Results;
 
 public sealed class ArticleMediaListResultItem
 {
     public long ArticleMediaId { get; init; }
 
     public long ArticleId { get; init; }
-    public long MediaId { get; init; }
+    public int AttachmentSetVersion { get; init; }
 
+    public long MediaId { get; init; }
     public string PublicId { get; init; } = string.Empty;
 
     public string StorageProvider { get; init; } = string.Empty;
@@ -23,6 +24,8 @@ public sealed class ArticleMediaListResultItem
     public int? DurationSeconds { get; init; }
 
     public string? DefaultAltText { get; init; }
+    public bool MediaIsDeleted { get; init; }
+
     public string? AltTextOverride { get; init; }
     public string? Caption { get; init; }
 
@@ -30,8 +33,14 @@ public sealed class ArticleMediaListResultItem
     public bool IsPrimary { get; init; }
 
     public DateTime CreatedAt { get; init; }
+    public long? CreatedBy { get; init; }
+
     public DateTime UpdatedAt { get; init; }
+    public long? UpdatedBy { get; init; }
+
+    public int Version { get; init; }
 
     public bool IsDeleted { get; init; }
-    public int Version { get; init; }
+    public DateTime? DeletedAt { get; init; }
+    public long? DeletedBy { get; init; }
 }
