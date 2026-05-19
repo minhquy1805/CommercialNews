@@ -32,7 +32,17 @@ services:
       Authorization__DefaultAdmin__Enabled: "${API_AUTHORIZATION_DEFAULT_ADMIN_ENABLED}"
       Authorization__DefaultAdmin__Email: "${API_AUTHORIZATION_DEFAULT_ADMIN_EMAIL}"
 
+      FileStorage__Provider: "${FILE_STORAGE_PROVIDER}"
+      FileStorage__Local__RootPath: "${FILE_STORAGE_LOCAL_ROOT_PATH}"
+      FileStorage__Local__PublicBaseUrl: "${FILE_STORAGE_LOCAL_PUBLIC_BASE_URL}"
+      FileStorage__GoogleCloud__BucketName: "${FILE_STORAGE_GCS_BUCKET_NAME}"
+      FileStorage__GoogleCloud__PublicBaseUrl: "${FILE_STORAGE_GCS_PUBLIC_BASE_URL}"
+      FileStorage__GoogleCloud__CredentialsJsonPath: "${FILE_STORAGE_GCS_CREDENTIALS_JSON_PATH}"
+
       AllowedHosts: "${API_ALLOWED_HOSTS}"
+
+    volumes:
+      - cn_api_uploads:/app/wwwroot/uploads
     depends_on:
       - cn-mssql
     restart: unless-stopped
@@ -192,6 +202,14 @@ services:
       RabbitMq__AuditConsumer__RoutingKeys__23: "content.article_unpublished"
       RabbitMq__AuditConsumer__RoutingKeys__24: "content.article_archived"
       RabbitMq__AuditConsumer__RoutingKeys__25: "content.article_soft_deleted"
+      RabbitMq__AuditConsumer__RoutingKeys__26: "media.asset_registered"
+      RabbitMq__AuditConsumer__RoutingKeys__27: "media.asset_updated"
+      RabbitMq__AuditConsumer__RoutingKeys__28: "media.asset_soft_deleted"
+      RabbitMq__AuditConsumer__RoutingKeys__29: "media.asset_restored"
+      RabbitMq__AuditConsumer__RoutingKeys__30: "media.article_media_attached"
+      RabbitMq__AuditConsumer__RoutingKeys__31: "media.article_media_detached"
+      RabbitMq__AuditConsumer__RoutingKeys__32: "media.article_media_reordered"
+      RabbitMq__AuditConsumer__RoutingKeys__33: "media.article_primary_media_set"
 
       RabbitMq__SeoConsumer__HostName: "${RABBITMQ_HOST}"
       RabbitMq__SeoConsumer__Port: "${RABBITMQ_PORT}"
@@ -249,3 +267,4 @@ services:
 volumes:
   cn_mssql_data:
   cn_rabbitmq_data:
+  cn_api_uploads:
