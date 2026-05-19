@@ -19,7 +19,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace CommercialNews.Api.Api.Admin.Controllers.Media;
 
 [ApiController]
-[Route("api/v1/admin/media/articles/{articleId:long}/attachments")]
+[Route("api/v1/admin/media/articles/{articleId:long}")]
 public sealed class ArticleMediaAdminController : ControllerBase
 {
     private readonly IAttachMediaToArticleUseCase _attachMediaToArticleUseCase;
@@ -61,7 +61,7 @@ public sealed class ArticleMediaAdminController : ControllerBase
             ?? throw new ArgumentNullException(nameof(getArticleMediaSetUseCase));
     }
 
-    [HttpPost]
+    [HttpPost("attachments")]
     [Authorize(Policy = AuthorizationPolicies.MediaArticleMediaAttach)]
     [ProducesResponseType(typeof(AttachMediaToArticleHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -112,7 +112,7 @@ public sealed class ArticleMediaAdminController : ControllerBase
             Result<AttachMediaToArticleHttpResponse>.Success(response));
     }
 
-    [HttpDelete("{mediaId:long}")]
+    [HttpDelete("attachments/{mediaId:long}")]
     [Authorize(Policy = AuthorizationPolicies.MediaArticleMediaDetach)]
     [ProducesResponseType(typeof(DetachMediaFromArticleHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -157,7 +157,7 @@ public sealed class ArticleMediaAdminController : ControllerBase
             Result<DetachMediaFromArticleHttpResponse>.Success(response));
     }
 
-    [HttpPost(":set-primary")]
+    [HttpPost("attachments:set-primary")]
     [Authorize(Policy = AuthorizationPolicies.MediaArticleMediaSetPrimary)]
     [ProducesResponseType(typeof(SetPrimaryMediaHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -205,7 +205,7 @@ public sealed class ArticleMediaAdminController : ControllerBase
             Result<SetPrimaryMediaHttpResponse>.Success(response));
     }
 
-    [HttpPost(":reorder")]
+    [HttpPost("attachments:reorder")]
     [Authorize(Policy = AuthorizationPolicies.MediaArticleMediaReorder)]
     [ProducesResponseType(typeof(ReorderArticleMediaHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -258,7 +258,7 @@ public sealed class ArticleMediaAdminController : ControllerBase
             Result<ReorderArticleMediaHttpResponse>.Success(response));
     }
 
-    [HttpGet]
+    [HttpGet("attachments")]
     [Authorize(Policy = AuthorizationPolicies.MediaArticleMediaRead)]
     [ProducesResponseType(typeof(GetArticleMediaListHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -310,7 +310,7 @@ public sealed class ArticleMediaAdminController : ControllerBase
             Result<GetArticleMediaListHttpResponse>.Success(response));
     }
 
-    [HttpGet("primary")]
+    [HttpGet("attachments/primary")]
     [Authorize(Policy = AuthorizationPolicies.MediaArticleMediaRead)]
     [ProducesResponseType(typeof(GetArticlePrimaryMediaHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
@@ -376,7 +376,7 @@ public sealed class ArticleMediaAdminController : ControllerBase
             Result<GetArticlePrimaryMediaHttpResponse>.Success(response));
     }
 
-    [HttpGet("state")]
+    [HttpGet("attachments/state")]
     [Authorize(Policy = AuthorizationPolicies.MediaArticleMediaReadState)]
     [ProducesResponseType(typeof(GetArticleMediaSetHttpResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
