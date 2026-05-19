@@ -13,6 +13,8 @@ namespace CommercialNews.Api.CompositionRoot
             app.UseApiCorrelationId();
             app.UseApiRequestLogging();
 
+            app.UseStaticFiles();
+
             app.UseRouting();
 
             app.UseCors("FrontendCors");
