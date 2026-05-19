@@ -17,6 +17,7 @@ using Media.Application.UseCases.MediaAssets.RegisterMedia;
 using Media.Application.UseCases.MediaAssets.RestoreMedia;
 using Media.Application.UseCases.MediaAssets.SoftDeleteMedia;
 using Media.Application.UseCases.MediaAssets.UpdateMediaAsset;
+using Media.Application.UseCases.MediaAssets.UploadMedia;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -36,6 +37,7 @@ public sealed class MediaAssetsAdminController : ControllerBase
     private readonly ISoftDeleteMediaUseCase _softDeleteMediaUseCase;
     private readonly IRestoreMediaUseCase _restoreMediaUseCase;
     private readonly IGetMediaUsageUseCase _getMediaUsageUseCase;
+    private readonly IUploadMediaUseCase _uploadMediaUseCase;
 
     public MediaAssetsAdminController(
         IRegisterMediaUseCase registerMediaUseCase,
@@ -45,7 +47,8 @@ public sealed class MediaAssetsAdminController : ControllerBase
         IUpdateMediaAssetUseCase updateMediaAssetUseCase,
         ISoftDeleteMediaUseCase softDeleteMediaUseCase,
         IRestoreMediaUseCase restoreMediaUseCase,
-        IGetMediaUsageUseCase getMediaUsageUseCase)
+        IGetMediaUsageUseCase getMediaUsageUseCase,
+        IUploadMediaUseCase uploadMediaUseCase)
     {
         _registerMediaUseCase = registerMediaUseCase
             ?? throw new ArgumentNullException(nameof(registerMediaUseCase));
@@ -70,6 +73,9 @@ public sealed class MediaAssetsAdminController : ControllerBase
 
         _getMediaUsageUseCase = getMediaUsageUseCase
             ?? throw new ArgumentNullException(nameof(getMediaUsageUseCase));
+
+        _uploadMediaUseCase = uploadMediaUseCase
+            ?? throw new ArgumentNullException(nameof(uploadMediaUseCase));
     }
 
     [HttpPost]
@@ -466,6 +472,85 @@ public sealed class MediaAssetsAdminController : ControllerBase
 
         return this.ToActionResult(
             Result<GetMediaUsageHttpResponse>.Success(response));
+    }
+
+    [HttpPost("~/api/v1/admin/media/items:upload")]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsCreate)]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(UploadMediaAssetHttpResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UploadAsync(
+        [FromForm] UploadMediaAssetHttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.File is null)
+        {
+            return this.ToActionResult(
+                Result<UploadMediaAssetHttpResponse>.Failure(
+                    Error.Validation(
+                        code: "MEDIA.FILE_REQUIRED",
+                        message: "File is required.")));
+        }
+
+        await using Stream stream = request.File.OpenReadStream();
+
+        var useCaseRequest = new UploadMediaRequest
+        {
+            Content = stream,
+            OriginalFileName = request.File.FileName,
+            ContentType = request.File.ContentType,
+            Length = request.File.Length,
+            MediaType = request.MediaType,
+            AltText = request.AltText,
+            MetadataJson = request.MetadataJson,
+            Folder = request.Folder,
+            PreferredFileNameWithoutExtension = null
+        };
+
+        Result<UploadMediaResponse> result =
+            await _uploadMediaUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<UploadMediaAssetHttpResponse>.Failure(result.Error!));
+        }
+
+        UploadMediaResponse value = result.Value!;
+
+        var response = new UploadMediaAssetHttpResponse
+        {
+            MediaId = value.MediaId,
+            PublicId = value.PublicId,
+            StorageProvider = value.StorageProvider,
+            Url = value.Url,
+            StoragePath = value.StoragePath,
+            FileName = value.FileName,
+            OriginalFileName = value.OriginalFileName,
+            MediaType = value.MediaType,
+            MimeType = value.MimeType,
+            FileSizeBytes = value.FileSizeBytes,
+            Width = value.Width,
+            Height = value.Height,
+            DurationSeconds = value.DurationSeconds,
+            AltText = value.AltText,
+            MetadataJson = value.MetadataJson,
+            CreatedAt = value.CreatedAt,
+            CreatedBy = value.CreatedBy,
+            Version = value.Version
+        };
+
+        return CreatedAtRoute(
+            GetMediaAssetByIdRouteName,
+            new { mediaId = response.MediaId },
+            response);
     }
 
     private static GetMediaAssetByIdHttpResponse MapByIdResponse(

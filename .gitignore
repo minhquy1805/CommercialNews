@@ -136,3 +136,7 @@ db/00_bootstrap/020_create_logins_users.local.sql
 # Certbot / Let's Encrypt local certificates
 docker/certbot/conf/
 docker/certbot/www/
+
+# Local uploaded files
+src/hosts/CommercialNews.Api/wwwroot/uploads/*
+!src/hosts/CommercialNews.Api/wwwroot/uploads/.gitkeep
