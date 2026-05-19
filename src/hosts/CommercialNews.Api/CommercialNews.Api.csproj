@@ -41,6 +41,7 @@
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Infrastructure\Notifications.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\Audit\Audit.Application\Audit.Application.csproj" />
     <ProjectReference Include="..\..\modules\Audit\Audit.Infrastructure\Audit.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks.Infrastructure\CommercialNews.BuildingBlocks.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
