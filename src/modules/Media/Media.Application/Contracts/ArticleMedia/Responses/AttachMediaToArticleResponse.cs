@@ -9,6 +9,8 @@ public sealed class AttachMediaToArticleResponse
 
     public bool Attached { get; init; }
     public bool IsPrimary { get; init; }
+    public bool PrimaryChanged { get; init; }
 
     public int AffectedRows { get; init; }
+    public int AttachmentSetVersion { get; init; }
 }

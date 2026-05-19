@@ -6,6 +6,8 @@ Related:
 - `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
 - `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
 - `../../../../decisions/adr-0013-outbox-and-delivery-semantics-v1.md`
+- `../../../../decisions/adr-0018-transaction-boundaries-and-consistency-model-v1.md`
+- `../../../../decisions/adr-0020-timeout-retry-and-failure-detection-policy-v1.md`
 - `../../../../decisions/adr-0027-stream-processing-and-derived-state-policy-v1.md`
 - `../../../../decisions/adr-0028-consumer-idempotency-replay-and-rebuild-policy-v1.md`
 
@@ -14,7 +16,8 @@ Related:
 ## 1) Ownership boundaries
 
 Media owns:
-- `MediaItem` metadata
+- `MediaAsset` metadata
+- `ArticleMedia` attachment truth
 - attachment rules and ordering
 - primary-media truth
 - soft delete / restore truth
@@ -34,24 +37,49 @@ Storage/CDN/derivative availability is operationally important, but it is not th
 
 ## 2) Allowed dependencies
 
-- Content: `articleId` reference only; optional read-only validation (allowed by V1 policy)
-- SEO: optional usage for social preview image id/url via composition, not ownership transfer
-- Audit: async ingestion of governance events
-- bounded cleanup/reporting workflows may consume:
-  - Media truth
-  - Media-owned terminal artifacts
-  - bounded storage-reference checks where policy allows
+Media may depend on:
+
+- Content:
+  - `ArticleId` reference
+  - optional read-only article validation by approved application contract
+  - no Content truth mutation from Media
+- Outbox:
+  - required V1 causal bridge for Media integration events
+  - Media writes Outbox records in the same local transaction as Media truth changes
+- Audit:
+  - required V1 async consumer for Media governance events
+  - Audit owns audit evidence truth
+- Object/file storage:
+  - stores binary content
+  - Media stores stable URL/path/reference metadata only
+  - storage availability does not define attachment/order/primary truth
+- Reading:
+  - public composition owner
+  - reads/composes Media truth where needed
+  - must degrade gracefully when media delivery or derived state is missing
+- SEO:
+  - no required V1 dependency
+  - may consume selected Media events in later phases if `og:image` or preview image derives from primary media
+- Cleanup/reconciliation workflows:
+  - may consume Media truth and bounded storage-reference checks where policy allows
 
 ### 2.1 Allowed dependency shapes
 Approved interaction patterns are:
 - sync truth mutation inside Media boundary
+- Outbox write in the same local transaction as Media truth
 - async event emission after truth commit
 - async downstream cache/CDN/projection/derivative consumers
 - bounded cleanup/reconciliation/reporting over Media-owned truth and derived artifacts
 - read-only validation against Content where policy explicitly allows it
 
 ### 2.2 Dependency rule
-No synchronous dependency on CDN purge, derivative generation, cache invalidation, or audit completion is required for Media truth success.
+No synchronous dependency on Outbox publication, CDN purge, derivative generation, cache invalidation, scan completion, or Audit ingestion is required for Media truth success.
+
+Content validation, if used, must be read-only and must not widen the Media transaction boundary into Content truth.
+
+Media must not mutate Content Article state when attaching, detaching, reordering, or setting primary media.
+
+For commands that emit integration events, Media success requires Media truth commit and Outbox intent commit, not broker publication or consumer completion.
 
 ---
 
@@ -65,6 +93,10 @@ No synchronous dependency on CDN purge, derivative generation, cache invalidatio
 - Partial derived outputs must not be published as if they were authoritative active truth.
 - Media must not mutate Content, Reading, Notifications, or Audit truth because the data is physically reachable.
 - Derived repair output must not overwrite fresher Media truth.
+- Media must not synchronously wait for Audit ingestion before returning success.
+- Media must not synchronously wait for Outbox publication before returning success.
+- Media must not synchronously wait for CDN/cache/variant/scan workflows before returning success.
+- Media must not treat object storage timeout as proof that no object operation happened.
 
 ---
 
@@ -130,17 +162,53 @@ Other systems may own:
 ### 5.3 Ownership consequence
 A successful Media command means:
 - Media truth committed
-- outbox/event intent committed where applicable
+- Outbox event intent committed for governance/audit-producing commands
 
 It does **not** mean:
 - CDN is already updated
 - thumbnails/variants are already generated
+- Outbox message has already been published to RabbitMQ
+- Audit has consumed the event
 - audit evidence is already queryable
 - read-facing derived outputs are already caught up
+
+### 5.4 V1 async ownership
+
+V1 async scope:
+
+- Media emits integration events through Outbox.
+- Worker publishes Media Outbox events to RabbitMQ.
+- Audit consumes Media events for governance evidence.
+
+Media owns:
+
+- the cause event
+- event payload correctness
+- writing Outbox intent atomically with Media truth
+
+Outbox/Worker owns:
+
+- publication attempts
+- retry/backoff/dead-state publication handling
+
+Audit owns:
+
+- consumer-side idempotency
+- audit evidence storage
+- audit ingestion retry/DLQ behavior
+
+Rules:
+
+- Outbox `Published` means broker handoff succeeded.
+- It does not mean Audit has processed the event.
+- Audit lag does not redefine Media truth.
+- Consumer failure must not be reported as synchronous Media API failure after Media truth commit.
 
 ---
 
 ## 6) Batch / cleanup / reconciliation ownership rules
+
+Some cleanup/reconciliation workflows may be operational policies rather than fully implemented V1 APIs.
 
 Media batch-light workflows may:
 - clean orphan or expired media artifacts

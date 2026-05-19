@@ -29,6 +29,8 @@ using CommercialNews.Worker.Seo.Handlers.Content;
 using CommercialNews.Worker.Seo.Consumers;
 using Seo.Application.DependencyInjection;
 using Seo.Infrastructure.DependencyInjection;
+using CommercialNews.Worker.Outbox.Handlers.Media;
+using CommercialNews.Worker.Audit.Handlers.Media;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -104,6 +106,16 @@ public static class WorkerModuleRegistration
         services.AddScoped<IOutboxMessageHandler, ContentArticleArchivedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, ContentArticleSoftDeletedOutboxHandler>();
 
+        services.AddScoped<IOutboxMessageHandler, MediaAssetRegisteredOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, MediaAssetUpdatedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, MediaAssetSoftDeletedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, MediaAssetRestoredOutboxHandler>();
+
+        services.AddScoped<IOutboxMessageHandler, ArticleMediaAttachedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, ArticleMediaDetachedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, ArticleMediaReorderedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, ArticlePrimaryMediaSetOutboxHandler>();
+
         services.Configure<NotificationsRabbitMqConsumerOptions>(
             configuration.GetSection(NotificationsRabbitMqConsumerOptions.SectionName));
 
@@ -163,6 +175,16 @@ public static class WorkerModuleRegistration
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleUnpublishedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleArchivedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ContentArticleSoftDeletedAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetRegisteredAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetUpdatedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetSoftDeletedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetRestoredAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaAttachedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaDetachedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaReorderedAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, ArticlePrimaryMediaSetAuditHandler>();
 
         services.AddScoped<SeoIntegrationEventDispatcher>();
 

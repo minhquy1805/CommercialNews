@@ -15,17 +15,19 @@ public sealed class ArticleMedia
     public string? AltTextOverride { get; private set; }
     public string? Caption { get; private set; }
 
-    public DateTime CreatedAt { get; private set; }
-    public DateTime UpdatedAt { get; private set; }
+    // Row-level version.
+    // Attachment-set concurrency is handled by ArticleMediaSet.Version.
+    public int Version { get; private set; }
 
-    public long? CreatedByUserId { get; private set; }
-    public long? UpdatedByUserId { get; private set; }
+    public DateTime CreatedAt { get; private set; }
+    public long? CreatedBy { get; private set; }
+
+    public DateTime UpdatedAt { get; private set; }
+    public long? UpdatedBy { get; private set; }
 
     public bool IsDeleted { get; private set; }
     public DateTime? DeletedAt { get; private set; }
-    public long? DeletedByUserId { get; private set; }
-
-    public int Version { get; private set; }
+    public long? DeletedBy { get; private set; }
 
     private ArticleMedia()
     {
@@ -55,12 +57,16 @@ public sealed class ArticleMedia
             IsPrimary = isPrimary,
             AltTextOverride = NormalizeOptional(altTextOverride),
             Caption = NormalizeOptional(caption),
+            Version = 1,
+
             CreatedAt = nowUtc,
+            CreatedBy = actorUserId,
             UpdatedAt = nowUtc,
-            CreatedByUserId = actorUserId,
-            UpdatedByUserId = actorUserId,
+            UpdatedBy = actorUserId,
+
             IsDeleted = false,
-            Version = 1
+            DeletedAt = null,
+            DeletedBy = null
         };
     }
 
@@ -72,14 +78,14 @@ public sealed class ArticleMedia
         bool isPrimary,
         string? altTextOverride,
         string? caption,
+        int version,
         DateTime createdAt,
+        long? createdBy,
         DateTime updatedAt,
-        long? createdByUserId,
-        long? updatedByUserId,
+        long? updatedBy,
         bool isDeleted,
         DateTime? deletedAt,
-        long? deletedByUserId,
-        int version)
+        long? deletedBy)
     {
         if (articleMediaId <= 0)
         {
@@ -88,39 +94,13 @@ public sealed class ArticleMedia
                 "Article media id must be greater than zero.");
         }
 
-        if (version <= 0)
-        {
-            throw new MediaDomainException(
-                "MEDIA.ARTICLE_MEDIA_INVALID_VERSION",
-                "Article media version must be greater than zero.");
-        }
-
         ValidateArticleId(articleId);
         ValidateMediaId(mediaId);
         ValidateSortOrder(sortOrder);
         ValidateAltTextOverride(altTextOverride);
         ValidateCaption(caption);
-
-        if (isDeleted && deletedAt is null)
-        {
-            throw new MediaDomainException(
-                "MEDIA.ARTICLE_MEDIA_DELETED_AT_REQUIRED",
-                "Deleted article media must have DeletedAt.");
-        }
-
-        if (!isDeleted && deletedAt is not null)
-        {
-            throw new MediaDomainException(
-                "MEDIA.ARTICLE_MEDIA_DELETED_AT_INVALID",
-                "Active article media must not have DeletedAt.");
-        }
-
-        if (isDeleted && isPrimary)
-        {
-            throw new MediaDomainException(
-                "MEDIA.PRIMARY_CONSTRAINT_VIOLATION",
-                "Deleted article media cannot remain primary.");
-        }
+        ValidateVersion(version);
+        ValidateDeleteState(isDeleted, deletedAt, deletedBy, isPrimary);
 
         return new ArticleMedia
         {
@@ -131,14 +111,16 @@ public sealed class ArticleMedia
             IsPrimary = isPrimary,
             AltTextOverride = NormalizeOptional(altTextOverride),
             Caption = NormalizeOptional(caption),
+            Version = version,
+
             CreatedAt = createdAt,
+            CreatedBy = createdBy,
             UpdatedAt = updatedAt,
-            CreatedByUserId = createdByUserId,
-            UpdatedByUserId = updatedByUserId,
+            UpdatedBy = updatedBy,
+
             IsDeleted = isDeleted,
             DeletedAt = deletedAt,
-            DeletedByUserId = deletedByUserId,
-            Version = version
+            DeletedBy = deletedBy
         };
     }
 
@@ -153,43 +135,55 @@ public sealed class ArticleMedia
         ValidateAltTextOverride(altTextOverride);
         ValidateCaption(caption);
 
-        AltTextOverride = NormalizeOptional(altTextOverride);
-        Caption = NormalizeOptional(caption);
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        var normalizedAltTextOverride = NormalizeOptional(altTextOverride);
+        var normalizedCaption = NormalizeOptional(caption);
+
+        if (AltTextOverride == normalizedAltTextOverride &&
+            Caption == normalizedCaption)
+        {
+            return;
+        }
+
+        AltTextOverride = normalizedAltTextOverride;
+        Caption = normalizedCaption;
+        Touch(nowUtc, actorUserId);
     }
 
-    public void ChangeSortOrder(int sortOrder, DateTime nowUtc, long? actorUserId)
+    public void ChangeSortOrder(
+        int sortOrder,
+        DateTime nowUtc,
+        long? actorUserId)
     {
         EnsureNotDeleted();
-
         ValidateSortOrder(sortOrder);
 
+        if (SortOrder == sortOrder)
+        {
+            return;
+        }
+
         SortOrder = sortOrder;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        Touch(nowUtc, actorUserId);
     }
 
-    public void MarkAsPrimary(DateTime nowUtc, long? actorUserId)
+    public void MarkAsPrimary(
+        DateTime nowUtc,
+        long? actorUserId)
     {
         EnsureNotDeleted();
 
         if (IsPrimary)
         {
-            throw new MediaDomainException(
-                "MEDIA.ARTICLE_MEDIA_ALREADY_PRIMARY",
-                "Article media is already primary.");
+            return;
         }
 
         IsPrimary = true;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        Touch(nowUtc, actorUserId);
     }
 
-    public void UnmarkAsPrimary(DateTime nowUtc, long? actorUserId)
+    public void UnmarkAsPrimary(
+        DateTime nowUtc,
+        long? actorUserId)
     {
         EnsureNotDeleted();
 
@@ -199,43 +193,48 @@ public sealed class ArticleMedia
         }
 
         IsPrimary = false;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        Touch(nowUtc, actorUserId);
     }
 
-    public void SoftDelete(DateTime nowUtc, long? actorUserId)
+    public void SoftDelete(
+        DateTime nowUtc,
+        long? actorUserId)
     {
         if (IsDeleted)
         {
-            throw new MediaDomainException(
-                "MEDIA.ARTICLE_MEDIA_ALREADY_DELETED",
-                "Article media is already deleted.");
+            return;
         }
 
-        IsDeleted = true;
         IsPrimary = false;
+        IsDeleted = true;
         DeletedAt = nowUtc;
-        DeletedByUserId = actorUserId;
-        UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
-        Version++;
+        DeletedBy = actorUserId;
+
+        Touch(nowUtc, actorUserId);
     }
 
-    public void Restore(DateTime nowUtc, long? actorUserId)
+    public void Restore(
+        DateTime nowUtc,
+        long? actorUserId)
     {
         if (!IsDeleted)
         {
-            throw new MediaDomainException(
-                "MEDIA.ARTICLE_MEDIA_NOT_DELETED",
-                "Article media is not deleted.");
+            return;
         }
 
         IsDeleted = false;
         DeletedAt = null;
-        DeletedByUserId = null;
+        DeletedBy = null;
+
+        Touch(nowUtc, actorUserId);
+    }
+
+    private void Touch(
+        DateTime nowUtc,
+        long? actorUserId)
+    {
         UpdatedAt = nowUtc;
-        UpdatedByUserId = actorUserId;
+        UpdatedBy = actorUserId;
         Version++;
     }
 
@@ -279,9 +278,55 @@ public sealed class ArticleMedia
         }
     }
 
+    private static void ValidateVersion(int version)
+    {
+        if (version <= 0)
+        {
+            throw new MediaDomainException(
+                "MEDIA.ARTICLE_MEDIA_INVALID_VERSION",
+                "Article media version must be greater than zero.");
+        }
+    }
+
+    private static void ValidateDeleteState(
+        bool isDeleted,
+        DateTime? deletedAt,
+        long? deletedBy,
+        bool isPrimary)
+    {
+        if (isDeleted && deletedAt is null)
+        {
+            throw new MediaDomainException(
+                "MEDIA.ARTICLE_MEDIA_DELETED_AT_REQUIRED",
+                "Deleted article media must have DeletedAt.");
+        }
+
+        if (!isDeleted && deletedAt is not null)
+        {
+            throw new MediaDomainException(
+                "MEDIA.ARTICLE_MEDIA_DELETED_AT_INVALID",
+                "Active article media must not have DeletedAt.");
+        }
+
+        if (!isDeleted && deletedBy is not null)
+        {
+            throw new MediaDomainException(
+                "MEDIA.ARTICLE_MEDIA_DELETED_BY_INVALID",
+                "Active article media must not have DeletedBy.");
+        }
+
+        if (isDeleted && isPrimary)
+        {
+            throw new MediaDomainException(
+                "MEDIA.PRIMARY_CONSTRAINT_VIOLATION",
+                "Deleted article media cannot remain primary.");
+        }
+    }
+
     private static void ValidateAltTextOverride(string? altTextOverride)
     {
-        if (!string.IsNullOrWhiteSpace(altTextOverride) && altTextOverride.Trim().Length > 300)
+        if (!string.IsNullOrWhiteSpace(altTextOverride) &&
+            altTextOverride.Trim().Length > 300)
         {
             throw new MediaDomainException(
                 "MEDIA.ARTICLE_MEDIA_ALT_TEXT_OVERRIDE_TOO_LONG",
@@ -291,7 +336,8 @@ public sealed class ArticleMedia
 
     private static void ValidateCaption(string? caption)
     {
-        if (!string.IsNullOrWhiteSpace(caption) && caption.Trim().Length > 300)
+        if (!string.IsNullOrWhiteSpace(caption) &&
+            caption.Trim().Length > 300)
         {
             throw new MediaDomainException(
                 "MEDIA.ARTICLE_MEDIA_CAPTION_TOO_LONG",
@@ -301,11 +347,8 @@ public sealed class ArticleMedia
 
     private static string? NormalizeOptional(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return value.Trim();
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }

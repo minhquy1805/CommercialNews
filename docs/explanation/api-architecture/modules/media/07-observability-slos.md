@@ -9,6 +9,8 @@ Related:
 - `../../../../architecture/arc42/17-dataflow-and-batch-workflows-v1.md`
 - `../../../../decisions/adr-0013-outbox-and-delivery-semantics-v1.md`
 - `../../../../decisions/adr-0027-stream-processing-and-derived-state-policy-v1.md`
+- `../../../../decisions/adr-0018-transaction-boundaries-and-consistency-model-v1.md`
+- `../../../../decisions/adr-0020-timeout-retry-and-failure-detection-policy-v1.md`
 - `../../../../decisions/adr-0028-consumer-idempotency-replay-and-rebuild-policy-v1.md`
 
 ---
@@ -21,12 +23,15 @@ Related:
 - set-primary success/failure and latency
 - reorder success/failure and latency
 - soft delete/restore success/failure
+- update media metadata success/failure and latency
 
 ### Error taxonomy signals (stability)
 - error spikes and distribution by code:
   - `409` primary conflicts / invariant violations
   - `400` invalid reorder / validation failures
   - `404` missing media/attachment target
+  - `409` idempotency conflicts
+  - `409` version conflicts
   - `5xx`/timeouts (infrastructure instability)
 
 ### Invariant health (non-negotiable)
@@ -35,6 +40,13 @@ Related:
 - unexpected detach/restore anomalies (optional)
 - duplicate attachment prevention count
 - stale-update / optimistic-concurrency reject rate where implemented
+- idempotency-key reuse count for `POST /items`
+- idempotency-key reuse count for `POST /articles/{articleId}/attachments`
+- idempotency conflict count:
+  - same key reused with different semantic request
+- missing `expectedVersion` count for reorder/set-primary
+- `expectedVersion` mismatch count for reorder
+- `expectedVersion` mismatch count for set-primary
 
 ### Consistency / correctness signals
 - reorder mismatch or resync-trigger count where order-sensitive derived views exist
@@ -43,14 +55,18 @@ Related:
 - unexpected "deleted media still active in derived output" incidents
 - any derived artifact reintroducing older primary/order state = release blocker
 
-### Replication freshness (only if Media emits events/outbox)
-If media changes trigger downstream effects (CDN purge, projections, audit, derivatives):
-- outbox pending count (media events)
-- outbox oldest pending age (seconds)
-- consumer backlog/lag (queue depth, retries)
-- dedupe hits / idempotency rejects (if measured)
-- time-to-apply distribution:
-  - `media truth occurredAt -> derived consumer appliedAt`
+### Replication freshness for Media Outbox events
+
+In V1, Media emits Outbox events and Audit consumes them asynchronously.
+
+Track:
+- outbox pending count by Media `eventType`
+- outbox oldest pending age by Media `eventType`
+- publish success/failure count by Media `eventType`
+- publish retry count by Media `eventType`
+- dead Media outbox message count by `eventType`
+- broker queue depth for Media-related events where measurable
+- Media event publish-to-consume lag where measurable
 
 ### Interpretation rule
 Media observability must help distinguish:
@@ -59,6 +75,22 @@ Media observability must help distinguish:
 - stale-worker or replay behavior
 - cleanup/reconciliation lag
 - read-path degradation caused by delivery layers rather than Media truth corruption
+
+### Audit ingestion signals
+
+- Media audit event consumed count by `eventType`
+- Media audit ingestion success/failure count
+- Media audit ingestion lag:
+  - `event occurredAtUtc -> audit insertedAtUtc`
+- Audit dedupe hit count by `MessageId`
+- Audit consumer retry count for Media events
+- Audit DLQ/dead-letter count for Media events where applicable
+- Media events published but not audited within target lag
+
+Rules:
+- Audit lag must not redefine Media truth.
+- Audit consumer failure must not be reported as synchronous Media API failure after Media truth commit.
+- Audit ack must happen only after durable append or durable dedupe decision.
 
 ---
 
@@ -169,10 +201,41 @@ During rollout, gate on:
 - sustained outbox oldest pending age growth for media-derived side effects
 - derivative/thumbnail pipeline failure spike if enabled
 - any signal that stale derived media output is overriding fresher truth-backed state (release blocker)
+- any dead Media outbox message under normal operation
+- Audit DLQ/dead-letter growth for Media events
+- Media events published but not audited within target lag
 
 ---
 
-## 6) Operator questions this module must answer
+## 6) Initial SLO targets (V1)
+
+These are initial operating targets and should be refined after measurement.
+
+### Truth-path latency
+
+- register metadata excluding binary upload: P95 < 500ms, P99 < 1500ms
+- update metadata: P95 < 300ms, P99 < 1000ms
+- attach/detach: P95 < 300ms, P99 < 1000ms
+- reorder/set-primary: P95 < 500ms, P99 < 1500ms
+- delete/restore: P95 < 500ms, P99 < 1500ms
+
+### Async freshness
+
+- Media outbox oldest pending age: normally < 60s
+- Media audit ingestion lag: P95 < 120s
+- dead Media outbox messages: 0 under normal operation
+- Audit DLQ/dead-letter count for Media events: 0 under normal operation
+
+### Correctness targets
+
+- duplicate active attachment incidents: 0
+- multiple active primary incidents: 0
+- stale derived output overriding fresher truth: 0
+- article read failures caused by missing media: 0 where graceful degradation policy applies
+
+---
+
+## 7) Operator questions this module must answer
 
 Media observability should help answer:
 

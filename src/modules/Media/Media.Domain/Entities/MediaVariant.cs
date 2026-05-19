@@ -2,6 +2,8 @@ using Media.Domain.Exceptions;
 
 namespace Media.Domain.Entities;
 
+// Derived media output.
+// V2 hook only. Not authoritative truth for attachment/order/primary.
 public sealed class MediaVariant
 {
     public long VariantId { get; private set; }

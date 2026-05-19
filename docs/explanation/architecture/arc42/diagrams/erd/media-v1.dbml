@@ -10,12 +10,15 @@
 //   + attachment membership
 //   + primary selection
 //   + attachment ordering
+//   + attachment-set versioning
 //   + soft delete / restore state
 //
 // Design posture
 // - V1 truth-first OLTP model.
 // - Derived delivery (CDN/cache/variants) is not authoritative truth.
 // - Cross-module refs to Content/Identity are shown as ERD stubs only.
+// - Media writes shared OutboxMessage rows in the same local transaction
+//   as Media truth changes; the shared/system Outbox table is not duplicated here.
 // - Primary-per-article is enforced in SQL Server by filtered unique index:
 //   UNIQUE (ArticleId) WHERE IsPrimary = 1 AND IsDeleted = 0
 //
@@ -23,6 +26,12 @@
 // - (ArticleId, MediaId) is a stable unique relationship.
 // - Re-attaching a soft-deleted relation should restore the existing row,
 //   not create a new duplicate relationship row.
+// - ArticleMediaSet.Version is the aggregate version checked by expectedVersion
+//   for reorder and set-primary.
+// - ArticleMediaSet.Version starts at 0.
+// - Attach/detach/reorder/set-primary and primary-clear side effects should
+//   increment ArticleMediaSet.Version and return the new version.
+// - First attachment-set mutation returns version 1.
 // =====================================================
 
 Enum MediaTypeEnum {
@@ -33,14 +42,14 @@ Enum MediaTypeEnum {
 
 Table MediaAsset {
   MediaId bigint [pk, increment]
-  PublicId varchar(26) [not null, unique] // ULID/public identifier
+  PublicId varchar(26) [not null]          // ULID/public identifier
 
   StorageProvider varchar(30) [not null, default: "local"] // local/gcs/s3/...
-  Url nvarchar(800) [not null]            // public serving URL or stable delivery URL
-  StoragePath nvarchar(800) [null]        // object key / internal storage path
+  Url nvarchar(800) [not null]             // public serving URL or stable delivery URL
+  StoragePath nvarchar(800) [null]         // object key / internal storage path
   FileName nvarchar(255) [null]
 
-  MediaType varchar(20) [not null]        // CHECK IN ('Image','Video','File')
+  MediaType varchar(20) [not null]         // CHECK IN ('Image','Video','File')
   MimeType nvarchar(100) [null]
 
   FileSizeBytes bigint [null]
@@ -48,24 +57,28 @@ Table MediaAsset {
   Height int [null]
   DurationSeconds int [null]
 
-  AltText nvarchar(300) [null]            // default alt text
-  MetadataJson nvarchar(max) [null]       // sanitized metadata only
-  ContentHash varbinary(32) [null]        // optional dedup/integrity hook
+  AltText nvarchar(300) [null]             // default alt text
+  MetadataJson nvarchar(max) [null]        // sanitized metadata only
+  ContentHash varbinary(32) [null]         // optional integrity hook; content-hash dedupe is V2 policy
 
-  Version int [not null, default: 1]      // app-managed revision/version for stale-write protection
+  Version int [not null, default: 1]       // asset-level revision/version for metadata lifecycle changes
 
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  CreatedBy bigint [null]                 // external: Identity.UserAccount
+  CreatedBy bigint [null]                  // external: Identity.UserAccount
 
   UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  UpdatedBy bigint [null]                 // external: Identity.UserAccount
+  UpdatedBy bigint [null]                  // external: Identity.UserAccount
 
   IsDeleted bit [not null, default: 0]
   DeletedAt datetime2(3) [null]
-  DeletedBy bigint [null]                 // external: Identity.UserAccount
-  RestoreUntil datetime2(3) [null]        // retention window hook
+  DeletedBy bigint [null]                  // external: Identity.UserAccount
+  RestoreUntil datetime2(3) [null]         // retention window hook
+  RestoredAt datetime2(3) [null]
+  RestoredBy bigint [null]                 // external: Identity.UserAccount
 
   Indexes {
+    (PublicId) [unique, name: "UQ_MediaAsset_PublicId"]
+
     (IsDeleted, CreatedAt) [name: "IX_MediaAsset_IsDeleted_CreatedAt"]
     (MediaType, IsDeleted, CreatedAt) [name: "IX_MediaAsset_MediaType_IsDeleted_CreatedAt"]
     (MimeType) [name: "IX_MediaAsset_MimeType"]
@@ -76,11 +89,29 @@ Table MediaAsset {
   Note: "Authoritative metadata only. Binary bytes live outside SQL. Soft delete preferred in V1."
 }
 
+Table ArticleMediaSet {
+  ArticleId bigint [pk]                    // external: Content.Article; one row per article attachment set
+
+  Version int [not null, default: 0]       // aggregate version used by expectedVersion
+
+  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CreatedBy bigint [null]                  // external: Identity.UserAccount
+
+  UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedBy bigint [null]                  // external: Identity.UserAccount
+
+  Indexes {
+    (UpdatedAt) [name: "IX_ArticleMediaSet_UpdatedAt"]
+  }
+
+  Note: "Logical ArticleMediaSet aggregate. Version is checked by reorder/set-primary expectedVersion and increments on attachment-set truth changes. First mutation returns version 1."
+}
+
 Table ArticleMedia {
   ArticleMediaId bigint [pk, increment]
 
-  ArticleId bigint [not null]             // external: Content.Article
-  MediaId bigint [not null]               // FK -> MediaAsset
+  ArticleId bigint [not null]              // FK -> ArticleMediaSet.ArticleId
+  MediaId bigint [not null]                // FK -> MediaAsset
 
   SortOrder int [not null, default: 0]
   IsPrimary bit [not null, default: 0]
@@ -88,29 +119,33 @@ Table ArticleMedia {
   AltTextOverride nvarchar(300) [null]
   Caption nvarchar(300) [null]
 
-  Version int [not null, default: 1]      // app-managed revision/version for stale-write protection
+  Version int [not null, default: 1]       // row-level revision; set-level concurrency uses ArticleMediaSet.Version
 
   CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  CreatedBy bigint [null]                 // external: Identity.UserAccount
+  CreatedBy bigint [null]                  // external: Identity.UserAccount
 
   UpdatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  UpdatedBy bigint [null]                 // external: Identity.UserAccount
+  UpdatedBy bigint [null]                  // external: Identity.UserAccount
 
   IsDeleted bit [not null, default: 0]
   DeletedAt datetime2(3) [null]
-  DeletedBy bigint [null]                 // external: Identity.UserAccount
+  DeletedBy bigint [null]                  // external: Identity.UserAccount
 
   Indexes {
-    // Stable unique relationship: re-attach should restore existing row, not create a new duplicate row
+    // Stable unique relationship:
+    // re-attach should restore existing row, not create a new duplicate row.
     (ArticleId, MediaId) [unique, name: "UQ_ArticleMedia_ArticleId_MediaId"]
 
-    // Hot path: list active attachments for one article in stable order
+    // Hot path:
+    // list active attachments for one article in stable order.
     (ArticleId, IsDeleted, SortOrder) [name: "IX_ArticleMedia_ArticleId_IsDeleted_SortOrder"]
 
-    // Fast primary lookup support (filtered unique enforced later in SQL Server)
+    // Fast primary lookup support.
+    // Filtered unique primary-per-article is enforced later in SQL Server.
     (ArticleId, IsDeleted, IsPrimary) [name: "IX_ArticleMedia_ArticleId_IsDeleted_IsPrimary"]
 
-    // Reverse usage lookup: which articles use this media
+    // Reverse usage lookup:
+    // which articles use this media.
     (MediaId, IsDeleted, ArticleId) [name: "IX_ArticleMedia_MediaId_IsDeleted_ArticleId"]
   }
 
@@ -122,9 +157,9 @@ Table ArticleMedia {
 // --------------------------
 Table MediaVariant {
   VariantId bigint [pk, increment]
-  MediaId bigint [not null]               // FK -> MediaAsset
+  MediaId bigint [not null]                // FK -> MediaAsset
 
-  VariantType varchar(30) [not null]      // thumb/medium/large/webp/...
+  VariantType varchar(30) [not null]       // thumb/medium/large/webp/...
   Url nvarchar(800) [not null]
 
   Width int [null]
@@ -143,23 +178,32 @@ Table MediaVariant {
 // ---------- External stubs for ERD readability ----------
 Table ContentArticle {
   ArticleId bigint [pk]
-  Note: "EXTERNAL (Content module). Stub for ERD readability only."
+  Note: "EXTERNAL (Content module). Stub for ERD readability only. Physical FK is optional in shared DB V1."
 }
 
 Table IdentityUserAccount {
   UserId bigint [pk]
-  Note: "EXTERNAL (Identity module). Stub for ERD readability only."
+  Note: "EXTERNAL (Identity module). Stub for ERD readability only. Physical FK is optional in shared DB V1."
 }
 
 // ---------- Relationships ----------
+Ref: ArticleMedia.ArticleId > ArticleMediaSet.ArticleId
 Ref: ArticleMedia.MediaId > MediaAsset.MediaId
 Ref: MediaVariant.MediaId > MediaAsset.MediaId
 
 // visual-only cross-module refs
-Ref: ArticleMedia.ArticleId > ContentArticle.ArticleId
+// Physical FK to Content is optional in shared DB V1.
+// Physical reachability must not imply shared transactional ownership.
+Ref: ArticleMediaSet.ArticleId > ContentArticle.ArticleId
+
 Ref: MediaAsset.CreatedBy > IdentityUserAccount.UserId
 Ref: MediaAsset.UpdatedBy > IdentityUserAccount.UserId
 Ref: MediaAsset.DeletedBy > IdentityUserAccount.UserId
+Ref: MediaAsset.RestoredBy > IdentityUserAccount.UserId
+
+Ref: ArticleMediaSet.CreatedBy > IdentityUserAccount.UserId
+Ref: ArticleMediaSet.UpdatedBy > IdentityUserAccount.UserId
+
 Ref: ArticleMedia.CreatedBy > IdentityUserAccount.UserId
 Ref: ArticleMedia.UpdatedBy > IdentityUserAccount.UserId
 Ref: ArticleMedia.DeletedBy > IdentityUserAccount.UserId
@@ -167,12 +211,24 @@ Ref: ArticleMedia.DeletedBy > IdentityUserAccount.UserId
 // ---------- SQL Server enforcement notes ----------
 // 1) CHECK ArticleMedia.SortOrder >= 0
 // 2) CHECK MediaAsset.MediaType IN ('Image','Video','File')
-// 3) CHECK NOT (IsPrimary = 1 AND IsDeleted = 1) on ArticleMedia
-// 4) Primary-per-article filtered unique index:
+// 3) CHECK NOT (ArticleMedia.IsPrimary = 1 AND ArticleMedia.IsDeleted = 1)
+// 4) Soft-deleting MediaAsset must clear affected ArticleMedia.IsPrimary rows
+//    in the same Media truth transaction where feasible.
+// 5) Primary-per-article filtered unique index:
 //    CREATE UNIQUE INDEX UX_ArticleMedia_ActivePrimaryPerArticle
 //    ON [media].[ArticleMedia](ArticleId)
 //    WHERE IsPrimary = 1 AND IsDeleted = 0;
-// 5) Prefer short truth transactions for attach / set-primary / reorder / delete / restore
-// 6) Reorder should be applied as a final-state set operation, not loose row-by-row updates
-// 7) Re-attaching a previously soft-deleted relation should restore the same row under V1 policy
-// 8) Avoid cascading hard deletes across module boundaries
+// 6) Reorder and set-primary must compare expectedVersion with ArticleMediaSet.Version.
+// 7) Attachment-set mutations must increment ArticleMediaSet.Version atomically
+//    with ArticleMedia changes.
+// 8) First attachment-set mutation should move ArticleMediaSet.Version from 0 to 1.
+// 9) Shared OutboxMessage insert is part of the same local transaction
+//    for emitted Media integration events.
+// 10) Prefer short truth transactions for attach / detach / set-primary / reorder / delete / restore.
+// 11) Reorder should be applied as a final-state set operation, not loose row-by-row updates.
+// 12) Re-attaching a previously soft-deleted relation should restore the same row under V1 policy.
+// 13) Avoid cascading hard deletes across module boundaries.
+// 14) Binary storage operations, CDN purge, scan, variant generation, and Audit ingestion
+//     must not be required inside the Media truth transaction.
+// 15) Object storage/CDN/variants are delivery or derived layers,
+//     not attachment/order/primary/delete truth.

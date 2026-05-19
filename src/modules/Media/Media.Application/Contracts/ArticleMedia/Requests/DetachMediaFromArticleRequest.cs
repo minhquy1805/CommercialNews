@@ -5,6 +5,4 @@ public sealed class DetachMediaFromArticleRequest
     public long ArticleId { get; init; }
 
     public long MediaId { get; init; }
-
-    public long? ActorUserId { get; init; }
 }
