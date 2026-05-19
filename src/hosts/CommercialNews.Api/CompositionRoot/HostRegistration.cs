@@ -5,6 +5,7 @@ using CommercialNews.Api.Authorization;
 using CommercialNews.Api.Health;
 using CommercialNews.Api.OpenApi;
 using CommercialNews.BuildingBlocks.DependencyInjection;
+using CommercialNews.BuildingBlocks.Infrastructure.Storage;
 using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using Identity.Infrastructure.Security;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -22,6 +23,7 @@ namespace CommercialNews.Api.CompositionRoot
             ArgumentNullException.ThrowIfNull(configuration);
 
             services.AddBuildingBlocks(configuration);
+            services.AddFileStorage(configuration);
 
             services.Configure<JwtSettings>(
                 configuration.GetSection(JwtSettings.SectionName));
