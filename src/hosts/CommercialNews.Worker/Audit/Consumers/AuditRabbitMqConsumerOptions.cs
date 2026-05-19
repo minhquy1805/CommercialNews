@@ -68,6 +68,16 @@ public sealed class AuditRabbitMqConsumerOptions
         "content.article_published",
         "content.article_unpublished",
         "content.article_archived",
-        "content.article_soft_deleted"
+        "content.article_soft_deleted",
+
+        "media.asset_registered",
+        "media.asset_updated",
+        "media.asset_soft_deleted",
+        "media.asset_restored",
+
+        "media.article_media_attached",
+        "media.article_media_detached",
+        "media.article_media_reordered",
+        "media.article_primary_media_set"
     ];
 }

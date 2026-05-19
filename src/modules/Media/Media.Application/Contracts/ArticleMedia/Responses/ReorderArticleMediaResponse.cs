@@ -7,4 +7,6 @@ public sealed class ReorderArticleMediaResponse
     public bool Reordered { get; init; }
 
     public int AffectedRows { get; init; }
+
+    public int AttachmentSetVersion { get; init; }
 }

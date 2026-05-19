@@ -1,13 +1,19 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Paging;
-using Media.Application.Models.QueryModels;
+using Media.Application.Models.Commands;
+using Media.Application.Models.Queries;
+using Media.Application.Models.Results;
 using Media.Domain.Entities;
 
 namespace Media.Application.Ports.Persistence;
 
 public interface IMediaAssetRepository
 {
-    Task<long> InsertAsync(
-        MediaAsset mediaAsset,
+    Task<MediaAssetInsertResult> InsertAsync(
+        CreateMediaAssetCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task<MediaAssetMutationResult> UpdateMetadataAsync(
+        UpdateMediaMetadataCommand command,
         CancellationToken cancellationToken = default);
 
     Task<MediaAsset?> GetByIdAsync(
@@ -18,15 +24,12 @@ public interface IMediaAssetRepository
         string publicId,
         CancellationToken cancellationToken = default);
 
-    Task<int> SoftDeleteAsync(
-        long mediaId,
-        long? deletedByUserId,
-        DateTime? restoreUntil,
+    Task<MediaAssetMutationResult> SoftDeleteAsync(
+        SoftDeleteMediaAssetCommand command,
         CancellationToken cancellationToken = default);
 
-    Task<int> RestoreAsync(
-        long mediaId,
-        long? restoredByUserId,
+    Task<MediaAssetMutationResult> RestoreAsync(
+        RestoreMediaAssetCommand command,
         CancellationToken cancellationToken = default);
 
     Task<PagedQueryResult<MediaAssetListResultItem>> SelectSkipAndTakeAsync(

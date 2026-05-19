@@ -6,7 +6,11 @@ using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Media.Application.Contracts.MediaAsset.Requests;
 using Media.Application.Contracts.MediaAsset.Responses;
 using Media.Application.Errors;
+using Media.Application.Models.Commands;
+using Media.Application.Models.Results;
 using Media.Application.Ports.Persistence;
+using Media.Application.Ports.Services;
+using Media.Domain.Constants;
 using Media.Domain.Entities;
 using Media.Domain.Exceptions;
 
@@ -16,6 +20,7 @@ public sealed class RegisterMediaUseCase : IRegisterMediaUseCase
 {
     private readonly IMediaAssetRepository _mediaAssetRepository;
     private readonly IMediaUnitOfWork _unitOfWork;
+    private readonly IMediaOutboxWriter _mediaOutboxWriter;
     private readonly IPublicIdGenerator _publicIdGenerator;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
@@ -23,30 +28,48 @@ public sealed class RegisterMediaUseCase : IRegisterMediaUseCase
     public RegisterMediaUseCase(
         IMediaAssetRepository mediaAssetRepository,
         IMediaUnitOfWork unitOfWork,
+        IMediaOutboxWriter mediaOutboxWriter,
         IPublicIdGenerator publicIdGenerator,
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext)
     {
-        _mediaAssetRepository = mediaAssetRepository;
-        _unitOfWork = unitOfWork;
-        _publicIdGenerator = publicIdGenerator;
-        _dateTimeProvider = dateTimeProvider;
-        _requestContext = requestContext;
+        _mediaAssetRepository = mediaAssetRepository
+            ?? throw new ArgumentNullException(nameof(mediaAssetRepository));
+
+        _unitOfWork = unitOfWork
+            ?? throw new ArgumentNullException(nameof(unitOfWork));
+
+        _mediaOutboxWriter = mediaOutboxWriter
+            ?? throw new ArgumentNullException(nameof(mediaOutboxWriter));
+
+        _publicIdGenerator = publicIdGenerator
+            ?? throw new ArgumentNullException(nameof(publicIdGenerator));
+
+        _dateTimeProvider = dateTimeProvider
+            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+
+        _requestContext = requestContext
+            ?? throw new ArgumentNullException(nameof(requestContext));
     }
 
     public async Task<Result<RegisterMediaResponse>> ExecuteAsync(
         RegisterMediaRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         try
         {
-            string publicId = string.IsNullOrWhiteSpace(request.PublicId)
-                ? _publicIdGenerator.NewId()
-                : request.PublicId.Trim();
-
+            string publicId = _publicIdGenerator.NewId();
             DateTime nowUtc = _dateTimeProvider.UtcNow;
-            long? actorUserId = request.ActorUserId ?? _requestContext.CurrentUserId;
+            long? actorUserId = _requestContext.CurrentUserId;
 
+            if (actorUserId is null or <= 0)
+            {
+                return Result<RegisterMediaResponse>.Failure(MediaErrors.Actor.NotFound);
+            }
+
+            // Domain validation only. Persistence is done through command/proc.
             MediaAsset mediaAsset = MediaAsset.Create(
                 publicId: publicId,
                 storageProvider: request.StorageProvider,
@@ -69,32 +92,69 @@ public sealed class RegisterMediaUseCase : IRegisterMediaUseCase
 
             try
             {
-                long mediaId = await _mediaAssetRepository.InsertAsync(
-                    mediaAsset,
-                    cancellationToken);
+                MediaAssetInsertResult insertResult =
+                    await _mediaAssetRepository.InsertAsync(
+                        new CreateMediaAssetCommand(
+                            PublicId: mediaAsset.PublicId,
+                            StorageProvider: mediaAsset.StorageProvider,
+                            Url: mediaAsset.Url,
+                            StoragePath: mediaAsset.StoragePath,
+                            FileName: mediaAsset.FileName,
+                            MediaType: mediaAsset.MediaType,
+                            MimeType: mediaAsset.MimeType,
+                            FileSizeBytes: mediaAsset.FileSizeBytes,
+                            Width: mediaAsset.Width,
+                            Height: mediaAsset.Height,
+                            DurationSeconds: mediaAsset.DurationSeconds,
+                            AltText: mediaAsset.AltText,
+                            MetadataJson: mediaAsset.MetadataJson,
+                            ContentHash: mediaAsset.ContentHash,
+                            CreatedBy: actorUserId),
+                        cancellationToken);
+
+                await _mediaOutboxWriter.EnqueueMediaAssetRegisteredAsync(
+                    unitOfWork: _unitOfWork,
+                    mediaId: insertResult.MediaId,
+                    mediaPublicId: mediaAsset.PublicId,
+                    storageProvider: mediaAsset.StorageProvider,
+                    url: mediaAsset.Url,
+                    storagePath: mediaAsset.StoragePath,
+                    fileName: mediaAsset.FileName,
+                    mediaType: mediaAsset.MediaType,
+                    mimeType: mediaAsset.MimeType,
+                    fileSizeBytes: mediaAsset.FileSizeBytes,
+                    width: mediaAsset.Width,
+                    height: mediaAsset.Height,
+                    durationSeconds: mediaAsset.DurationSeconds,
+                    actorUserId: actorUserId.Value,
+                    version: insertResult.NewVersion,
+                    registeredAtUtc: nowUtc,
+                    correlationId: _requestContext.CorrelationId,
+                    cancellationToken: cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
 
-                return Result<RegisterMediaResponse>.Success(new RegisterMediaResponse
-                {
-                    MediaId = mediaId,
-                    PublicId = mediaAsset.PublicId,
-                    StorageProvider = mediaAsset.StorageProvider,
-                    Url = mediaAsset.Url,
-                    StoragePath = mediaAsset.StoragePath,
-                    FileName = mediaAsset.FileName,
-                    MediaType = mediaAsset.MediaType,
-                    MimeType = mediaAsset.MimeType,
-                    FileSizeBytes = mediaAsset.FileSizeBytes,
-                    Width = mediaAsset.Width,
-                    Height = mediaAsset.Height,
-                    DurationSeconds = mediaAsset.DurationSeconds,
-                    AltText = mediaAsset.AltText,
-                    MetadataJson = mediaAsset.MetadataJson,
-                    CreatedAt = mediaAsset.CreatedAt,
-                    CreatedByUserId = mediaAsset.CreatedByUserId,
-                    Version = mediaAsset.Version
-                });
+                return Result<RegisterMediaResponse>.Success(
+                    new RegisterMediaResponse
+                    {
+                        MediaId = insertResult.MediaId,
+                        PublicId = mediaAsset.PublicId,
+                        StorageProvider = mediaAsset.StorageProvider,
+                        Url = mediaAsset.Url,
+                        StoragePath = mediaAsset.StoragePath,
+                        FileName = mediaAsset.FileName,
+                        MediaType = mediaAsset.MediaType,
+                        MimeType = mediaAsset.MimeType,
+                        FileSizeBytes = mediaAsset.FileSizeBytes,
+                        Width = mediaAsset.Width,
+                        Height = mediaAsset.Height,
+                        DurationSeconds = mediaAsset.DurationSeconds,
+                        AltText = mediaAsset.AltText,
+                        MetadataJson = mediaAsset.MetadataJson,
+                        CreatedAt = mediaAsset.CreatedAt,
+                        CreatedBy = actorUserId,
+                        Version = insertResult.NewVersion
+                    });
             }
             catch
             {
@@ -104,11 +164,13 @@ public sealed class RegisterMediaUseCase : IRegisterMediaUseCase
         }
         catch (PersistenceException exception)
         {
-            return Result<RegisterMediaResponse>.Failure(MapPersistenceException(exception));
+            return Result<RegisterMediaResponse>.Failure(
+                MapPersistenceException(exception));
         }
         catch (MediaDomainException exception)
         {
-            return Result<RegisterMediaResponse>.Failure(MapDomainException(exception));
+            return Result<RegisterMediaResponse>.Failure(
+                MapDomainException(exception));
         }
     }
 
@@ -116,22 +178,48 @@ public sealed class RegisterMediaUseCase : IRegisterMediaUseCase
     {
         return exception.Code switch
         {
-            "MEDIA.MEDIA_ASSET_PUBLIC_ID_REQUIRED" => MediaErrors.MediaAsset.PublicIdRequired,
-            "MEDIA.MEDIA_ASSET_PUBLIC_ID_INVALID" => MediaErrors.MediaAsset.PublicIdInvalid,
-            "MEDIA.MEDIA_ASSET_STORAGE_PROVIDER_REQUIRED" => MediaErrors.MediaAsset.StorageProviderRequired,
-            "MEDIA.MEDIA_ASSET_STORAGE_PROVIDER_TOO_LONG" => MediaErrors.MediaAsset.StorageProviderTooLong,
-            "MEDIA.MEDIA_ASSET_URL_REQUIRED" => MediaErrors.MediaAsset.UrlRequired,
-            "MEDIA.MEDIA_ASSET_URL_TOO_LONG" => MediaErrors.MediaAsset.UrlTooLong,
-            "MEDIA.TYPE_NOT_ALLOWED" => MediaErrors.MediaAsset.TypeNotAllowed,
-            "MEDIA.MEDIA_ASSET_MIME_TYPE_TOO_LONG" => MediaErrors.MediaAsset.MimeTypeTooLong,
-            "MEDIA.MEDIA_ASSET_FILE_SIZE_INVALID" => MediaErrors.MediaAsset.FileSizeInvalid,
-            "MEDIA.MEDIA_ASSET_DURATION_INVALID" => MediaErrors.MediaAsset.DurationInvalid,
-            "MEDIA.MEDIA_ASSET_ALT_TEXT_TOO_LONG" => MediaErrors.MediaAsset.AltTextTooLong,
-            "MEDIA.MEDIA_ASSET_FILE_NAME_TOO_LONG" => MediaErrors.MediaAsset.FileNameTooLong,
-            "MEDIA.MEDIA_ASSET_ALREADY_DELETED" => MediaErrors.MediaAsset.AlreadyDeleted,
-            "MEDIA.MEDIA_ASSET_NOT_DELETED" => MediaErrors.MediaAsset.NotDeleted,
-            "MEDIA.RESTORE_WINDOW_EXPIRED" => MediaErrors.MediaAsset.RestoreWindowExpired,
-            "MEDIA.MEDIA_ASSET_RESTORE_UNTIL_INVALID" => MediaErrors.MediaAsset.RestoreUntilInvalid,
+            "MEDIA.MEDIA_ASSET_PUBLIC_ID_REQUIRED" =>
+                MediaErrors.MediaAsset.PublicIdRequired,
+
+            "MEDIA.MEDIA_ASSET_PUBLIC_ID_INVALID" =>
+                MediaErrors.MediaAsset.PublicIdInvalid,
+
+            "MEDIA.MEDIA_ASSET_STORAGE_PROVIDER_REQUIRED" =>
+                MediaErrors.MediaAsset.StorageProviderRequired,
+
+            "MEDIA.MEDIA_ASSET_STORAGE_PROVIDER_TOO_LONG" =>
+                MediaErrors.MediaAsset.StorageProviderTooLong,
+
+            "MEDIA.MEDIA_ASSET_URL_REQUIRED" =>
+                MediaErrors.MediaAsset.UrlRequired,
+
+            "MEDIA.MEDIA_ASSET_URL_TOO_LONG" =>
+                MediaErrors.MediaAsset.UrlTooLong,
+
+            "MEDIA.MEDIA_ASSET_STORAGE_PATH_TOO_LONG" =>
+                MediaErrors.MediaAsset.StoragePathTooLong,
+
+            "MEDIA.TYPE_NOT_ALLOWED" =>
+                MediaErrors.MediaAsset.TypeNotAllowed,
+
+            "MEDIA.MEDIA_ASSET_MIME_TYPE_TOO_LONG" =>
+                MediaErrors.MediaAsset.MimeTypeTooLong,
+
+            "MEDIA.MEDIA_ASSET_FILE_SIZE_INVALID" =>
+                MediaErrors.MediaAsset.FileSizeInvalid,
+
+            "MEDIA.MEDIA_ASSET_DIMENSION_INVALID" =>
+                MediaErrors.MediaAsset.DimensionInvalid,
+
+            "MEDIA.MEDIA_ASSET_DURATION_INVALID" =>
+                MediaErrors.MediaAsset.DurationInvalid,
+
+            "MEDIA.MEDIA_ASSET_ALT_TEXT_TOO_LONG" =>
+                MediaErrors.MediaAsset.AltTextTooLong,
+
+            "MEDIA.MEDIA_ASSET_FILE_NAME_TOO_LONG" =>
+                MediaErrors.MediaAsset.FileNameTooLong,
+
             _ => MediaErrors.ValidationFailed
         };
     }
@@ -140,8 +228,37 @@ public sealed class RegisterMediaUseCase : IRegisterMediaUseCase
     {
         return exception.Code switch
         {
-            "MEDIA.CONCURRENCY_CONFLICT" => MediaErrors.ArticleMedia.PrimaryConstraintViolation,
-            _ => MediaErrors.ValidationFailed
+            "MEDIA.MEDIA_PUBLIC_ID_ALREADY_EXISTS" =>
+                MediaErrors.MediaAsset.PublicIdAlreadyExists,
+
+            "MEDIA.TYPE_NOT_ALLOWED" =>
+                MediaErrors.MediaAsset.TypeNotAllowed,
+
+            "MEDIA.MEDIA_ASSET_FILE_SIZE_INVALID" =>
+                MediaErrors.MediaAsset.FileSizeInvalid,
+
+            "MEDIA.MEDIA_ASSET_DIMENSION_INVALID" =>
+                MediaErrors.MediaAsset.DimensionInvalid,
+
+            "MEDIA.MEDIA_ASSET_DURATION_INVALID" =>
+                MediaErrors.MediaAsset.DurationInvalid,
+
+            "MEDIA.ACTOR_NOT_FOUND" =>
+                MediaErrors.Actor.NotFound,
+
+            "MEDIA.CONSTRAINT_VIOLATION" =>
+                MediaErrors.ConstraintViolation,
+
+            "MEDIA.CONCURRENT_MODIFICATION" =>
+                MediaErrors.ConcurrentModification,
+
+            "MEDIA.DEPENDENCY_UNAVAILABLE" =>
+                MediaErrors.DependencyUnavailable,
+
+            "MEDIA.PERSISTENCE_ERROR" =>
+                MediaErrors.PersistenceError,
+
+            _ => MediaErrors.PersistenceError
         };
     }
 }

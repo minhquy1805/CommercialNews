@@ -1,335 +1,569 @@
+using CommercialNews.Api.Api.Admin.Contracts.Media.ArticleMedia.Responses;
 using CommercialNews.Api.Api.Admin.Contracts.Media.MediaAssets.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Media.MediaAssets.Responses;
 using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
+using CommercialNews.Api.Authorization;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Media.Application.Contracts.ArticleMedia.Requests;
+using Media.Application.Contracts.ArticleMedia.Responses;
 using Media.Application.Contracts.MediaAsset.Requests;
 using Media.Application.Contracts.MediaAsset.Responses;
+using Media.Application.UseCases.ArticleMedia.GetMediaUsage;
 using Media.Application.UseCases.MediaAssets.GetMediaById;
 using Media.Application.UseCases.MediaAssets.GetMediaByPublicId;
 using Media.Application.UseCases.MediaAssets.GetMediaList;
 using Media.Application.UseCases.MediaAssets.RegisterMedia;
 using Media.Application.UseCases.MediaAssets.RestoreMedia;
 using Media.Application.UseCases.MediaAssets.SoftDeleteMedia;
+using Media.Application.UseCases.MediaAssets.UpdateMediaAsset;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace CommercialNews.Api.Api.Admin.Controllers.Media
+namespace CommercialNews.Api.Api.Admin.Controllers.Media;
+
+[ApiController]
+[Route("api/v1/admin/media/items")]
+public sealed class MediaAssetsAdminController : ControllerBase
 {
-    [ApiController]
-    [Route("api/v1/admin/media/assets")]
-    public sealed class MediaAssetsAdminController : ControllerBase
+    private const string GetMediaAssetByIdRouteName = "AdminMediaItems.GetById";
+
+    private readonly IRegisterMediaUseCase _registerMediaUseCase;
+    private readonly IGetMediaByIdUseCase _getMediaByIdUseCase;
+    private readonly IGetMediaByPublicIdUseCase _getMediaByPublicIdUseCase;
+    private readonly IGetMediaListUseCase _getMediaListUseCase;
+    private readonly IUpdateMediaAssetUseCase _updateMediaAssetUseCase;
+    private readonly ISoftDeleteMediaUseCase _softDeleteMediaUseCase;
+    private readonly IRestoreMediaUseCase _restoreMediaUseCase;
+    private readonly IGetMediaUsageUseCase _getMediaUsageUseCase;
+
+    public MediaAssetsAdminController(
+        IRegisterMediaUseCase registerMediaUseCase,
+        IGetMediaByIdUseCase getMediaByIdUseCase,
+        IGetMediaByPublicIdUseCase getMediaByPublicIdUseCase,
+        IGetMediaListUseCase getMediaListUseCase,
+        IUpdateMediaAssetUseCase updateMediaAssetUseCase,
+        ISoftDeleteMediaUseCase softDeleteMediaUseCase,
+        IRestoreMediaUseCase restoreMediaUseCase,
+        IGetMediaUsageUseCase getMediaUsageUseCase)
     {
-        private const string GetMediaAssetByIdRouteName = "AdminMediaAssets.GetById";
+        _registerMediaUseCase = registerMediaUseCase
+            ?? throw new ArgumentNullException(nameof(registerMediaUseCase));
 
-        private readonly IRegisterMediaUseCase _registerMediaUseCase;
-        private readonly IGetMediaByIdUseCase _getMediaByIdUseCase;
-        private readonly IGetMediaByPublicIdUseCase _getMediaByPublicIdUseCase;
-        private readonly IGetMediaListUseCase _getMediaListUseCase;
-        private readonly ISoftDeleteMediaUseCase _softDeleteMediaUseCase;
-        private readonly IRestoreMediaUseCase _restoreMediaUseCase;
+        _getMediaByIdUseCase = getMediaByIdUseCase
+            ?? throw new ArgumentNullException(nameof(getMediaByIdUseCase));
 
-        public MediaAssetsAdminController(
-            IRegisterMediaUseCase registerMediaUseCase,
-            IGetMediaByIdUseCase getMediaByIdUseCase,
-            IGetMediaByPublicIdUseCase getMediaByPublicIdUseCase,
-            IGetMediaListUseCase getMediaListUseCase,
-            ISoftDeleteMediaUseCase softDeleteMediaUseCase,
-            IRestoreMediaUseCase restoreMediaUseCase)
+        _getMediaByPublicIdUseCase = getMediaByPublicIdUseCase
+            ?? throw new ArgumentNullException(nameof(getMediaByPublicIdUseCase));
+
+        _getMediaListUseCase = getMediaListUseCase
+            ?? throw new ArgumentNullException(nameof(getMediaListUseCase));
+
+        _updateMediaAssetUseCase = updateMediaAssetUseCase
+            ?? throw new ArgumentNullException(nameof(updateMediaAssetUseCase));
+
+        _softDeleteMediaUseCase = softDeleteMediaUseCase
+            ?? throw new ArgumentNullException(nameof(softDeleteMediaUseCase));
+
+        _restoreMediaUseCase = restoreMediaUseCase
+            ?? throw new ArgumentNullException(nameof(restoreMediaUseCase));
+
+        _getMediaUsageUseCase = getMediaUsageUseCase
+            ?? throw new ArgumentNullException(nameof(getMediaUsageUseCase));
+    }
+
+    [HttpPost]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsCreate)]
+    [ProducesResponseType(typeof(CreateMediaAssetHttpResponse), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CreateAsync(
+        [FromBody] CreateMediaAssetHttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var useCaseRequest = new RegisterMediaRequest
         {
-            _registerMediaUseCase = registerMediaUseCase;
-            _getMediaByIdUseCase = getMediaByIdUseCase;
-            _getMediaByPublicIdUseCase = getMediaByPublicIdUseCase;
-            _getMediaListUseCase = getMediaListUseCase;
-            _softDeleteMediaUseCase = softDeleteMediaUseCase;
-            _restoreMediaUseCase = restoreMediaUseCase;
+            StorageProvider = request.StorageProvider,
+            Url = request.Url,
+            StoragePath = request.StoragePath,
+            FileName = request.FileName,
+            MediaType = request.MediaType,
+            MimeType = request.MimeType,
+            FileSizeBytes = request.FileSizeBytes,
+            Width = request.Width,
+            Height = request.Height,
+            DurationSeconds = request.DurationSeconds,
+            AltText = request.AltText,
+            MetadataJson = request.MetadataJson,
+            ContentHash = request.ContentHash
+        };
+
+        Result<RegisterMediaResponse> result =
+            await _registerMediaUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<CreateMediaAssetHttpResponse>.Failure(result.Error!));
         }
 
-        [HttpPost]
-        [ProducesResponseType(typeof(CreateMediaAssetHttpResponse), StatusCodes.Status201Created)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> CreateAsync(
-            [FromBody] CreateMediaAssetHttpRequest request,
-            CancellationToken cancellationToken)
+        RegisterMediaResponse value = result.Value!;
+
+        var response = new CreateMediaAssetHttpResponse
         {
-            var useCaseRequest = new RegisterMediaRequest
-            {
-                StorageProvider = request.StorageProvider,
-                Url = request.Url,
-                StoragePath = request.StoragePath,
-                FileName = request.FileName,
-                MediaType = request.MediaType,
-                MimeType = request.MimeType,
-                FileSizeBytes = request.FileSizeBytes,
-                Width = request.Width,
-                Height = request.Height,
-                DurationSeconds = request.DurationSeconds,
-                AltText = request.AltText,
-                MetadataJson = request.MetadataJson
-            };
+            MediaId = value.MediaId,
+            PublicId = value.PublicId,
+            StorageProvider = value.StorageProvider,
+            Url = value.Url,
+            StoragePath = value.StoragePath,
+            FileName = value.FileName,
+            MediaType = value.MediaType,
+            MimeType = value.MimeType,
+            FileSizeBytes = value.FileSizeBytes,
+            Width = value.Width,
+            Height = value.Height,
+            DurationSeconds = value.DurationSeconds,
+            AltText = value.AltText,
+            MetadataJson = value.MetadataJson,
+            CreatedAt = value.CreatedAt,
+            CreatedBy = value.CreatedBy,
+            Version = value.Version
+        };
 
-            Result<RegisterMediaResponse> result =
-                await _registerMediaUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+        return CreatedAtRoute(
+            GetMediaAssetByIdRouteName,
+            new { mediaId = response.MediaId },
+            response);
+    }
 
-            if (result.IsFailure)
-            {
-                return this.ToActionResult(Result<CreateMediaAssetHttpResponse>.Failure(result.Error!));
-            }
+    [HttpGet("{mediaId:long}", Name = GetMediaAssetByIdRouteName)]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsRead)]
+    [ProducesResponseType(typeof(GetMediaAssetByIdHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetByIdAsync(
+        [FromRoute] long mediaId,
+        CancellationToken cancellationToken)
+    {
+        var useCaseRequest = new GetMediaByIdRequest
+        {
+            MediaId = mediaId
+        };
 
-            var response = new CreateMediaAssetHttpResponse
-            {
-                MediaId = result.Value!.MediaId,
-                PublicId = result.Value.PublicId,
-                StorageProvider = result.Value.StorageProvider,
-                Url = result.Value.Url,
-                StoragePath = result.Value.StoragePath,
-                FileName = result.Value.FileName,
-                MediaType = result.Value.MediaType,
-                MimeType = result.Value.MimeType,
-                FileSizeBytes = result.Value.FileSizeBytes,
-                Width = result.Value.Width,
-                Height = result.Value.Height,
-                DurationSeconds = result.Value.DurationSeconds,
-                AltText = result.Value.AltText,
-                MetadataJson = result.Value.MetadataJson,
-                CreatedAt = result.Value.CreatedAt,
-                CreatedByUserId = result.Value.CreatedByUserId,
-                Version = result.Value.Version
-            };
+        Result<GetMediaByIdResponse> result =
+            await _getMediaByIdUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
 
-            return CreatedAtRoute(
-                GetMediaAssetByIdRouteName,
-                new { mediaId = response.MediaId },
-                response);
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<GetMediaAssetByIdHttpResponse>.Failure(result.Error!));
         }
 
-        [HttpGet("{mediaId:long}", Name = GetMediaAssetByIdRouteName)]
-        [ProducesResponseType(typeof(GetMediaAssetByIdHttpResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> GetByIdAsync(
-            [FromRoute] long mediaId,
-            CancellationToken cancellationToken)
+        var response = MapByIdResponse(result.Value!);
+
+        return this.ToActionResult(
+            Result<GetMediaAssetByIdHttpResponse>.Success(response));
+    }
+
+    [HttpGet("public/{publicId}")]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsRead)]
+    [ProducesResponseType(typeof(GetMediaAssetByPublicIdHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetByPublicIdAsync(
+        [FromRoute] string publicId,
+        CancellationToken cancellationToken)
+    {
+        var useCaseRequest = new GetMediaByPublicIdRequest
         {
-            var useCaseRequest = new GetMediaByIdRequest
-            {
-                MediaId = mediaId
-            };
+            PublicId = publicId
+        };
 
-            Result<GetMediaByIdResponse> result =
-                await _getMediaByIdUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+        Result<GetMediaByPublicIdResponse> result =
+            await _getMediaByPublicIdUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
 
-            if (result.IsFailure)
-            {
-                return this.ToActionResult(Result<GetMediaAssetByIdHttpResponse>.Failure(result.Error!));
-            }
-
-            var response = new GetMediaAssetByIdHttpResponse
-            {
-                MediaId = result.Value!.MediaId,
-                PublicId = result.Value.PublicId,
-                StorageProvider = result.Value.StorageProvider,
-                Url = result.Value.Url,
-                StoragePath = result.Value.StoragePath,
-                FileName = result.Value.FileName,
-                MediaType = result.Value.MediaType,
-                MimeType = result.Value.MimeType,
-                FileSizeBytes = result.Value.FileSizeBytes,
-                Width = result.Value.Width,
-                Height = result.Value.Height,
-                DurationSeconds = result.Value.DurationSeconds,
-                AltText = result.Value.AltText,
-                MetadataJson = result.Value.MetadataJson,
-                CreatedAt = result.Value.CreatedAt,
-                CreatedByUserId = result.Value.CreatedByUserId,
-                UpdatedAt = result.Value.UpdatedAt,
-                UpdatedByUserId = result.Value.UpdatedByUserId,
-                IsDeleted = result.Value.IsDeleted,
-                DeletedAt = result.Value.DeletedAt,
-                DeletedByUserId = result.Value.DeletedByUserId,
-                RestoreUntil = result.Value.RestoreUntil,
-                Version = result.Value.Version
-            };
-
-            return this.ToActionResult(Result<GetMediaAssetByIdHttpResponse>.Success(response));
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<GetMediaAssetByPublicIdHttpResponse>.Failure(result.Error!));
         }
 
-        [HttpGet("public/{publicId}")]
-        [ProducesResponseType(typeof(GetMediaAssetByPublicIdHttpResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> GetByPublicIdAsync(
-            [FromRoute] string publicId,
-            CancellationToken cancellationToken)
+        var response = MapByPublicIdResponse(result.Value!);
+
+        return this.ToActionResult(
+            Result<GetMediaAssetByPublicIdHttpResponse>.Success(response));
+    }
+
+    [HttpGet]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsRead)]
+    [ProducesResponseType(typeof(GetMediaAssetsHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> GetPagedAsync(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] bool? isDeleted = null,
+        [FromQuery] string? mediaType = null,
+        [FromQuery] string sortBy = "CreatedAt",
+        [FromQuery] string sortDirection = "DESC",
+        CancellationToken cancellationToken = default)
+    {
+        var useCaseRequest = new GetMediaListRequest
         {
-            var useCaseRequest = new GetMediaByPublicIdRequest
-            {
-                PublicId = publicId
-            };
+            Page = page,
+            PageSize = pageSize,
+            IsDeleted = isDeleted,
+            MediaType = mediaType,
+            SortBy = sortBy,
+            SortDirection = sortDirection
+        };
 
-            Result<GetMediaByPublicIdResponse> result =
-                await _getMediaByPublicIdUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+        Result<GetMediaListResponse> result =
+            await _getMediaListUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
 
-            if (result.IsFailure)
-            {
-                return this.ToActionResult(Result<GetMediaAssetByPublicIdHttpResponse>.Failure(result.Error!));
-            }
-
-            var response = new GetMediaAssetByPublicIdHttpResponse
-            {
-                MediaId = result.Value!.MediaId,
-                PublicId = result.Value.PublicId,
-                StorageProvider = result.Value.StorageProvider,
-                Url = result.Value.Url,
-                StoragePath = result.Value.StoragePath,
-                FileName = result.Value.FileName,
-                MediaType = result.Value.MediaType,
-                MimeType = result.Value.MimeType,
-                FileSizeBytes = result.Value.FileSizeBytes,
-                Width = result.Value.Width,
-                Height = result.Value.Height,
-                DurationSeconds = result.Value.DurationSeconds,
-                AltText = result.Value.AltText,
-                MetadataJson = result.Value.MetadataJson,
-                CreatedAt = result.Value.CreatedAt,
-                CreatedByUserId = result.Value.CreatedByUserId,
-                UpdatedAt = result.Value.UpdatedAt,
-                UpdatedByUserId = result.Value.UpdatedByUserId,
-                IsDeleted = result.Value.IsDeleted,
-                DeletedAt = result.Value.DeletedAt,
-                DeletedByUserId = result.Value.DeletedByUserId,
-                RestoreUntil = result.Value.RestoreUntil,
-                Version = result.Value.Version
-            };
-
-            return this.ToActionResult(Result<GetMediaAssetByPublicIdHttpResponse>.Success(response));
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<GetMediaAssetsHttpResponse>.Failure(result.Error!));
         }
 
-        [HttpGet]
-        [ProducesResponseType(typeof(GetMediaAssetsHttpResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> GetPagedAsync(
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 20,
-            [FromQuery] bool? isDeleted = null,
-            [FromQuery] string? mediaType = null,
-            [FromQuery] string sortBy = "CreatedAt",
-            [FromQuery] string sortDirection = "DESC",
-            CancellationToken cancellationToken = default)
+        GetMediaListResponse value = result.Value!;
+
+        var response = new GetMediaAssetsHttpResponse
         {
-            var useCaseRequest = new GetMediaListRequest
-            {
-                Page = page,
-                PageSize = pageSize,
-                IsDeleted = isDeleted,
-                MediaType = mediaType,
-                SortBy = sortBy,
-                SortDirection = sortDirection
-            };
+            Items = value.Items
+                .Select(MapListItem)
+                .ToArray(),
+            Page = value.Page,
+            PageSize = value.PageSize,
+            TotalItems = value.TotalItems
+        };
 
-            Result<GetMediaListResponse> result =
-                await _getMediaListUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
+        return this.ToActionResult(
+            Result<GetMediaAssetsHttpResponse>.Success(response));
+    }
 
-            if (result.IsFailure)
-            {
-                return this.ToActionResult(Result<GetMediaAssetsHttpResponse>.Failure(result.Error!));
-            }
+    [HttpPatch("{mediaId:long}")]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsUpdate)]
+    [ProducesResponseType(typeof(UpdateMediaAssetHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateAsync(
+        [FromRoute] long mediaId,
+        [FromBody] UpdateMediaAssetHttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
 
-            var response = new GetMediaAssetsHttpResponse
-            {
-                Items = result.Value!.Items.Select(static item => new GetMediaAssetsItemHttpResponse
+        var useCaseRequest = new UpdateMediaAssetRequest
+        {
+            MediaId = mediaId,
+            AltText = request.AltText,
+            MetadataJson = request.MetadataJson
+        };
+
+        Result<UpdateMediaAssetResponse> result =
+            await _updateMediaAssetUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<UpdateMediaAssetHttpResponse>.Failure(result.Error!));
+        }
+
+        UpdateMediaAssetResponse value = result.Value!;
+
+        var response = new UpdateMediaAssetHttpResponse
+        {
+            MediaId = value.MediaId,
+            PublicId = value.PublicId,
+            AltText = value.AltText,
+            MetadataJson = value.MetadataJson,
+            UpdatedAt = value.UpdatedAt,
+            UpdatedBy = value.UpdatedBy,
+            Version = value.Version
+        };
+
+        return this.ToActionResult(
+            Result<UpdateMediaAssetHttpResponse>.Success(response));
+    }
+
+    [HttpDelete("{mediaId:long}")]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsDelete)]
+    [ProducesResponseType(typeof(SoftDeleteMediaAssetHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> SoftDeleteAsync(
+        [FromRoute] long mediaId,
+        [FromBody] SoftDeleteMediaAssetHttpRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var useCaseRequest = new SoftDeleteMediaRequest
+        {
+            MediaId = mediaId,
+            RestoreUntil = request.RestoreUntil
+        };
+
+        Result<SoftDeleteMediaResponse> result =
+            await _softDeleteMediaUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<SoftDeleteMediaAssetHttpResponse>.Failure(result.Error!));
+        }
+
+        SoftDeleteMediaResponse value = result.Value!;
+
+        var response = new SoftDeleteMediaAssetHttpResponse
+        {
+            MediaId = value.MediaId,
+            PublicId = value.PublicId,
+            IsDeleted = value.IsDeleted,
+            DeletedAt = value.DeletedAt,
+            DeletedBy = value.DeletedBy,
+            RestoreUntil = value.RestoreUntil,
+            AffectedRows = value.AffectedRows,
+            PrimaryClearedCount = value.PrimaryClearedCount,
+            Version = value.Version
+        };
+
+        return this.ToActionResult(
+            Result<SoftDeleteMediaAssetHttpResponse>.Success(response));
+    }
+
+    [HttpPost("{mediaId:long}:restore")]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsRestore)]
+    [ProducesResponseType(typeof(RestoreMediaAssetHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> RestoreAsync(
+        [FromRoute] long mediaId,
+        CancellationToken cancellationToken)
+    {
+        var useCaseRequest = new RestoreMediaRequest
+        {
+            MediaId = mediaId
+        };
+
+        Result<RestoreMediaResponse> result =
+            await _restoreMediaUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<RestoreMediaAssetHttpResponse>.Failure(result.Error!));
+        }
+
+        RestoreMediaResponse value = result.Value!;
+
+        var response = new RestoreMediaAssetHttpResponse
+        {
+            MediaId = value.MediaId,
+            PublicId = value.PublicId,
+            IsRestored = value.IsRestored,
+            IsDeleted = value.IsDeleted,
+            RestoredAt = value.RestoredAt,
+            RestoredBy = value.RestoredBy,
+            AffectedRows = value.AffectedRows,
+            Version = value.Version
+        };
+
+        return this.ToActionResult(
+            Result<RestoreMediaAssetHttpResponse>.Success(response));
+    }
+
+    [HttpGet("{mediaId:long}/usages")]
+    [Authorize(Policy = AuthorizationPolicies.MediaAssetsReadUsage)]
+    [ProducesResponseType(typeof(GetMediaUsageHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetUsageAsync(
+        [FromRoute] long mediaId,
+        [FromQuery] bool includeDeleted = false,
+        CancellationToken cancellationToken = default)
+    {
+        var useCaseRequest = new GetMediaUsageRequest
+        {
+            MediaId = mediaId,
+            IncludeDeleted = includeDeleted
+        };
+
+        Result<GetMediaUsageResponse> result =
+            await _getMediaUsageUseCase.ExecuteAsync(
+                useCaseRequest,
+                cancellationToken);
+
+        if (result.IsFailure)
+        {
+            return this.ToActionResult(
+                Result<GetMediaUsageHttpResponse>.Failure(result.Error!));
+        }
+
+        GetMediaUsageResponse value = result.Value!;
+
+        var response = new GetMediaUsageHttpResponse
+        {
+            MediaId = value.MediaId,
+            Items = value.Items
+                .Select(static item => new GetMediaUsageItemHttpResponse
                 {
+                    ArticleMediaId = item.ArticleMediaId,
+                    ArticleId = item.ArticleId,
+                    AttachmentSetVersion = item.AttachmentSetVersion,
                     MediaId = item.MediaId,
-                    PublicId = item.PublicId,
-                    StorageProvider = item.StorageProvider,
-                    Url = item.Url,
-                    StoragePath = item.StoragePath,
-                    FileName = item.FileName,
-                    MediaType = item.MediaType,
-                    MimeType = item.MimeType,
-                    FileSizeBytes = item.FileSizeBytes,
-                    Width = item.Width,
-                    Height = item.Height,
-                    DurationSeconds = item.DurationSeconds,
-                    AltText = item.AltText,
+                    SortOrder = item.SortOrder,
+                    IsPrimary = item.IsPrimary,
+                    AltTextOverride = item.AltTextOverride,
+                    Caption = item.Caption,
                     CreatedAt = item.CreatedAt,
+                    CreatedBy = item.CreatedBy,
                     UpdatedAt = item.UpdatedAt,
+                    UpdatedBy = item.UpdatedBy,
+                    Version = item.Version,
                     IsDeleted = item.IsDeleted,
-                    Version = item.Version
-                }).ToArray(),
-                Page = result.Value.Page,
-                PageSize = result.Value.PageSize,
-                TotalItems = result.Value.TotalItems
-            };
+                    DeletedAt = item.DeletedAt,
+                    DeletedBy = item.DeletedBy
+                })
+                .ToArray()
+        };
 
-            return this.ToActionResult(Result<GetMediaAssetsHttpResponse>.Success(response));
-        }
+        return this.ToActionResult(
+            Result<GetMediaUsageHttpResponse>.Success(response));
+    }
 
-        [HttpPost("{mediaId:long}:soft-delete")]
-        [ProducesResponseType(typeof(SoftDeleteMediaAssetHttpResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> SoftDeleteAsync(
-            [FromRoute] long mediaId,
-            [FromBody] SoftDeleteMediaAssetHttpRequest request,
-            CancellationToken cancellationToken)
+    private static GetMediaAssetByIdHttpResponse MapByIdResponse(
+        GetMediaByIdResponse value)
+    {
+        return new GetMediaAssetByIdHttpResponse
         {
-            var useCaseRequest = new SoftDeleteMediaRequest
-            {
-                MediaId = mediaId,
-                RestoreUntil = request.RestoreUntil
-            };
+            MediaId = value.MediaId,
+            PublicId = value.PublicId,
+            StorageProvider = value.StorageProvider,
+            Url = value.Url,
+            StoragePath = value.StoragePath,
+            FileName = value.FileName,
+            MediaType = value.MediaType,
+            MimeType = value.MimeType,
+            FileSizeBytes = value.FileSizeBytes,
+            Width = value.Width,
+            Height = value.Height,
+            DurationSeconds = value.DurationSeconds,
+            AltText = value.AltText,
+            MetadataJson = value.MetadataJson,
+            CreatedAt = value.CreatedAt,
+            CreatedBy = value.CreatedBy,
+            UpdatedAt = value.UpdatedAt,
+            UpdatedBy = value.UpdatedBy,
+            IsDeleted = value.IsDeleted,
+            DeletedAt = value.DeletedAt,
+            DeletedBy = value.DeletedBy,
+            RestoreUntil = value.RestoreUntil,
+            RestoredAt = value.RestoredAt,
+            RestoredBy = value.RestoredBy,
+            Version = value.Version
+        };
+    }
 
-            Result<SoftDeleteMediaResponse> result =
-                await _softDeleteMediaUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
-
-            if (result.IsFailure)
-            {
-                return this.ToActionResult(Result<SoftDeleteMediaAssetHttpResponse>.Failure(result.Error!));
-            }
-
-            var response = new SoftDeleteMediaAssetHttpResponse
-            {
-                MediaId = result.Value!.MediaId,
-                IsDeleted = result.Value.IsDeleted,
-                RestoreUntil = result.Value.RestoreUntil,
-                AffectedRows = result.Value.AffectedRows
-            };
-
-            return this.ToActionResult(Result<SoftDeleteMediaAssetHttpResponse>.Success(response));
-        }
-
-        [HttpPost("{mediaId:long}:restore")]
-        [ProducesResponseType(typeof(RestoreMediaAssetHttpResponse), StatusCodes.Status200OK)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status404NotFound)]
-        [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status409Conflict)]
-        public async Task<IActionResult> RestoreAsync(
-            [FromRoute] long mediaId,
-            CancellationToken cancellationToken)
+    private static GetMediaAssetByPublicIdHttpResponse MapByPublicIdResponse(
+        GetMediaByPublicIdResponse value)
+    {
+        return new GetMediaAssetByPublicIdHttpResponse
         {
-            var useCaseRequest = new RestoreMediaRequest
-            {
-                MediaId = mediaId
-            };
+            MediaId = value.MediaId,
+            PublicId = value.PublicId,
+            StorageProvider = value.StorageProvider,
+            Url = value.Url,
+            StoragePath = value.StoragePath,
+            FileName = value.FileName,
+            MediaType = value.MediaType,
+            MimeType = value.MimeType,
+            FileSizeBytes = value.FileSizeBytes,
+            Width = value.Width,
+            Height = value.Height,
+            DurationSeconds = value.DurationSeconds,
+            AltText = value.AltText,
+            MetadataJson = value.MetadataJson,
+            CreatedAt = value.CreatedAt,
+            CreatedBy = value.CreatedBy,
+            UpdatedAt = value.UpdatedAt,
+            UpdatedBy = value.UpdatedBy,
+            IsDeleted = value.IsDeleted,
+            DeletedAt = value.DeletedAt,
+            DeletedBy = value.DeletedBy,
+            RestoreUntil = value.RestoreUntil,
+            RestoredAt = value.RestoredAt,
+            RestoredBy = value.RestoredBy,
+            Version = value.Version
+        };
+    }
 
-            Result<RestoreMediaResponse> result =
-                await _restoreMediaUseCase.ExecuteAsync(useCaseRequest, cancellationToken);
-
-            if (result.IsFailure)
-            {
-                return this.ToActionResult(Result<RestoreMediaAssetHttpResponse>.Failure(result.Error!));
-            }
-
-            var response = new RestoreMediaAssetHttpResponse
-            {
-                MediaId = result.Value!.MediaId,
-                IsRestored = result.Value.IsRestored,
-                AffectedRows = result.Value.AffectedRows
-            };
-
-            return this.ToActionResult(Result<RestoreMediaAssetHttpResponse>.Success(response));
-        }
+    private static GetMediaAssetsItemHttpResponse MapListItem(
+        GetMediaListItemResponse item)
+    {
+        return new GetMediaAssetsItemHttpResponse
+        {
+            MediaId = item.MediaId,
+            PublicId = item.PublicId,
+            StorageProvider = item.StorageProvider,
+            Url = item.Url,
+            StoragePath = item.StoragePath,
+            FileName = item.FileName,
+            MediaType = item.MediaType,
+            MimeType = item.MimeType,
+            FileSizeBytes = item.FileSizeBytes,
+            Width = item.Width,
+            Height = item.Height,
+            DurationSeconds = item.DurationSeconds,
+            AltText = item.AltText,
+            MetadataJson = item.MetadataJson,
+            Version = item.Version,
+            CreatedAt = item.CreatedAt,
+            CreatedBy = item.CreatedBy,
+            UpdatedAt = item.UpdatedAt,
+            UpdatedBy = item.UpdatedBy,
+            IsDeleted = item.IsDeleted,
+            DeletedAt = item.DeletedAt,
+            DeletedBy = item.DeletedBy,
+            RestoreUntil = item.RestoreUntil,
+            RestoredAt = item.RestoredAt,
+            RestoredBy = item.RestoredBy
+        };
     }
 }

@@ -35,14 +35,17 @@
     <ProjectReference Include="..\..\modules\Content\Content.Application\Content.Application.csproj" />
     <ProjectReference Include="..\..\modules\Content\Content.Infrastructure\Content.Infrastructure.csproj" />
 
+    <ProjectReference Include="..\..\modules\Media\Media.Application\Media.Application.csproj" />
+    <ProjectReference Include="..\..\modules\Media\Media.Infrastructure\Media.Infrastructure.csproj" />
+
+    <ProjectReference Include="..\..\modules\Seo\Seo.Application\Seo.Application.csproj" />
+    <ProjectReference Include="..\..\modules\Seo\Seo.Infrastructure\Seo.Infrastructure.csproj" />
+
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Application\Notifications.Application.csproj" />
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Infrastructure\Notifications.Infrastructure.csproj" />
 
     <ProjectReference Include="..\..\modules\Audit\Audit.Application\Audit.Application.csproj" />
     <ProjectReference Include="..\..\modules\Audit\Audit.Infrastructure\Audit.Infrastructure.csproj" />
-
-    <ProjectReference Include="..\..\modules\Seo\Seo.Application\Seo.Application.csproj" />
-    <ProjectReference Include="..\..\modules\Seo\Seo.Infrastructure\Seo.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

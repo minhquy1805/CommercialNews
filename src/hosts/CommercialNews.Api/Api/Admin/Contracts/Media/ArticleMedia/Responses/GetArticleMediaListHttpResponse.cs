@@ -6,6 +6,8 @@ public sealed class GetArticleMediaListHttpResponse
         = Array.Empty<GetArticleMediaListItemHttpResponse>();
 
     public int Page { get; init; }
+
     public int PageSize { get; init; }
+
     public int TotalItems { get; init; }
 }

@@ -7,6 +7,4 @@ public sealed class AttachMediaToArticleRequest
     public long MediaId { get; init; }
 
     public bool IsPrimary { get; init; }
-
-    public long? ActorUserId { get; init; }
 }

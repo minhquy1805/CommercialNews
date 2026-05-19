@@ -4,10 +4,10 @@ public sealed class ReorderArticleMediaRequest
 {
     public long ArticleId { get; init; }
 
+    public int? ExpectedVersion { get; init; }
+
     public IReadOnlyCollection<ReorderArticleMediaItemRequest> Items { get; init; }
         = Array.Empty<ReorderArticleMediaItemRequest>();
-
-    public long? ActorUserId { get; init; }
 }
 
 public sealed class ReorderArticleMediaItemRequest

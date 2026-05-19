@@ -129,16 +129,21 @@ Accepted for:
 
 ---
 
-## 2) Idempotent operations (recommended)
+## 2) Idempotent operations and business guards
 
 ### 2.1 Attach
 Repeated attach should return success without duplication.
 
 ### 2.2 Set primary
-Setting the same primary again should return success.
+Setting the same primary again should converge safely when the request is based on current version.
+If the request carries a stale `expectedVersion`, it should fail deterministically with `409 Conflict`.
 
 ### 2.3 Reorder
-Submitting the same order list again should return success with unchanged truth.
+Submitting the same order list again should either:
+- converge safely when protected by idempotency/replay policy, or
+- fail deterministically with `409 Conflict` when `expectedVersion` is stale.
+
+It must never partially apply or corrupt order truth.
 
 ### 2.4 Soft delete / restore
 - repeated delete returns success
@@ -173,6 +178,57 @@ Media should instead rely on:
 - stale-write rejection where needed
 - replay-safe downstream processing
 
+### 2.8 Business-level idempotency table
+
+| Operation | Message-level guard | Business-level guard | Expected behavior |
+|---|---|---|---|
+| Register media | Outbox `MessageId` for emitted event | `Idempotency-Key` where provided | Same semantic retry converges safely |
+| Update metadata | Outbox `MessageId` | Same final state is no-op/equivalent success | No duplicate meaningful side effect |
+| Attach media | Outbox `MessageId` | Unique active `(ArticleId, MediaId)` + optional `Idempotency-Key` | Repeated attach does not duplicate membership |
+| Detach media | Outbox `MessageId` | Current attachment truth | Repeated detach converges safely |
+| Reorder | Outbox `MessageId` | `expectedVersion` + final-state set validation | Stale reorder returns `409` |
+| Set primary | Outbox `MessageId` | `expectedVersion` + one-primary invariant | Stale primary update returns `409` |
+| Soft delete | Outbox `MessageId` | Current asset state | Repeated delete converges safely |
+| Restore | Outbox `MessageId` | Current asset state + retention policy | Repeated restore converges where policy allows |
+
+### 2.9 Idempotency-Key policy
+
+`Idempotency-Key` is used to protect same-intent retries after client timeout or network ambiguity.
+
+Required / strongly recommended usage:
+
+- `POST /items`
+- `POST /articles/{articleId}/attachments`
+
+V1 posture:
+
+- `Idempotency-Key` is strongly recommended and may become required for production clients.
+- The key must be scoped by actor/client, endpoint, and semantic request.
+- Reusing the same key with the same semantic request should return the original/equivalent result.
+- Reusing the same key with a different semantic request must return `409 Conflict`.
+- Malformed keys must return `400 Bad Request`.
+- Idempotency keys must not bypass authorization.
+- Idempotency keys must not be treated as global secrets.
+
+Same semantic request includes:
+
+- same actor/client scope
+- same endpoint/operation
+- same target resource where applicable
+- same important payload fields
+
+For `POST /items`, semantic request should include:
+
+- `url` or canonical storage reference
+- `type`
+- safe metadata summary where policy requires it
+
+For `POST /articles/{articleId}/attachments`, semantic request should include:
+
+- `articleId`
+- `mediaId`
+- `isPrimary`
+
 ---
 
 ## 3) Consistency expectations
@@ -201,6 +257,7 @@ If a client times out during:
 - reorder
 - soft delete / restore
 - register media
+- update media metadata
 
 that timeout does **not** prove the Media truth change failed.
 
@@ -247,6 +304,8 @@ For Media commands, the module should commit atomically:
 - the Media truth change
 - attachment relation updates
 - primary/order state changes required by the command
+- register: media metadata insert + Outbox
+- update metadata: metadata update + version increment + Outbox
 - revision/version marker where used for stale-write protection
 - the Outbox record for downstream cache/projection/audit side effects
 
@@ -327,7 +386,7 @@ At minimum, the design must prevent:
 Typical implementation options include:
 - DB uniqueness constraints for attachment identity
 - filtered unique constraints for primary invariants
-- optimistic concurrency for admin edit/reorder workflows where needed
+- optimistic concurrency for reorder and set-primary workflows
 - deterministic “set desired final state” semantics instead of procedural incremental updates
 
 ### 5.3 Version/revision over timestamp
@@ -353,7 +412,7 @@ A caller saying:
 is not sufficient.
 
 The store or write boundary must verify:
-- expected version/revision where used
+- expected version/revision for operations requiring it
 - current primary scope
 - current attachment membership
 - final set validity before commit
@@ -375,6 +434,26 @@ If caches, projections, derivative metadata, or delayed workers still reflect ol
 - they must not restore an older primary selection over current truth
 - they must not publish older ordering over fresher truth-backed order
 - they must be rejected, ignored, or rebuilt from authoritative Media truth
+
+### 5.7 ExpectedVersion policy
+
+`expectedVersion` is required for:
+
+- `POST /articles/{articleId}/attachments:reorder`
+- `POST /articles/{articleId}/attachments:set-primary`
+
+Rules:
+
+- missing `expectedVersion` returns `400 Bad Request`
+- version mismatch returns `409 Conflict`
+- `UpdatedAt` must not be used as the concurrency authority
+- version check must be performed against current Media attachment-set truth
+- passing version check does not bypass invariant validation
+
+Attach and detach do not require `expectedVersion` in V1:
+
+- attach is protected by active `(ArticleId, MediaId)` uniqueness and optional `Idempotency-Key`
+- detach converges safely from current attachment truth
 
 ---
 
@@ -405,27 +484,29 @@ They do **not** imply one global order across all media operations in the system
 
 ## 7) Replication mechanics (events and side effects)
 
-Media changes may trigger downstream effects:
+Media changes trigger Audit ingestion in V1.
+
+Media changes may trigger additional downstream effects in later phases:
 - cache invalidation / CDN purge
 - search/index projection updates
-- audit logging
-- read-model refreshes if introduced later
+- read-model refreshes
 - derivative processing workflows
 
 If downstream effects are required:
 - Media writes an Outbox record atomically with the truth change
 - Worker publishes and consumers execute side effects
 
-Typical events (policy-level):
-- `MediaAttached`
-- `MediaDetached`
-- `MediaReordered`
-- `PrimaryMediaSet`
-- `MediaSoftDeleted`
-- `MediaRestored`
-- `MediaRegistered`
+Typical events:
+- `media.asset_registered`
+- `media.asset_updated`
+- `media.asset_soft_deleted`
+- `media.asset_restored`
+- `media.article_media_attached`
+- `media.article_media_detached`
+- `media.article_media_reordered`
+- `media.article_primary_media_set`
 
-Consumers must be idempotent (`messageId` dedupe).
+Consumers must be idempotent (`MessageId` dedupe).
 
 ### 7.1 Duplicate delivery vs stale delivery
 Media consumers must distinguish:
@@ -433,7 +514,7 @@ Media consumers must distinguish:
 - **stale delivery**: older event arrives after newer Media truth already exists
 
 Protection:
-- dedupe by `messageId`
+- dedupe by `MessageId`
 - version-aware stale rejection where order-sensitive projections exist
 - truth resync if gaps are detected and exact order matters
 
@@ -457,6 +538,28 @@ Media assumes downstream consumers may:
 
 Therefore derived media outputs must remain subordinate to current truth and safe under replay.
 
+### 7.4 V1 consumer posture
+
+In V1, Media events are required to be consumed by Audit.
+
+Audit consumer rules:
+
+- dedupe by `MessageId`
+- append audit record only if not already processed
+- ack only after durable append or durable dedupe decision
+- duplicate delivery must not create duplicate audit records
+- Audit lag must not redefine Media truth
+- Audit consumer failure must not be reported as a synchronous Media API failure after truth commit
+
+Reading, SEO, CDN invalidation, scan, and variant generation are future consumers.
+
+Future projection consumers must:
+
+- dedupe by `MessageId`
+- use `AggregateId + Version` where ordering matters
+- ignore stale versions or resync from Media truth
+- avoid blind overwrite by arrival order
+
 ---
 
 ## 8) Primary rule enforcement (non-negotiable invariant)
@@ -472,16 +575,18 @@ Recommended pattern:
 3. commit atomically
 
 If supported, enforce with a unique filtered constraint such as:
-- unique `(ArticleId, Type)` where `IsPrimary = 1` and `IsDeleted = 0`
+- unique `(ArticleId)` where `IsPrimary = 1` and `IsDeleted = 0`
 
 ### 8.1 Deleted media cannot remain primary
 Deleted media cannot remain primary.
 
-Policy options:
-- **Option A (recommended):** auto-unset primary upon delete in the same transaction
-- **Option B:** block delete if media is primary and require explicit primary change first
+V1 policy:
 
-The chosen option must be applied consistently.
+- if a deleted media asset is active primary in any article attachment, primary selection is cleared in the same Media truth transaction where feasible
+- the system does not automatically select fallback primary media
+- if primary selections were cleared, `media.asset_soft_deleted` payload may include `primarySelectionsCleared = true` and affected article IDs where safe
+- deleted media must not be newly attached
+- deleted media must not be selected as primary
 
 ---
 
@@ -510,14 +615,16 @@ Restore must:
 ## 10) Retry safety
 
 Clients may retry after timeout ambiguity.
-Operations must converge to the same final truth state.
+Operations must converge to the same final truth state or fail safely according to policy.
 
 This applies especially to:
+- register media
+- update media metadata
 - attach
+- detach
 - set primary
 - reorder
 - soft delete / restore
-- register media
 
 If Media publishes events for side effects:
 - DB commit must not depend on broker availability
@@ -532,6 +639,31 @@ Media correctness must not depend on:
 - only one cleanup/repair run being assumed current without explicit protection
 
 If future ownership-sensitive workflows are introduced, they must use authoritative generation/fencing checks rather than naive singleton assumptions.
+
+### 10.2 Same-intent replay policy
+
+Media distinguishes:
+
+- duplicate message replay: same `MessageId`
+- same-intent replay: different `MessageId`, same effective business intent
+
+Same-intent replay risks:
+
+- duplicate media metadata registration
+- duplicate attachment intent
+- repeated primary changes after timeout ambiguity
+- repeated audit evidence for unchanged state
+
+V1 protection:
+
+- `Idempotency-Key` for register and attach where provided
+- unique active `(ArticleId, MediaId)` for attach
+- `expectedVersion` for reorder and set-primary
+- repeated delete/restore converge by current state
+- Audit dedupes by `MessageId`
+
+Same-intent replay must not rely on timeout assumptions.
+If ambiguity exists, reconcile from Media truth.
 
 ---
 
@@ -643,8 +775,12 @@ over unsafe dual publication or stale overwrite.
 Minimum signals:
 - attach/detach/primary/reorder success/failure
 - invariant violation attempts (multiple primary prevented, duplicate attach prevented)
-- optimistic-concurrency or stale-update rejects if implemented
+- expectedVersion / stale-update rejects for reorder and set-primary
+- idempotency-key reuse count
+- idempotency conflict count
 - outbox backlog/age for Media events
+- Media event dedupe hits by `MessageId`
+- Audit dedupe hit count for Media events
 - CDN/cache invalidation failures if used
 - degraded reads due to missing media (placeholder rate)
 - reorder conflict/resync indicators for order-sensitive projections if implemented
@@ -652,14 +788,22 @@ Minimum signals:
 - cleanup/reconciliation activity for media artifacts
 - candidate publication/cutover failures for important derived outputs
 - version-gap / stale-event rejection indicators where applicable
+- same-intent replay rejects where measurable
 - ownership-generation mismatch count if future ownership-sensitive workflows are introduced
 
 Logs should include:
 - `correlationId`
+- `MessageId`
+- `eventType`
 - `ArticleId`
 - `MediaId`
+- `expectedVersion`
+- `actualVersion`
+- `idempotencyKeyHash` where used
 - action and outcome (`applied`, `no-op`, `idempotent`, `conflict`, `stale-rejected`)
 - version/revision markers where relevant
+
+Do not log raw idempotency keys.
 
 ---
 
@@ -669,7 +813,7 @@ Media correctness in V1 rests on fifteen rules:
 
 1. Media truth owns attachment membership, order, primary selection, and deletion state.  
 2. CDN/object storage serve binary content but do not define relationship truth.  
-3. Attach, set-primary, reorder, delete/restore, and register must converge deterministically under retry.  
+3. Register, update, attach, detach, set-primary, reorder, delete/restore must converge deterministically or fail safely under retry.
 4. Reorder is a final-state set operation, not a loose partial update sequence.  
 5. Primary invariants must be enforced by truth and protected under concurrency.  
 6. Timeout does not prove a Media mutation failed.  

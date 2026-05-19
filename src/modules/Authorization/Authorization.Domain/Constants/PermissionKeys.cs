@@ -37,6 +37,29 @@ public static class PermissionKeys
         }
     }
 
+    public static class Media
+    {
+        public static class Assets
+        {
+            public const string Create = "media:assets:create";
+            public const string Read = "media:assets:read";
+            public const string Update = "media:assets:update";
+            public const string Delete = "media:assets:delete";
+            public const string Restore = "media:assets:restore";
+            public const string ReadUsage = "media:assets:read-usage";
+        }
+
+        public static class ArticleMedia
+        {
+            public const string Read = "media:article-media:read";
+            public const string Attach = "media:article-media:attach";
+            public const string Detach = "media:article-media:detach";
+            public const string SetPrimary = "media:article-media:set-primary";
+            public const string Reorder = "media:article-media:reorder";
+            public const string ReadState = "media:article-media:read-state";
+        }
+    }
+
     public static class Seo
     {
         public static class Metadata

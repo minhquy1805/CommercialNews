@@ -22,7 +22,7 @@ public sealed class RegisterMediaResponse
     public string? MetadataJson { get; init; }
 
     public DateTime CreatedAt { get; init; }
-    public long? CreatedByUserId { get; init; }
+    public long? CreatedBy { get; init; }
 
     public int Version { get; init; }
 }

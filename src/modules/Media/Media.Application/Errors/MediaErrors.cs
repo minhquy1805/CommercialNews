@@ -9,6 +9,41 @@ public static class MediaErrors
             code: "MEDIA.VALIDATION_FAILED",
             message: "One or more media validations failed.");
 
+    public static readonly Error InvalidState =
+        Error.Validation(
+            code: "MEDIA.INVALID_STATE",
+            message: "The media operation is not valid for the current state.");
+
+    public static readonly Error VersionConflict =
+        Error.Conflict(
+            code: "MEDIA.VERSION_CONFLICT",
+            message: "The media resource version does not match the expected version.");
+
+    public static readonly Error ExpectedVersionRequired =
+        Error.Validation(
+            code: "MEDIA.EXPECTED_VERSION_REQUIRED",
+            message: "Expected version is required for this operation.");
+
+    public static readonly Error ConstraintViolation =
+        Error.Conflict(
+            code: "MEDIA.CONSTRAINT_VIOLATION",
+            message: "A media persistence constraint was violated.");
+
+    public static readonly Error PersistenceError =
+        Error.Failure(
+            code: "MEDIA.PERSISTENCE_ERROR",
+            message: "An unexpected media persistence error occurred.");
+
+    public static readonly Error DependencyUnavailable =
+        Error.Failure(
+            code: "MEDIA.DEPENDENCY_UNAVAILABLE",
+            message: "A media dependency is temporarily unavailable.");
+
+    public static readonly Error ConcurrentModification =
+        Error.Conflict(
+            code: "MEDIA.CONCURRENT_MODIFICATION",
+            message: "The media operation could not be completed because the resource was modified concurrently.");
+
     public static readonly Error RateLimited =
         Error.RateLimited(
             code: "MEDIA.RATE_LIMITED",
@@ -20,6 +55,11 @@ public static class MediaErrors
             Error.NotFound(
                 code: "MEDIA.MEDIA_NOT_FOUND",
                 message: "Media asset was not found.");
+
+        public static readonly Error Deleted =
+            Error.Conflict(
+                code: "MEDIA.MEDIA_DELETED",
+                message: "Media asset is deleted.");
 
         public static readonly Error AlreadyDeleted =
             Error.Validation(
@@ -40,6 +80,11 @@ public static class MediaErrors
             Error.Validation(
                 code: "MEDIA.MEDIA_PUBLIC_ID_INVALID",
                 message: "Media public id must be exactly 26 characters.");
+
+        public static readonly Error PublicIdAlreadyExists =
+            Error.Conflict(
+                code: "MEDIA.MEDIA_PUBLIC_ID_ALREADY_EXISTS",
+                message: "Media public id already exists.");
 
         public static readonly Error StorageProviderRequired =
             Error.Validation(
@@ -86,6 +131,11 @@ public static class MediaErrors
                 code: "MEDIA.MEDIA_FILE_SIZE_INVALID",
                 message: "File size must be greater than or equal to zero.");
 
+        public static readonly Error DimensionInvalid =
+            Error.Validation(
+                code: "MEDIA.MEDIA_DIMENSION_INVALID",
+                message: "Media dimensions must be greater than or equal to zero.");
+
         public static readonly Error WidthInvalid =
             Error.Validation(
                 code: "MEDIA.MEDIA_WIDTH_INVALID",
@@ -121,8 +171,13 @@ public static class MediaErrors
                 code: "MEDIA.MEDIA_INVALID_DELETED_AT",
                 message: "Deleted time is invalid for the current media state.");
 
-        public static readonly Error RestoreWindowExpired =
+        public static readonly Error InvalidDeletedBy =
             Error.Validation(
+                code: "MEDIA.MEDIA_INVALID_DELETED_BY",
+                message: "Deleted-by user is invalid for the current media state.");
+
+        public static readonly Error RestoreWindowExpired =
+            Error.Conflict(
                 code: "MEDIA.RESTORE_WINDOW_EXPIRED",
                 message: "The restore window has expired.");
 
@@ -130,6 +185,39 @@ public static class MediaErrors
             Error.Validation(
                 code: "MEDIA.MEDIA_RESTORE_UNTIL_INVALID",
                 message: "Restore-until time must be greater than or equal to the current time.");
+
+        public static readonly Error RestoredAtRequired =
+            Error.Validation(
+                code: "MEDIA.MEDIA_RESTORED_AT_REQUIRED",
+                message: "Restored media asset must have RestoredAt when RestoredBy exists.");
+    }
+
+    public static class ArticleMediaSet
+    {
+        public static readonly Error NotFound =
+            Error.NotFound(
+                code: "MEDIA.ARTICLE_MEDIA_SET_NOT_FOUND",
+                message: "Article media set was not found.");
+
+        public static readonly Error InvalidArticleId =
+            Error.Validation(
+                code: "MEDIA.ARTICLE_MEDIA_SET_INVALID_ARTICLE_ID",
+                message: "Article id must be greater than zero.");
+
+        public static readonly Error InvalidVersion =
+            Error.Validation(
+                code: "MEDIA.ARTICLE_MEDIA_SET_INVALID_VERSION",
+                message: "Article media set version must be greater than or equal to zero.");
+
+        public static readonly Error VersionConflict =
+            Error.Conflict(
+                code: "MEDIA.VERSION_CONFLICT",
+                message: "Article media set version does not match the expected version.");
+
+        public static readonly Error ExpectedVersionRequired =
+            Error.Validation(
+                code: "MEDIA.EXPECTED_VERSION_REQUIRED",
+                message: "Expected version is required.");
     }
 
     public static class ArticleMedia
@@ -153,6 +241,11 @@ public static class MediaErrors
             Error.Validation(
                 code: "MEDIA.ATTACHMENT_NOT_DELETED",
                 message: "The media attachment is not deleted.");
+
+        public static readonly Error MediaNotAttached =
+            Error.NotFound(
+                code: "MEDIA.MEDIA_NOT_ATTACHED",
+                message: "The media asset is not attached to the article.");
 
         public static readonly Error InvalidArticleMediaId =
             Error.Validation(
@@ -184,15 +277,15 @@ public static class MediaErrors
                 code: "MEDIA.ATTACHMENT_INVALID_DELETED_AT",
                 message: "Deleted time is invalid for the current attachment state.");
 
+        public static readonly Error InvalidDeletedBy =
+            Error.Validation(
+                code: "MEDIA.ATTACHMENT_INVALID_DELETED_BY",
+                message: "Deleted-by user is invalid for the current attachment state.");
+
         public static readonly Error PrimaryConstraintViolation =
             Error.Conflict(
                 code: "MEDIA.PRIMARY_CONSTRAINT_VIOLATION",
-                message: "The primary media constraint was violated.");
-
-        public static readonly Error AlreadyPrimary =
-            Error.Validation(
-                code: "MEDIA.ATTACHMENT_ALREADY_PRIMARY",
-                message: "The media attachment is already primary.");
+                message: "Only one active primary media is allowed per article.");
 
         public static readonly Error AltTextOverrideTooLong =
             Error.Validation(
@@ -208,6 +301,16 @@ public static class MediaErrors
             Error.Validation(
                 code: "MEDIA.INVALID_REORDER_LIST",
                 message: "The reorder list is invalid.");
+
+        public static readonly Error ExpectedVersionRequired =
+            Error.Validation(
+                code: "MEDIA.EXPECTED_VERSION_REQUIRED",
+                message: "Expected version is required.");
+
+        public static readonly Error VersionConflict =
+            Error.Conflict(
+                code: "MEDIA.VERSION_CONFLICT",
+                message: "Article media set version does not match the expected version.");
     }
 
     public static class Variant
@@ -216,6 +319,11 @@ public static class MediaErrors
             Error.NotFound(
                 code: "MEDIA.VARIANT_NOT_FOUND",
                 message: "Media variant was not found.");
+
+        public static readonly Error AlreadyExists =
+            Error.Conflict(
+                code: "MEDIA.VARIANT_ALREADY_EXISTS",
+                message: "A media variant with the same type already exists for this media asset.");
 
         public static readonly Error InvalidVariantId =
             Error.Validation(
@@ -269,5 +377,13 @@ public static class MediaErrors
             Error.NotFound(
                 code: "MEDIA.ARTICLE_NOT_FOUND",
                 message: "Article was not found.");
+    }
+
+    public static class Actor
+    {
+        public static readonly Error NotFound =
+            Error.NotFound(
+                code: "MEDIA.ACTOR_NOT_FOUND",
+                message: "The actor user referenced by the media operation was not found.");
     }
 }

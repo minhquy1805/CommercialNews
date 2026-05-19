@@ -6,6 +6,8 @@ Base path (Admin): `/api/v1/admin/media`
 
 > All endpoints in this module require Bearer auth + explicit authorization policies.
 > Governance actions must emit audit events (async ingestion).
+> V1 async scope: Media emits events through Outbox. Audit consumes these events first.
+> Reading, SEO, CDN, scan, and variant workflows are downstream extensions and must not be required for Media write success.
 > Success means **Media truth committed**. It does not guarantee that CDN, cache, or derivative side effects have already completed.
 
 ---
@@ -14,11 +16,11 @@ Base path (Admin): `/api/v1/admin/media`
 
 ### POST `/items`
 
-Register a media item (metadata) after upload (upload mechanism is implementation-specific).
+Register a media item (metadata) after binary upload (upload mechanism is implementation-specific).
 
 **Headers**
 
-* `Idempotency-Key` (recommended)
+* `Idempotency-Key` (strongly recommended; may become required for production clients)
 * `X-Correlation-Id` (optional)
 
 **Request**
@@ -47,10 +49,12 @@ Register a media item (metadata) after upload (upload mechanism is implementatio
 
 **Rules**
 
+* This endpoint registers media metadata after binary upload. It does not guarantee that binary upload was performed by this API.
 * Allowed types and size constraints must be validated by policy.
 * Metadata must be sanitized and must not accept dangerous fields.
 * If `Idempotency-Key` is reused with the same semantic request, registration should converge safely.
 * Timeout ambiguity must be reconciled from Media truth, not from client belief or downstream derivative presence.
+* On success, emit `media.asset_registered`.
 
 ### GET `/items`
 
@@ -76,6 +80,42 @@ Get media item details.
 
 Media detail object.
 
+### PATCH `/items/{mediaId}`
+
+Update safe media metadata.
+
+**Headers**
+
+* `X-Correlation-Id` (optional)
+
+**Request**
+
+```json
+{
+  "altText": "Updated alt text",
+  "metadata": {
+    "width": 1200,
+    "height": 630
+  }
+}
+```
+
+**Response (200)**
+
+```json
+{
+  "updated": true
+}
+```
+
+**Rules**
+
+* Only safe metadata fields may be updated.
+* `url`, storage path, size, and type should not be changed unless explicitly allowed by policy.
+* Metadata must be sanitized.
+* Repeated update with the same final state should converge safely.
+* On success, emit `media.asset_updated`.
+
 ### DELETE `/items/{mediaId}`
 
 Soft delete a media item.
@@ -91,8 +131,10 @@ Soft delete a media item.
 **Rules**
 
 * Soft delete is truth-first.
-* Deleted media must not remain active primary if policy forbids it.
+* V1 policy: if the deleted media is active primary in any article attachment, primary selection for those attachments is cleared in the same Media truth transaction where feasible.
+* The system does not automatically select fallback primary media in V1.
 * Repeated delete should converge safely as a no-op or equivalent success by policy.
+* On success, emit `media.asset_soft_deleted`.
 
 ### POST `/items/{mediaId}:restore`
 
@@ -111,6 +153,7 @@ Restore a soft-deleted media item (within the retention window).
 * Restore must obey retention and legality policy.
 * Restore must not silently violate current primary or ordering invariants.
 * Repeated restore should converge safely where policy allows.
+* On success, emit `media.asset_restored`.
 
 ---
 
@@ -122,7 +165,7 @@ Attach a media item to an article.
 
 **Headers**
 
-* `Idempotency-Key` (recommended)
+* `Idempotency-Key` (strongly recommended to avoid duplicate attach intent after client timeout)
 * `X-Correlation-Id` (optional)
 
 **Request**
@@ -138,16 +181,19 @@ Attach a media item to an article.
 
 ```json
 {
-  "attached": true
+  "attached": true,
+  "version": 5
 }
 ```
 
 **Rules**
 
 * Attachment integrity must be enforced.
-* If `isPrimary = true`, the primary rule (`0..1`) must be enforced atomically.
+* If `isPrimary = true`, the same transaction attaches the media and sets it as primary.
 * Repeated attach must not create duplicate membership or duplicate meaningful side effects.
 * If timeout occurs, callers must reconcile from current Media truth.
+* On success, emit `media.article_media_attached`.
+* If primary was changed by this request, include `primaryChanged = true` and `isPrimary = true` in the event payload.
 
 ### DELETE `/articles/{articleId}/attachments/{mediaId}`
 
@@ -157,15 +203,20 @@ Detach media from an article.
 
 ```json
 {
-  "detached": true
+  "detached": true,
+  "version": 6
 }
 ```
 
 **Rules**
 
-* If detaching the primary media, primary becomes none or falls back deterministically by policy.
+* V1 policy: if the detached media is the current primary, primary selection is cleared.
+* The system does not automatically select a fallback primary in V1.
+* Admin may explicitly set a new primary through `attachments:set-primary`.
 * Repeated detach should converge safely.
 * Derived caches and projections may lag, but detach truth is immediate inside Media.
+* On success, emit `media.article_media_detached`.
+* If primary was cleared, include `primaryCleared = true` in the event payload.
 
 ### POST `/articles/{articleId}/attachments:reorder`
 
@@ -179,6 +230,7 @@ Reorder attachments deterministically.
 
 ```json
 {
+  "expectedVersion": 7,
   "mediaIds": ["id1", "id2", "id3"]
 }
 ```
@@ -187,7 +239,8 @@ Reorder attachments deterministically.
 
 ```json
 {
-  "reordered": true
+  "reordered": true,
+  "version": 8
 }
 ```
 
@@ -198,6 +251,10 @@ Reorder attachments deterministically.
 * Reorder is a final-state set operation, not a loose partial mutation sequence.
 * Retrying the same order must converge to the same final truth.
 * Partial reorder application is not acceptable.
+* `expectedVersion` is required to prevent stale admin updates.
+* If `expectedVersion` is missing, return `400 Bad Request`.
+* If the provided version does not match current Media attachment version, return `409 Conflict`.
+* On success, emit `media.article_media_reordered`.
 
 ### POST `/articles/{articleId}/attachments:set-primary`
 
@@ -211,7 +268,8 @@ Set the primary media for an article.
 
 ```json
 {
-  "mediaId": "string"
+  "mediaId": "string",
+  "expectedVersion": 7
 }
 ```
 
@@ -219,7 +277,8 @@ Set the primary media for an article.
 
 ```json
 {
-  "primarySet": true
+  "primarySet": true,
+  "version": 9
 }
 ```
 
@@ -228,11 +287,17 @@ Set the primary media for an article.
 * Exactly one primary (or none, by policy) must be enforced.
 * This operation must be idempotent.
 * The primary invariant must be enforced atomically.
+* `expectedVersion` is required to prevent stale primary selection.
+* If `expectedVersion` is missing, return `400 Bad Request`.
+* If the version does not match current Media attachment version, return `409 Conflict`.
+* If the selected media is already primary, the operation should converge safely.
+* If the version does not match current Media attachment version, return `409 Conflict`.
 * Stale or replayed downstream projection or cache updates must not recreate an older primary state.
+* On success, emit `media.article_primary_media_set`.
 
 ---
 
-## 3) Public read endpoints (optional)
+## 3) Public read endpoints (not implemented in V1)
 
 Typically Reading composes media. If direct public reads are needed:
 
@@ -273,3 +338,39 @@ CDN, cache, thumbnails, and transformed variants are downstream and derived.
 * Timeout does not prove attach, reorder, set-primary, delete, restore, or register failed.
 * Derived delivery lag may affect presentation, but it must not redefine Media truth.
 * If downstream side effects are emitted, they are at-least-once and must be safe under duplicate delivery and replay.
+
+---
+
+## 6) Emitted events
+
+Media emits integration events through the system Outbox.
+
+Events are committed in the same local transaction as the Media truth change.
+
+### Media item events
+
+* `media.asset_registered`
+  * Emitted after media metadata is registered.
+* `media.asset_updated`
+  * Emitted after safe metadata is updated.
+* `media.asset_soft_deleted`
+  * Emitted after a media item is soft-deleted.
+* `media.asset_restored`
+  * Emitted after a media item is restored.
+
+### Article attachment events
+
+* `media.article_media_attached`
+  * Emitted after a media item is attached to an article.
+* `media.article_media_detached`
+  * Emitted after a media item is detached from an article.
+* `media.article_media_reordered`
+  * Emitted after article attachments are reordered.
+* `media.article_primary_media_set`
+  * Emitted after primary media is set for an article.
+
+### V1 consumers
+
+In V1, Media events are consumed by Audit for asynchronous audit ingestion.
+
+Reading, SEO, CDN invalidation, media scanning, and variant generation may consume selected Media events in later phases, but they are not required for Media truth success in V1.

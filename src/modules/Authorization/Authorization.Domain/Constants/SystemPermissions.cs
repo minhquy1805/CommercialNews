@@ -125,6 +125,78 @@ public static class SystemPermissions
             Description: "Restore deleted tags"),
 
         new(
+            Key: PermissionKeys.Media.Assets.Create,
+            Module: "Media",
+            Action: "Create",
+            Description: "Register media assets"),
+
+        new(
+            Key: PermissionKeys.Media.Assets.Read,
+            Module: "Media",
+            Action: "Read",
+            Description: "Read media assets in admin media workflows"),
+
+        new(
+            Key: PermissionKeys.Media.Assets.Update,
+            Module: "Media",
+            Action: "Update",
+            Description: "Update media asset metadata"),
+
+        new(
+            Key: PermissionKeys.Media.Assets.Delete,
+            Module: "Media",
+            Action: "Delete",
+            Description: "Soft-delete media assets"),
+
+        new(
+            Key: PermissionKeys.Media.Assets.Restore,
+            Module: "Media",
+            Action: "Restore",
+            Description: "Restore deleted media assets"),
+
+        new(
+            Key: PermissionKeys.Media.Assets.ReadUsage,
+            Module: "Media",
+            Action: "ReadUsage",
+            Description: "Read media asset usage across article attachments"),
+
+        new(
+            Key: PermissionKeys.Media.ArticleMedia.Read,
+            Module: "Media",
+            Action: "Read",
+            Description: "Read article media attachments"),
+
+        new(
+            Key: PermissionKeys.Media.ArticleMedia.ReadState,
+            Module: "Media",
+            Action: "ReadState",
+            Description: "Read article media attachment set state and version"),
+
+        new(
+            Key: PermissionKeys.Media.ArticleMedia.Attach,
+            Module: "Media",
+            Action: "Attach",
+            Description: "Attach media assets to articles"),
+
+        new(
+            Key: PermissionKeys.Media.ArticleMedia.Detach,
+            Module: "Media",
+            Action: "Detach",
+            Description: "Detach media assets from articles"),
+
+        new(
+            Key: PermissionKeys.Media.ArticleMedia.SetPrimary,
+            Module: "Media",
+            Action: "SetPrimary",
+            Description: "Set primary media for articles"),
+
+        new(
+            Key: PermissionKeys.Media.ArticleMedia.Reorder,
+            Module: "Media",
+            Action: "Reorder",
+            Description: "Reorder article media attachments"),
+
+        new(
             Key: PermissionKeys.Seo.ArticleSettings.Read,
             Module: "Seo",
             Action: "Read",

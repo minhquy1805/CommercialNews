@@ -5,25 +5,39 @@
   - Create stored procedures for Media V1.
   - Focus on practical OLTP operations for:
       * media asset registration and lookup
+      * safe media metadata update
       * media asset soft delete / restore
+      * article-media attachment-set versioning
       * article-media attachment lifecycle
       * primary-media selection
       * deterministic attachment reorder
       * article-scoped media queries
-  - Idempotent: uses CREATE OR ALTER PROCEDURE
+  - Idempotent: uses CREATE OR ALTER PROCEDURE where possible.
 
   Notes:
   - Business orchestration still primarily belongs in application/service layer.
+  - These procedures mutate Media truth only.
+  - Application/use-case layer must execute truth mutation and shared Outbox insert
+    inside the same local transaction for commands that emit Media events.
   - Media truth owns:
       * media metadata
       * attachment membership
+      * attachment-set version
       * primary selection
       * ordering
       * soft delete / restore state
-  - Outbox / audit emission is intentionally handled outside this file.
   - Reorder is treated as a final-state set operation.
   - Re-attaching a soft-deleted relation should restore the existing row
     rather than create a duplicate relationship row.
+
+  ResultCode convention for write procs that expose it:
+  - 0 = Success
+  - 1 = NotFound
+  - 2 = InvalidState / Deleted / RestoreNotAllowed
+  - 3 = VersionConflict
+  - 4 = InvalidReorderList
+  - 5 = Duplicate / ConstraintConflict
+  - 6 = ExpectedVersionRequired
 */
 
 SET ANSI_NULLS ON;
@@ -31,13 +45,13 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-USE [CommercialNews];
-GO
-
 IF DB_ID(N'CommercialNews') IS NULL
 BEGIN
     THROW 52201, 'Database [CommercialNews] does not exist. Run bootstrap scripts first.', 1;
 END
+GO
+
+USE [CommercialNews];
 GO
 
 IF SCHEMA_ID(N'media') IS NULL
@@ -66,7 +80,8 @@ CREATE OR ALTER PROCEDURE [media].[Media_MediaAsset_Insert]
     @MetadataJson     NVARCHAR(MAX) = NULL,
     @ContentHash      VARBINARY(32) = NULL,
     @CreatedBy        BIGINT = NULL,
-    @MediaId          BIGINT OUTPUT
+    @MediaId          BIGINT OUTPUT,
+    @NewVersion       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -96,7 +111,9 @@ BEGIN
         [IsDeleted],
         [DeletedAt],
         [DeletedBy],
-        [RestoreUntil]
+        [RestoreUntil],
+        [RestoredAt],
+        [RestoredBy]
     )
     VALUES
     (
@@ -122,10 +139,69 @@ BEGIN
         0,
         NULL,
         NULL,
+        NULL,
+        NULL,
         NULL
     );
 
     SET @MediaId = SCOPE_IDENTITY();
+    SET @NewVersion = 1;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [media].[Media_MediaAsset_UpdateMetadata]
+    @MediaId        BIGINT,
+    @AltText        NVARCHAR(300) = NULL,
+    @MetadataJson   NVARCHAR(MAX) = NULL,
+    @UpdatedBy      BIGINT = NULL,
+    @AffectedRows   INT OUTPUT,
+    @NewVersion     INT OUTPUT,
+    @ResultCode     INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @AffectedRows = 0;
+    SET @NewVersion = NULL;
+    SET @ResultCode = 0;
+
+    IF NOT EXISTS (SELECT 1 FROM [media].[MediaAsset] WHERE [MediaId] = @MediaId)
+    BEGIN
+        SET @ResultCode = 1;
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM [media].[MediaAsset] WHERE [MediaId] = @MediaId AND [IsDeleted] = 1)
+    BEGIN
+        SET @ResultCode = 2;
+        SELECT @NewVersion = [Version]
+        FROM [media].[MediaAsset]
+        WHERE [MediaId] = @MediaId;
+        RETURN;
+    END
+
+    UPDATE [media].[MediaAsset]
+    SET
+        [AltText] = @AltText,
+        [MetadataJson] = @MetadataJson,
+        [UpdatedAt] = SYSUTCDATETIME(),
+        [UpdatedBy] = @UpdatedBy,
+        [Version] = [Version] + 1
+    WHERE [MediaId] = @MediaId
+      AND [IsDeleted] = 0
+      AND
+      (
+          ([AltText] <> @AltText OR ([AltText] IS NULL AND @AltText IS NOT NULL) OR ([AltText] IS NOT NULL AND @AltText IS NULL))
+          OR
+          ([MetadataJson] <> @MetadataJson OR ([MetadataJson] IS NULL AND @MetadataJson IS NOT NULL) OR ([MetadataJson] IS NOT NULL AND @MetadataJson IS NULL))
+      );
+
+    SET @AffectedRows = @@ROWCOUNT;
+
+    SELECT @NewVersion = [Version]
+    FROM [media].[MediaAsset]
+    WHERE [MediaId] = @MediaId;
 END;
 GO
 
@@ -159,7 +235,9 @@ BEGIN
         [IsDeleted],
         [DeletedAt],
         [DeletedBy],
-        [RestoreUntil]
+        [RestoreUntil],
+        [RestoredAt],
+        [RestoredBy]
     FROM [media].[MediaAsset]
     WHERE [MediaId] = @MediaId;
 END;
@@ -195,25 +273,53 @@ BEGIN
         [IsDeleted],
         [DeletedAt],
         [DeletedBy],
-        [RestoreUntil]
+        [RestoreUntil],
+        [RestoredAt],
+        [RestoredBy]
     FROM [media].[MediaAsset]
     WHERE [PublicId] = @PublicId;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [media].[Media_MediaAsset_SoftDelete]
-    @MediaId        BIGINT,
-    @DeletedBy      BIGINT = NULL,
-    @RestoreUntil   DATETIME2(3) = NULL,
-    @AffectedRows   INT OUTPUT
+    @MediaId              BIGINT,
+    @DeletedBy            BIGINT = NULL,
+    @RestoreUntil         DATETIME2(3) = NULL,
+    @AffectedRows         INT OUTPUT,
+    @PrimaryClearedCount  INT OUTPUT,
+    @NewVersion           INT OUTPUT,
+    @ResultCode           INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    SET @AffectedRows = 0;
+    SET @PrimaryClearedCount = 0;
+    SET @NewVersion = NULL;
+    SET @ResultCode = 0;
+
+    DECLARE @AffectedArticles TABLE
+    (
+        [ArticleId] BIGINT NOT NULL PRIMARY KEY
+    );
+
     BEGIN TRANSACTION;
 
-    /* Option A: if this asset is current primary anywhere, unset it in the same truth transaction */
+    IF NOT EXISTS (SELECT 1 FROM [media].[MediaAsset] WITH (UPDLOCK, HOLDLOCK) WHERE [MediaId] = @MediaId)
+    BEGIN
+        SET @ResultCode = 1;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    INSERT INTO @AffectedArticles ([ArticleId])
+    SELECT DISTINCT [ArticleId]
+    FROM [media].[ArticleMedia] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [MediaId] = @MediaId
+      AND [IsDeleted] = 0
+      AND [IsPrimary] = 1;
+
     UPDATE [media].[ArticleMedia]
     SET
         [IsPrimary] = 0,
@@ -224,12 +330,28 @@ BEGIN
       AND [IsDeleted] = 0
       AND [IsPrimary] = 1;
 
+    SET @PrimaryClearedCount = @@ROWCOUNT;
+
+    IF @PrimaryClearedCount > 0
+    BEGIN
+        UPDATE AMS
+        SET
+            [Version] = [Version] + 1,
+            [UpdatedAt] = SYSUTCDATETIME(),
+            [UpdatedBy] = @DeletedBy
+        FROM [media].[ArticleMediaSet] AMS
+        INNER JOIN @AffectedArticles A
+            ON A.[ArticleId] = AMS.[ArticleId];
+    END
+
     UPDATE [media].[MediaAsset]
     SET
         [IsDeleted] = 1,
         [DeletedAt] = SYSUTCDATETIME(),
         [DeletedBy] = @DeletedBy,
         [RestoreUntil] = @RestoreUntil,
+        [RestoredAt] = NULL,
+        [RestoredBy] = NULL,
         [UpdatedAt] = SYSUTCDATETIME(),
         [UpdatedBy] = @DeletedBy,
         [Version] = [Version] + 1
@@ -238,6 +360,10 @@ BEGIN
 
     SET @AffectedRows = @@ROWCOUNT;
 
+    SELECT @NewVersion = [Version]
+    FROM [media].[MediaAsset]
+    WHERE [MediaId] = @MediaId;
+
     COMMIT TRANSACTION;
 END;
 GO
@@ -245,11 +371,56 @@ GO
 CREATE OR ALTER PROCEDURE [media].[Media_MediaAsset_Restore]
     @MediaId        BIGINT,
     @RestoredBy     BIGINT = NULL,
-    @AffectedRows   INT OUTPUT
+    @AffectedRows   INT OUTPUT,
+    @NewVersion     INT OUTPUT,
+    @ResultCode     INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    SET @AffectedRows = 0;
+    SET @NewVersion = NULL;
+    SET @ResultCode = 0;
+
+    BEGIN TRANSACTION;
+
+    IF NOT EXISTS (SELECT 1 FROM [media].[MediaAsset] WITH (UPDLOCK, HOLDLOCK) WHERE [MediaId] = @MediaId)
+    BEGIN
+        SET @ResultCode = 1;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM [media].[MediaAsset] WHERE [MediaId] = @MediaId AND [IsDeleted] = 0)
+    BEGIN
+        SELECT @NewVersion = [Version]
+        FROM [media].[MediaAsset]
+        WHERE [MediaId] = @MediaId;
+
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [media].[MediaAsset]
+        WHERE [MediaId] = @MediaId
+          AND [IsDeleted] = 1
+          AND [RestoreUntil] IS NOT NULL
+          AND [RestoreUntil] < SYSUTCDATETIME()
+    )
+    BEGIN
+        SET @ResultCode = 2;
+
+        SELECT @NewVersion = [Version]
+        FROM [media].[MediaAsset]
+        WHERE [MediaId] = @MediaId;
+
+        COMMIT TRANSACTION;
+        RETURN;
+    END
 
     UPDATE [media].[MediaAsset]
     SET
@@ -257,14 +428,21 @@ BEGIN
         [DeletedAt] = NULL,
         [DeletedBy] = NULL,
         [RestoreUntil] = NULL,
+        [RestoredAt] = SYSUTCDATETIME(),
+        [RestoredBy] = @RestoredBy,
         [UpdatedAt] = SYSUTCDATETIME(),
         [UpdatedBy] = @RestoredBy,
         [Version] = [Version] + 1
     WHERE [MediaId] = @MediaId
-      AND [IsDeleted] = 1
-      AND ([RestoreUntil] IS NULL OR [RestoreUntil] >= SYSUTCDATETIME());
+      AND [IsDeleted] = 1;
 
     SET @AffectedRows = @@ROWCOUNT;
+
+    SELECT @NewVersion = [Version]
+    FROM [media].[MediaAsset]
+    WHERE [MediaId] = @MediaId;
+
+    COMMIT TRANSACTION;
 END;
 GO
 
@@ -334,7 +512,9 @@ BEGIN
         [IsDeleted],
         [DeletedAt],
         [DeletedBy],
-        [RestoreUntil]
+        [RestoreUntil],
+        [RestoredAt],
+        [RestoredBy]
     FROM [media].[MediaAsset]
     WHERE (@IsDeleted IS NULL OR [IsDeleted] = @IsDeleted)
       AND (@MediaType IS NULL OR [MediaType] = @MediaType)
@@ -352,52 +532,183 @@ END;
 GO
 
 /* =========================================================
-   ArticleMedia
+   ArticleMediaSet
    ========================================================= */
 
-CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_Attach]
-    @ArticleId      BIGINT,
-    @MediaId        BIGINT,
-    @IsPrimary      BIT = 0,
-    @CreatedBy      BIGINT = NULL,
-    @ArticleMediaId BIGINT OUTPUT,
-    @AffectedRows   INT OUTPUT
+CREATE OR ALTER PROCEDURE [media].[Media_ArticleMediaSet_SelectByArticleId]
+    @ArticleId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        [ArticleId],
+        [Version],
+        [CreatedAt],
+        [CreatedBy],
+        [UpdatedAt],
+        [UpdatedBy]
+    FROM [media].[ArticleMediaSet]
+    WHERE [ArticleId] = @ArticleId;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [media].[Media_ArticleMediaSet_Ensure]
+    @ArticleId BIGINT,
+    @ActorUserId BIGINT = NULL,
+    @Version INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    DECLARE @ExistingArticleMediaId BIGINT;
+    BEGIN TRANSACTION;
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [media].[ArticleMediaSet] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [ArticleId] = @ArticleId
+    )
+    BEGIN
+        INSERT INTO [media].[ArticleMediaSet]
+        (
+            [ArticleId],
+            [Version],
+            [CreatedAt],
+            [CreatedBy],
+            [UpdatedAt],
+            [UpdatedBy]
+        )
+        VALUES
+        (
+            @ArticleId,
+            0,
+            SYSUTCDATETIME(),
+            @ActorUserId,
+            SYSUTCDATETIME(),
+            @ActorUserId
+        );
+    END
+
+    SELECT @Version = [Version]
+    FROM [media].[ArticleMediaSet]
+    WHERE [ArticleId] = @ArticleId;
+
+    COMMIT TRANSACTION;
+END;
+GO
+
+/* =========================================================
+   ArticleMedia
+   ========================================================= */
+
+CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_Attach]
+    @ArticleId       BIGINT,
+    @MediaId         BIGINT,
+    @IsPrimary       BIT = 0,
+    @CreatedBy       BIGINT = NULL,
+    @ArticleMediaId  BIGINT OUTPUT,
+    @AffectedRows    INT OUTPUT,
+    @PrimaryChanged  BIT OUTPUT,
+    @NewVersion      INT OUTPUT,
+    @ResultCode      INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @ArticleMediaId = NULL;
+    SET @AffectedRows = 0;
+    SET @PrimaryChanged = 0;
+    SET @NewVersion = NULL;
+    SET @ResultCode = 0;
+
+    DECLARE @ExistingIsDeleted BIT = NULL;
+    DECLARE @ExistingIsPrimary BIT = NULL;
+    DECLARE @RelationChanged BIT = 0;
+    DECLARE @UnsetRows INT = 0;
+    DECLARE @SetRows INT = 0;
+    DECLARE @NextSortOrder INT;
 
     BEGIN TRANSACTION;
 
-    /* If relation exists but is soft-deleted, restore it */
+    IF NOT EXISTS (SELECT 1 FROM [media].[MediaAsset] WITH (UPDLOCK, HOLDLOCK) WHERE [MediaId] = @MediaId)
+    BEGIN
+        SET @ResultCode = 1;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM [media].[MediaAsset] WHERE [MediaId] = @MediaId AND [IsDeleted] = 1)
+    BEGIN
+        SET @ResultCode = 2;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [media].[ArticleMediaSet] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [ArticleId] = @ArticleId
+    )
+    BEGIN
+        INSERT INTO [media].[ArticleMediaSet]
+        (
+            [ArticleId],
+            [Version],
+            [CreatedAt],
+            [CreatedBy],
+            [UpdatedAt],
+            [UpdatedBy]
+        )
+        VALUES
+        (
+            @ArticleId,
+            0,
+            SYSUTCDATETIME(),
+            @CreatedBy,
+            SYSUTCDATETIME(),
+            @CreatedBy
+        );
+    END
+
     SELECT TOP (1)
-        @ExistingArticleMediaId = [ArticleMediaId]
-    FROM [media].[ArticleMedia]
+        @ArticleMediaId = [ArticleMediaId],
+        @ExistingIsDeleted = [IsDeleted],
+        @ExistingIsPrimary = [IsPrimary]
+    FROM [media].[ArticleMedia] WITH (UPDLOCK, HOLDLOCK)
     WHERE [ArticleId] = @ArticleId
       AND [MediaId] = @MediaId;
 
-    IF @ExistingArticleMediaId IS NOT NULL
+    IF @ArticleMediaId IS NOT NULL
     BEGIN
-        UPDATE [media].[ArticleMedia]
-        SET
-            [IsDeleted] = 0,
-            [DeletedAt] = NULL,
-            [DeletedBy] = NULL,
-            [UpdatedAt] = SYSUTCDATETIME(),
-            [UpdatedBy] = @CreatedBy,
-            [Version] = [Version] + 1
-        WHERE [ArticleMediaId] = @ExistingArticleMediaId
-          AND [IsDeleted] = 1;
+        IF @ExistingIsDeleted = 1
+        BEGIN
+            SELECT @NextSortOrder = ISNULL(MAX([SortOrder]), -1) + 1
+            FROM [media].[ArticleMedia]
+            WHERE [ArticleId] = @ArticleId
+              AND [IsDeleted] = 0;
 
-        SET @AffectedRows = CASE WHEN @@ROWCOUNT > 0 THEN 1 ELSE 0 END;
-        SET @ArticleMediaId = @ExistingArticleMediaId;
+            UPDATE [media].[ArticleMedia]
+            SET
+                [SortOrder] = @NextSortOrder,
+                [IsDeleted] = 0,
+                [DeletedAt] = NULL,
+                [DeletedBy] = NULL,
+                [UpdatedAt] = SYSUTCDATETIME(),
+                [UpdatedBy] = @CreatedBy,
+                [Version] = [Version] + 1
+            WHERE [ArticleMediaId] = @ArticleMediaId
+              AND [IsDeleted] = 1;
+
+            SET @RelationChanged = CASE WHEN @@ROWCOUNT > 0 THEN 1 ELSE 0 END;
+            SET @ExistingIsPrimary = 0;
+        END
     END
     ELSE
     BEGIN
-        DECLARE @NextSortOrder INT;
-
         SELECT @NextSortOrder = ISNULL(MAX([SortOrder]), -1) + 1
         FROM [media].[ArticleMedia]
         WHERE [ArticleId] = @ArticleId
@@ -439,10 +750,11 @@ BEGIN
         );
 
         SET @ArticleMediaId = SCOPE_IDENTITY();
-        SET @AffectedRows = 1;
+        SET @RelationChanged = 1;
+        SET @ExistingIsPrimary = 0;
     END
 
-    IF @IsPrimary = 1
+    IF @IsPrimary = 1 AND ISNULL(@ExistingIsPrimary, 0) = 0
     BEGIN
         UPDATE [media].[ArticleMedia]
         SET
@@ -455,6 +767,8 @@ BEGIN
           AND [IsPrimary] = 1
           AND [MediaId] <> @MediaId;
 
+        SET @UnsetRows = @@ROWCOUNT;
+
         UPDATE [media].[ArticleMedia]
         SET
             [IsPrimary] = 1,
@@ -463,22 +777,67 @@ BEGIN
             [Version] = [Version] + 1
         WHERE [ArticleId] = @ArticleId
           AND [MediaId] = @MediaId
-          AND [IsDeleted] = 0;
+          AND [IsDeleted] = 0
+          AND [IsPrimary] = 0;
+
+        SET @SetRows = @@ROWCOUNT;
+        SET @PrimaryChanged = CASE WHEN (@UnsetRows + @SetRows) > 0 THEN 1 ELSE 0 END;
     END
+
+    SET @AffectedRows = CONVERT(INT, @RelationChanged) + @UnsetRows + @SetRows;
+
+    IF @AffectedRows > 0
+    BEGIN
+        UPDATE [media].[ArticleMediaSet]
+        SET
+            [Version] = [Version] + 1,
+            [UpdatedAt] = SYSUTCDATETIME(),
+            [UpdatedBy] = @CreatedBy
+        WHERE [ArticleId] = @ArticleId;
+    END
+
+    SELECT @NewVersion = [Version]
+    FROM [media].[ArticleMediaSet]
+    WHERE [ArticleId] = @ArticleId;
 
     COMMIT TRANSACTION;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_Detach]
-    @ArticleId      BIGINT,
-    @MediaId        BIGINT,
-    @DeletedBy      BIGINT = NULL,
-    @AffectedRows   INT OUTPUT
+    @ArticleId       BIGINT,
+    @MediaId         BIGINT,
+    @DeletedBy       BIGINT = NULL,
+    @AffectedRows    INT OUTPUT,
+    @PrimaryCleared  BIT OUTPUT,
+    @NewVersion      INT OUTPUT,
+    @ResultCode      INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    SET @AffectedRows = 0;
+    SET @PrimaryCleared = 0;
+    SET @NewVersion = NULL;
+    SET @ResultCode = 0;
+
+    DECLARE @CurrentIsPrimary BIT = 0;
+
+    BEGIN TRANSACTION;
+
+    IF NOT EXISTS (SELECT 1 FROM [media].[ArticleMediaSet] WITH (UPDLOCK, HOLDLOCK) WHERE [ArticleId] = @ArticleId)
+    BEGIN
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    SELECT TOP (1)
+        @CurrentIsPrimary = [IsPrimary]
+    FROM [media].[ArticleMedia] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticleId] = @ArticleId
+      AND [MediaId] = @MediaId
+      AND [IsDeleted] = 0;
 
     UPDATE [media].[ArticleMedia]
     SET
@@ -494,6 +853,23 @@ BEGIN
       AND [IsDeleted] = 0;
 
     SET @AffectedRows = @@ROWCOUNT;
+    SET @PrimaryCleared = CASE WHEN @AffectedRows > 0 AND @CurrentIsPrimary = 1 THEN 1 ELSE 0 END;
+
+    IF @AffectedRows > 0
+    BEGIN
+        UPDATE [media].[ArticleMediaSet]
+        SET
+            [Version] = [Version] + 1,
+            [UpdatedAt] = SYSUTCDATETIME(),
+            [UpdatedBy] = @DeletedBy
+        WHERE [ArticleId] = @ArticleId;
+    END
+
+    SELECT @NewVersion = [Version]
+    FROM [media].[ArticleMediaSet]
+    WHERE [ArticleId] = @ArticleId;
+
+    COMMIT TRANSACTION;
 END;
 GO
 
@@ -501,11 +877,44 @@ CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_Restore]
     @ArticleId      BIGINT,
     @MediaId        BIGINT,
     @RestoredBy     BIGINT = NULL,
-    @AffectedRows   INT OUTPUT
+    @AffectedRows   INT OUTPUT,
+    @NewVersion     INT OUTPUT,
+    @ResultCode     INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
+
+    SET @AffectedRows = 0;
+    SET @NewVersion = NULL;
+    SET @ResultCode = 0;
+
+    BEGIN TRANSACTION;
+
+    IF NOT EXISTS (SELECT 1 FROM [media].[ArticleMediaSet] WITH (UPDLOCK, HOLDLOCK) WHERE [ArticleId] = @ArticleId)
+    BEGIN
+        SET @ResultCode = 1;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [media].[MediaAsset]
+        WHERE [MediaId] = @MediaId
+          AND [IsDeleted] = 1
+    )
+    BEGIN
+        SET @ResultCode = 2;
+
+        SELECT @NewVersion = [Version]
+        FROM [media].[ArticleMediaSet]
+        WHERE [ArticleId] = @ArticleId;
+
+        COMMIT TRANSACTION;
+        RETURN;
+    END
 
     UPDATE [media].[ArticleMedia]
     SET
@@ -520,20 +929,109 @@ BEGIN
       AND [IsDeleted] = 1;
 
     SET @AffectedRows = @@ROWCOUNT;
+
+    IF @AffectedRows > 0
+    BEGIN
+        UPDATE [media].[ArticleMediaSet]
+        SET
+            [Version] = [Version] + 1,
+            [UpdatedAt] = SYSUTCDATETIME(),
+            [UpdatedBy] = @RestoredBy
+        WHERE [ArticleId] = @ArticleId;
+    END
+
+    SELECT @NewVersion = [Version]
+    FROM [media].[ArticleMediaSet]
+    WHERE [ArticleId] = @ArticleId;
+
+    COMMIT TRANSACTION;
 END;
 GO
 
 CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_SetPrimary]
-    @ArticleId      BIGINT,
-    @MediaId        BIGINT,
-    @UpdatedBy      BIGINT = NULL,
-    @AffectedRows   INT OUTPUT
+    @ArticleId        BIGINT,
+    @MediaId          BIGINT,
+    @ExpectedVersion  INT = NULL,
+    @UpdatedBy        BIGINT = NULL,
+    @AffectedRows     INT OUTPUT,
+    @NewVersion       INT OUTPUT,
+    @ResultCode       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    SET @AffectedRows = 0;
+    SET @NewVersion = NULL;
+    SET @ResultCode = 0;
+
+    DECLARE @CurrentVersion INT;
+    DECLARE @CurrentIsPrimary BIT;
+    DECLARE @MediaIsDeleted BIT;
+    DECLARE @UnsetRows INT = 0;
+    DECLARE @SetRows INT = 0;
+
     BEGIN TRANSACTION;
+
+    SELECT @CurrentVersion = [Version]
+    FROM [media].[ArticleMediaSet] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticleId] = @ArticleId;
+
+    IF @CurrentVersion IS NULL
+    BEGIN
+        SET @ResultCode = 1;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF @ExpectedVersion IS NULL
+    BEGIN
+        SET @ResultCode = 6;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF @CurrentVersion <> @ExpectedVersion
+    BEGIN
+        SET @ResultCode = 3;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    SELECT TOP (1)
+        @CurrentIsPrimary = AM.[IsPrimary],
+        @MediaIsDeleted = MA.[IsDeleted]
+    FROM [media].[ArticleMedia] AM WITH (UPDLOCK, HOLDLOCK)
+    INNER JOIN [media].[MediaAsset] MA WITH (UPDLOCK, HOLDLOCK)
+        ON MA.[MediaId] = AM.[MediaId]
+    WHERE AM.[ArticleId] = @ArticleId
+      AND AM.[MediaId] = @MediaId
+      AND AM.[IsDeleted] = 0;
+
+    IF @CurrentIsPrimary IS NULL
+    BEGIN
+        SET @ResultCode = 1;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF @MediaIsDeleted = 1
+    BEGIN
+        SET @ResultCode = 2;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF @CurrentIsPrimary = 1
+    BEGIN
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
 
     UPDATE [media].[ArticleMedia]
     SET
@@ -543,8 +1041,9 @@ BEGIN
         [Version] = [Version] + 1
     WHERE [ArticleId] = @ArticleId
       AND [IsDeleted] = 0
-      AND [IsPrimary] = 1
-      AND [MediaId] <> @MediaId;
+      AND [IsPrimary] = 1;
+
+    SET @UnsetRows = @@ROWCOUNT;
 
     UPDATE [media].[ArticleMedia]
     SET
@@ -554,9 +1053,30 @@ BEGIN
         [Version] = [Version] + 1
     WHERE [ArticleId] = @ArticleId
       AND [MediaId] = @MediaId
-      AND [IsDeleted] = 0;
+      AND [IsDeleted] = 0
+      AND [IsPrimary] = 0;
 
-    SET @AffectedRows = @@ROWCOUNT;
+    SET @SetRows = @@ROWCOUNT;
+    SET @AffectedRows = @UnsetRows + @SetRows;
+
+    IF @SetRows = 0
+    BEGIN
+        SET @ResultCode = 2;
+        SET @NewVersion = @CurrentVersion;
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    UPDATE [media].[ArticleMediaSet]
+    SET
+        [Version] = [Version] + 1,
+        [UpdatedAt] = SYSUTCDATETIME(),
+        [UpdatedBy] = @UpdatedBy
+    WHERE [ArticleId] = @ArticleId;
+
+    SELECT @NewVersion = [Version]
+    FROM [media].[ArticleMediaSet]
+    WHERE [ArticleId] = @ArticleId;
 
     COMMIT TRANSACTION;
 END;
@@ -565,6 +1085,12 @@ GO
 /* =========================================================
    ArticleMedia TVP for reorder
    ========================================================= */
+
+IF OBJECT_ID(N'[media].[Media_ArticleMedia_ReorderByIds]', N'P') IS NOT NULL
+BEGIN
+    DROP PROCEDURE [media].[Media_ArticleMedia_ReorderByIds];
+END
+GO
 
 IF TYPE_ID(N'[media].[MediaOrderListType]') IS NOT NULL
 BEGIN
@@ -584,30 +1110,128 @@ GO
    ========================================================= */
 
 CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_ReorderByIds]
-    @ArticleId      BIGINT,
-    @UpdatedBy      BIGINT = NULL,
-    @Orders         [media].[MediaOrderListType] READONLY,
-    @AffectedRows   INT OUTPUT
+    @ArticleId        BIGINT,
+    @ExpectedVersion  INT = NULL,
+    @UpdatedBy        BIGINT = NULL,
+    @Orders           [media].[MediaOrderListType] READONLY,
+    @AffectedRows     INT OUTPUT,
+    @NewVersion       INT OUTPUT,
+    @ResultCode       INT OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    SET @AffectedRows = 0;
+    SET @NewVersion = NULL;
+    SET @ResultCode = 0;
+
+    DECLARE @CurrentVersion INT;
+    DECLARE @OrderCount INT;
+    DECLARE @DistinctMediaCount INT;
+    DECLARE @DistinctSortOrderCount INT;
+    DECLARE @ActiveCount INT;
+    DECLARE @InvalidItemCount INT;
+
     BEGIN TRANSACTION;
+
+    SELECT @CurrentVersion = [Version]
+    FROM [media].[ArticleMediaSet] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticleId] = @ArticleId;
+
+    IF @CurrentVersion IS NULL
+    BEGIN
+        SET @ResultCode = 1;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF @ExpectedVersion IS NULL
+    BEGIN
+        SET @ResultCode = 6;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF @CurrentVersion <> @ExpectedVersion
+    BEGIN
+        SET @ResultCode = 3;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    SELECT
+        @OrderCount = COUNT(1),
+        @DistinctMediaCount = COUNT(DISTINCT [MediaId]),
+        @DistinctSortOrderCount = COUNT(DISTINCT [SortOrder])
+    FROM @Orders;
+
+    IF @OrderCount = 0
+    BEGIN
+        SET @ResultCode = 4;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    SELECT @ActiveCount = COUNT(1)
+    FROM [media].[ArticleMedia]
+    WHERE [ArticleId] = @ArticleId
+      AND [IsDeleted] = 0;
+
+    SELECT @InvalidItemCount = COUNT(1)
+    FROM @Orders O
+    WHERE O.[SortOrder] < 0
+       OR NOT EXISTS
+       (
+           SELECT 1
+           FROM [media].[ArticleMedia] AM
+           WHERE AM.[ArticleId] = @ArticleId
+             AND AM.[MediaId] = O.[MediaId]
+             AND AM.[IsDeleted] = 0
+       );
+
+    IF @OrderCount <> @ActiveCount
+       OR @DistinctMediaCount <> @OrderCount
+       OR @DistinctSortOrderCount <> @OrderCount
+       OR @InvalidItemCount > 0
+    BEGIN
+        SET @ResultCode = 4;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
 
     UPDATE AM
     SET
         [SortOrder] = O.[SortOrder],
         [UpdatedAt] = SYSUTCDATETIME(),
         [UpdatedBy] = @UpdatedBy,
-        [Version] = [Version] + 1
+        [Version] = AM.[Version] + 1
     FROM [media].[ArticleMedia] AM
     INNER JOIN @Orders O
         ON O.[MediaId] = AM.[MediaId]
     WHERE AM.[ArticleId] = @ArticleId
-      AND AM.[IsDeleted] = 0;
+      AND AM.[IsDeleted] = 0
+      AND AM.[SortOrder] <> O.[SortOrder];
 
     SET @AffectedRows = @@ROWCOUNT;
+
+    IF @AffectedRows > 0
+    BEGIN
+        UPDATE [media].[ArticleMediaSet]
+        SET
+            [Version] = [Version] + 1,
+            [UpdatedAt] = SYSUTCDATETIME(),
+            [UpdatedBy] = @UpdatedBy
+        WHERE [ArticleId] = @ArticleId;
+    END
+
+    SELECT @NewVersion = [Version]
+    FROM [media].[ArticleMediaSet]
+    WHERE [ArticleId] = @ArticleId;
 
     COMMIT TRANSACTION;
 END;
@@ -626,6 +1250,7 @@ BEGIN
     SELECT
         AM.[ArticleMediaId],
         AM.[ArticleId],
+        AMS.[Version] AS [AttachmentSetVersion],
         AM.[MediaId],
         MA.[PublicId],
         MA.[StorageProvider],
@@ -639,6 +1264,7 @@ BEGIN
         MA.[Height],
         MA.[DurationSeconds],
         MA.[AltText] AS [DefaultAltText],
+        MA.[IsDeleted] AS [MediaIsDeleted],
         AM.[AltTextOverride],
         AM.[Caption],
         AM.[SortOrder],
@@ -652,6 +1278,8 @@ BEGIN
         AM.[DeletedAt],
         AM.[DeletedBy]
     FROM [media].[ArticleMedia] AM
+    INNER JOIN [media].[ArticleMediaSet] AMS
+        ON AMS.[ArticleId] = AM.[ArticleId]
     INNER JOIN [media].[MediaAsset] MA
         ON MA.[MediaId] = AM.[MediaId]
     WHERE AM.[ArticleMediaId] = @ArticleMediaId;
@@ -668,6 +1296,7 @@ BEGIN
     SELECT
         AM.[ArticleMediaId],
         AM.[ArticleId],
+        AMS.[Version] AS [AttachmentSetVersion],
         AM.[MediaId],
         MA.[PublicId],
         MA.[StorageProvider],
@@ -681,6 +1310,7 @@ BEGIN
         MA.[Height],
         MA.[DurationSeconds],
         MA.[AltText] AS [DefaultAltText],
+        MA.[IsDeleted] AS [MediaIsDeleted],
         AM.[AltTextOverride],
         AM.[Caption],
         AM.[SortOrder],
@@ -694,6 +1324,8 @@ BEGIN
         AM.[DeletedAt],
         AM.[DeletedBy]
     FROM [media].[ArticleMedia] AM
+    INNER JOIN [media].[ArticleMediaSet] AMS
+        ON AMS.[ArticleId] = AM.[ArticleId]
     INNER JOIN [media].[MediaAsset] MA
         ON MA.[MediaId] = AM.[MediaId]
     WHERE AM.[ArticleId] = @ArticleId
@@ -711,6 +1343,7 @@ BEGIN
     SELECT TOP (1)
         AM.[ArticleMediaId],
         AM.[ArticleId],
+        AMS.[Version] AS [AttachmentSetVersion],
         AM.[MediaId],
         MA.[PublicId],
         MA.[StorageProvider],
@@ -734,11 +1367,14 @@ BEGIN
         AM.[UpdatedBy],
         AM.[Version]
     FROM [media].[ArticleMedia] AM
+    INNER JOIN [media].[ArticleMediaSet] AMS
+        ON AMS.[ArticleId] = AM.[ArticleId]
     INNER JOIN [media].[MediaAsset] MA
         ON MA.[MediaId] = AM.[MediaId]
     WHERE AM.[ArticleId] = @ArticleId
       AND AM.[IsDeleted] = 0
       AND AM.[IsPrimary] = 1
+      AND MA.[IsDeleted] = 0
     ORDER BY AM.[ArticleMediaId] ASC;
 END;
 GO
@@ -753,6 +1389,7 @@ BEGIN
     SELECT
         AM.[ArticleMediaId],
         AM.[ArticleId],
+        AMS.[Version] AS [AttachmentSetVersion],
         AM.[MediaId],
         AM.[SortOrder],
         AM.[IsPrimary],
@@ -767,6 +1404,8 @@ BEGIN
         AM.[DeletedAt],
         AM.[DeletedBy]
     FROM [media].[ArticleMedia] AM
+    INNER JOIN [media].[ArticleMediaSet] AMS
+        ON AMS.[ArticleId] = AM.[ArticleId]
     WHERE AM.[MediaId] = @MediaId
       AND (@IncludeDeleted = 1 OR AM.[IsDeleted] = 0)
     ORDER BY AM.[ArticleId] ASC, AM.[SortOrder] ASC, AM.[ArticleMediaId] ASC;
@@ -815,11 +1454,22 @@ BEGIN
     IF UPPER(@SortDirection) NOT IN (N'ASC', N'DESC')
         SET @SortDirection = N'ASC';
 
+    DECLARE @OrderByExpression NVARCHAR(100);
+
+    SET @OrderByExpression =
+        CASE @SortBy
+            WHEN N'CreatedAt' THEN N'AM.[CreatedAt]'
+            WHEN N'UpdatedAt' THEN N'AM.[UpdatedAt]'
+            WHEN N'MediaId' THEN N'AM.[MediaId]'
+            ELSE N'AM.[SortOrder]'
+        END;
+
     DECLARE @Sql NVARCHAR(MAX) =
     N'
     SELECT
         AM.[ArticleMediaId],
         AM.[ArticleId],
+        AMS.[Version] AS [AttachmentSetVersion],
         AM.[MediaId],
         MA.[PublicId],
         MA.[StorageProvider],
@@ -833,6 +1483,7 @@ BEGIN
         MA.[Height],
         MA.[DurationSeconds],
         MA.[AltText] AS [DefaultAltText],
+        MA.[IsDeleted] AS [MediaIsDeleted],
         AM.[AltTextOverride],
         AM.[Caption],
         AM.[SortOrder],
@@ -846,11 +1497,13 @@ BEGIN
         AM.[DeletedAt],
         AM.[DeletedBy]
     FROM [media].[ArticleMedia] AM
+    INNER JOIN [media].[ArticleMediaSet] AMS
+        ON AMS.[ArticleId] = AM.[ArticleId]
     INNER JOIN [media].[MediaAsset] MA
         ON MA.[MediaId] = AM.[MediaId]
     WHERE AM.[ArticleId] = @ArticleId
       AND (@IncludeDeleted = 1 OR AM.[IsDeleted] = 0)
-    ORDER BY ' + QUOTENAME(@SortBy) + N' ' + @SortDirection + N', AM.[ArticleMediaId] ASC
+    ORDER BY ' + @OrderByExpression + N' ' + @SortDirection + N', AM.[ArticleMediaId] ASC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;';
 
     EXEC sp_executesql

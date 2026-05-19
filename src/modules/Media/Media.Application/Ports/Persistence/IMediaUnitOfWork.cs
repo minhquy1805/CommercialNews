@@ -1,10 +1,7 @@
+using CommercialNews.BuildingBlocks.Persistence.Sql.Transactions;
+
 namespace Media.Application.Ports.Persistence;
 
-public interface IMediaUnitOfWork
+public interface IMediaUnitOfWork : ISqlUnitOfWork
 {
-    Task BeginTransactionAsync(CancellationToken cancellationToken = default);
-
-    Task CommitAsync(CancellationToken cancellationToken = default);
-
-    Task RollbackAsync(CancellationToken cancellationToken = default);
 }
