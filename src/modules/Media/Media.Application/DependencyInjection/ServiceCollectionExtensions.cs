@@ -13,6 +13,7 @@ using Media.Application.UseCases.MediaAssets.RegisterMedia;
 using Media.Application.UseCases.MediaAssets.RestoreMedia;
 using Media.Application.UseCases.MediaAssets.SoftDeleteMedia;
 using Media.Application.UseCases.MediaAssets.UpdateMediaAsset;
+using Media.Application.UseCases.MediaAssets.UploadMedia;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Media.Application.DependencyInjection;
@@ -28,6 +29,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGetMediaByIdUseCase, GetMediaByIdUseCase>();
         services.AddScoped<IGetMediaByPublicIdUseCase, GetMediaByPublicIdUseCase>();
         services.AddScoped<IGetMediaListUseCase, GetMediaListUseCase>();
+        services.AddScoped<IUploadMediaUseCase, UploadMediaUseCase>();
         services.AddScoped<IUpdateMediaAssetUseCase, UpdateMediaAssetUseCase>();
         services.AddScoped<ISoftDeleteMediaUseCase, SoftDeleteMediaUseCase>();
         services.AddScoped<IRestoreMediaUseCase, RestoreMediaUseCase>();
