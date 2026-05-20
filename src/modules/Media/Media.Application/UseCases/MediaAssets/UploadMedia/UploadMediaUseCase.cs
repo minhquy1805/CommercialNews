@@ -7,7 +7,7 @@ using Media.Application.Contracts.MediaAsset.Responses;
 using Media.Application.Errors;
 using Media.Application.Ports.Services.Metadata;
 using Media.Application.UseCases.MediaAssets.RegisterMedia;
-using Media.Domain.Constants;
+using Media.Application.Validation.MediaAssets;
 
 namespace Media.Application.UseCases.MediaAssets.UploadMedia;
 
@@ -38,11 +38,11 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        Result validationResult = ValidateRequest(request);
+        Error? validationError = UploadMediaValidator.Validate(request);
 
-        if (validationResult.IsFailure)
+        if (validationError is not null)
         {
-            return Result<UploadMediaResponse>.Failure(validationResult.Error!);
+            return Result<UploadMediaResponse>.Failure(validationError);
         }
 
         ResetStreamPositionIfPossible(request.Content);
@@ -148,37 +148,6 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
             CreatedBy = value.CreatedBy,
             Version = value.Version
         });
-    }
-
-    private static Result ValidateRequest(
-        UploadMediaRequest request)
-    {
-        if (request.Content == Stream.Null || !request.Content.CanRead)
-        {
-            return Result.Failure(MediaErrors.ValidationFailed);
-        }
-
-        if (request.Length <= 0)
-        {
-            return Result.Failure(MediaErrors.ValidationFailed);
-        }
-
-        if (string.IsNullOrWhiteSpace(request.OriginalFileName))
-        {
-            return Result.Failure(MediaErrors.ValidationFailed);
-        }
-
-        if (string.IsNullOrWhiteSpace(request.MediaType))
-        {
-            return Result.Failure(MediaErrors.MediaAsset.TypeNotAllowed);
-        }
-
-        if (!MediaTypes.IsValid(request.MediaType))
-        {
-            return Result.Failure(MediaErrors.MediaAsset.TypeNotAllowed);
-        }
-
-        return Result.Success();
     }
 
     private static void ResetStreamPositionIfPossible(
