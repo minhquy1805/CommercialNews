@@ -1,9 +1,11 @@
 using Media.Application.Ports.Persistence;
 using Media.Application.Ports.Services;
+using Media.Application.Ports.Services.Metadata;
 using Media.Infrastructure.Persistence.Exceptions;
 using Media.Infrastructure.Persistence.Repositories;
 using Media.Infrastructure.Persistence.Sql;
 using Media.Infrastructure.Services;
+using Media.Infrastructure.Services.Metadata;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Media.Infrastructure.DependencyInjection
@@ -23,6 +25,8 @@ namespace Media.Infrastructure.DependencyInjection
             services.AddScoped<IArticleMediaRepository, ArticleMediaRepository>();
             services.AddScoped<IArticleMediaSetRepository, ArticleMediaSetRepository>();
             services.AddScoped<IMediaOutboxWriter, MediaOutboxWriter>();
+
+            services.AddScoped<IMediaFileMetadataReader, ImageHeaderMediaFileMetadataReader>();
 
             return services;
         }
