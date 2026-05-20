@@ -5,22 +5,28 @@ using CommercialNews.BuildingBlocks.Storage.Models;
 using Media.Application.Contracts.MediaAsset.Requests;
 using Media.Application.Contracts.MediaAsset.Responses;
 using Media.Application.Errors;
+using Media.Application.Ports.Services.Metadata;
 using Media.Application.UseCases.MediaAssets.RegisterMedia;
-using Media.Domain.Constants;
+using Media.Application.Validation.MediaAssets;
 
 namespace Media.Application.UseCases.MediaAssets.UploadMedia;
 
 public sealed class UploadMediaUseCase : IUploadMediaUseCase
 {
     private readonly IFileStorageService _fileStorageService;
+    private readonly IMediaFileMetadataReader _mediaFileMetadataReader;
     private readonly IRegisterMediaUseCase _registerMediaUseCase;
 
     public UploadMediaUseCase(
         IFileStorageService fileStorageService,
+        IMediaFileMetadataReader mediaFileMetadataReader,
         IRegisterMediaUseCase registerMediaUseCase)
     {
         _fileStorageService = fileStorageService
             ?? throw new ArgumentNullException(nameof(fileStorageService));
+
+        _mediaFileMetadataReader = mediaFileMetadataReader
+            ?? throw new ArgumentNullException(nameof(mediaFileMetadataReader));
 
         _registerMediaUseCase = registerMediaUseCase
             ?? throw new ArgumentNullException(nameof(registerMediaUseCase));
@@ -32,12 +38,35 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        Result validationResult = ValidateRequest(request);
+        Error? validationError = UploadMediaValidator.Validate(request);
 
-        if (validationResult.IsFailure)
+        if (validationError is not null)
         {
-            return Result<UploadMediaResponse>.Failure(validationResult.Error!);
+            return Result<UploadMediaResponse>.Failure(validationError);
         }
+
+        ResetStreamPositionIfPossible(request.Content);
+
+        MediaFileMetadataResult metadata;
+
+        try
+        {
+            metadata = await _mediaFileMetadataReader.ReadAsync(
+                request.Content,
+                request.ContentType,
+                request.MediaType,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            metadata = MediaFileMetadataResult.Empty;
+        }
+
+        ResetStreamPositionIfPossible(request.Content);
 
         FileStorageUploadResult storageResult;
 
@@ -78,9 +107,9 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
                     MediaType = request.MediaType,
                     MimeType = storageResult.ContentType,
                     FileSizeBytes = storageResult.FileSizeBytes,
-                    Width = null,
-                    Height = null,
-                    DurationSeconds = null,
+                    Width = metadata.Width,
+                    Height = metadata.Height,
+                    DurationSeconds = metadata.DurationSeconds,
                     AltText = request.AltText,
                     MetadataJson = request.MetadataJson,
                     ContentHash = storageResult.ContentHash
@@ -121,35 +150,13 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
         });
     }
 
-    private static Result ValidateRequest(
-        UploadMediaRequest request)
+    private static void ResetStreamPositionIfPossible(
+        Stream content)
     {
-        if (request.Content == Stream.Null || !request.Content.CanRead)
+        if (content.CanSeek)
         {
-            return Result.Failure(MediaErrors.ValidationFailed);
+            content.Position = 0;
         }
-
-        if (request.Length <= 0)
-        {
-            return Result.Failure(MediaErrors.ValidationFailed);
-        }
-
-        if (string.IsNullOrWhiteSpace(request.OriginalFileName))
-        {
-            return Result.Failure(MediaErrors.ValidationFailed);
-        }
-
-        if (string.IsNullOrWhiteSpace(request.MediaType))
-        {
-            return Result.Failure(MediaErrors.MediaAsset.TypeNotAllowed);
-        }
-
-        if (!MediaTypes.IsValid(request.MediaType))
-        {
-            return Result.Failure(MediaErrors.MediaAsset.TypeNotAllowed);
-        }
-
-        return Result.Success();
     }
 
     private async Task TryDeleteUploadedFileAsync(
