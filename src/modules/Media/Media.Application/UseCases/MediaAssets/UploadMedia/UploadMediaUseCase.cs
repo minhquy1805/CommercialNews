@@ -5,6 +5,7 @@ using CommercialNews.BuildingBlocks.Storage.Models;
 using Media.Application.Contracts.MediaAsset.Requests;
 using Media.Application.Contracts.MediaAsset.Responses;
 using Media.Application.Errors;
+using Media.Application.Ports.Services.Metadata;
 using Media.Application.UseCases.MediaAssets.RegisterMedia;
 using Media.Domain.Constants;
 
@@ -13,14 +14,19 @@ namespace Media.Application.UseCases.MediaAssets.UploadMedia;
 public sealed class UploadMediaUseCase : IUploadMediaUseCase
 {
     private readonly IFileStorageService _fileStorageService;
+    private readonly IMediaFileMetadataReader _mediaFileMetadataReader;
     private readonly IRegisterMediaUseCase _registerMediaUseCase;
 
     public UploadMediaUseCase(
         IFileStorageService fileStorageService,
+        IMediaFileMetadataReader mediaFileMetadataReader,
         IRegisterMediaUseCase registerMediaUseCase)
     {
         _fileStorageService = fileStorageService
             ?? throw new ArgumentNullException(nameof(fileStorageService));
+
+        _mediaFileMetadataReader = mediaFileMetadataReader
+            ?? throw new ArgumentNullException(nameof(mediaFileMetadataReader));
 
         _registerMediaUseCase = registerMediaUseCase
             ?? throw new ArgumentNullException(nameof(registerMediaUseCase));
@@ -38,6 +44,29 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
         {
             return Result<UploadMediaResponse>.Failure(validationResult.Error!);
         }
+
+        ResetStreamPositionIfPossible(request.Content);
+
+        MediaFileMetadataResult metadata;
+
+        try
+        {
+            metadata = await _mediaFileMetadataReader.ReadAsync(
+                request.Content,
+                request.ContentType,
+                request.MediaType,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            metadata = MediaFileMetadataResult.Empty;
+        }
+
+        ResetStreamPositionIfPossible(request.Content);
 
         FileStorageUploadResult storageResult;
 
@@ -78,9 +107,9 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
                     MediaType = request.MediaType,
                     MimeType = storageResult.ContentType,
                     FileSizeBytes = storageResult.FileSizeBytes,
-                    Width = null,
-                    Height = null,
-                    DurationSeconds = null,
+                    Width = metadata.Width,
+                    Height = metadata.Height,
+                    DurationSeconds = metadata.DurationSeconds,
                     AltText = request.AltText,
                     MetadataJson = request.MetadataJson,
                     ContentHash = storageResult.ContentHash
@@ -150,6 +179,15 @@ public sealed class UploadMediaUseCase : IUploadMediaUseCase
         }
 
         return Result.Success();
+    }
+
+    private static void ResetStreamPositionIfPossible(
+        Stream content)
+    {
+        if (content.CanSeek)
+        {
+            content.Position = 0;
+        }
     }
 
     private async Task TryDeleteUploadedFileAsync(
