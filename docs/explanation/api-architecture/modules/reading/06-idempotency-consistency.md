@@ -1,620 +1,674 @@
 # Reading — Idempotency & Consistency (V1)
 
-This document defines Reading-specific consistency guarantees for the public read path and how it behaves under replication lag, stale caches, ambiguous dependency outcomes, delayed enrichments, stream-style derived-state lag, and bounded rebuild/reconciliation workflows.
+This document defines Reading-specific consistency guarantees for public read APIs, async projection updates, replay behavior, stale event handling, cache safety, and rebuild/reconciliation workflows.
 
 System-wide rules live in:
-- `../../../../architecture/arc42/11-replication-v1.md`
-- `../../../../architecture/arc42/13-transactions-and-consistency-v1.md`
-- `../../../../architecture/arc42/14-distributed-systems-assumptions-v1.md`
-- `../../../../architecture/arc42/15-consistency-ordering-and-consensus-v1.md`
-- `../../../../architecture/arc42/16-batch-processing-and-derived-data-v1.md`
-- `../../../../architecture/arc42/17-dataflow-and-batch-workflows-v1.md`
-- `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
-- `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
-- ADR-0014 (Public ID / slug strategy)
-- ADR-0015 (Redis cache policy)
-- ADR-0018 (Transaction boundaries & consistency model)
-- ADR-0019 (System model and fault assumptions)
-- ADR-0020 (Timeout, retry, and failure detection policy)
-- ADR-0021 (Clock, time, and ordering policy)
-- ADR-0022 (Versioning and fencing strategy)
-- ADR-0023 (Consistency, ordering, and consensus boundaries)
-- ADR-0024 (Distributed coordination and singleton work policy)
-- ADR-0025 (Batch processing and derived state policy)
-- ADR-0026 (Batch job orchestration and materialization policy)
-- ADR-0027 (Stream processing and derived state policy)
-- ADR-0028 (Consumer idempotency, replay, and rebuild policy)
+
+* `../../../../architecture/arc42/11-replication-v1.md`
+* `../../../../architecture/arc42/13-transactions-and-consistency-v1.md`
+* `../../../../architecture/arc42/14-distributed-systems-assumptions-v1.md`
+* `../../../../architecture/arc42/15-consistency-ordering-and-consensus-v1.md`
+* `../../../../architecture/arc42/16-batch-processing-and-derived-data-v1.md`
+* `../../../../architecture/arc42/17-dataflow-and-batch-workflows-v1.md`
+* `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
+* `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
+* ADR-0013 (Outbox & delivery semantics)
+* ADR-0015 (Redis cache policy)
+* ADR-0018 (Transaction boundaries & consistency model)
+* ADR-0020 (Timeout, retry, and failure detection policy)
+* ADR-0021 (Clock, time, and ordering policy)
+* ADR-0022 (Versioning and fencing strategy)
+* ADR-0025 (Batch processing and derived state policy)
+* ADR-0026 (Batch job orchestration and materialization policy)
+* ADR-0027 (Stream processing and derived state policy)
+* ADR-0028 (Consumer idempotency, replay, and rebuild policy)
 
 ---
 
-## 0) Truth vs derived (read facade)
+## 1) Consistency model
 
-### 0.1 Reading is a truth-composing facade
-Reading does not own publication truth, slug-routing truth, or media truth.
+Reading is a derived public read projection module.
 
-Reading is a facade over truth owned by other modules:
+Reading owns:
 
-- **Content truth**: publication state and visibility rules (`Draft / Published / Unpublished / Archived`)
-- **SEO truth**: slug routing truth `(Scope, Slug) -> ArticleId/PublicId`
-- **Media truth**: attachments + primary media metadata
+* public read model
+* public query semantics
+* response composition
+* projection freshness metadata
+* safe degradation behavior
+* rebuild/reconciliation posture for Reading-owned derived outputs
 
-Reading is therefore correctness-sensitive even though it is read-only in business terms.
+Reading does not own:
 
-Its job is not merely “fetch fast.”  
-Its job is:
-- compose truth-backed public responses
-- tolerate lag in derived inputs
-- never leak non-public content
-- degrade safely when dependencies are stale or ambiguous
+* article lifecycle truth
+* slug generation truth
+* media lifecycle truth
+* interaction counter truth
+* audit truth
+* notification truth
 
-### 0.2 Derived inputs (allowed to lag)
-Reading may include derived data such as:
-- SEO metadata projections
-- interaction counters (`views / likes / comments`)
-- Redis/CDN/response caches if enabled
-- future read-model enrichments
-- batch-generated summaries or trending inputs
+Source ownership remains:
 
-Derived inputs may lag truth.
+| Concern | Source owner |
+|---|---|
+| Article lifecycle and editorial fields | Content |
+| Slug and SEO metadata | SEO |
+| Media assets and primary media | Media |
+| Views, likes, comments, counters | Interaction |
+| Public serving projection | Reading |
 
-**Rule:** Reading correctness must not depend on derived freshness.
+Reading follows source truth asynchronously.
 
-This means:
-- enrichments may be stale or missing
-- visibility correctness may not be stale or missing
-- fallback to truth is preferred over stale confidence
+Normal public path:
 
-### 0.3 Knowledge limits in the read path
-Reading does not directly “know” truth from one place only.
-It composes from multiple sources and therefore must assume:
-- caches may be stale
-- SEO routing may resolve a slug whose visibility has changed
-- enrichments may arrive later than truth transitions
-- batch-derived summaries may lag async signals
-- dependency timeouts do not prove a target is absent
+```text
+Public API
+    ↓
+Reading projection
+    ↓
+Response
+```
 
-Because of that, Reading must:
-- validate visibility from truth
-- distinguish truth-backed absence from derived uncertainty
-- prefer safe, explicit fallback behavior over optimistic assumptions
-
-### 0.4 Consistency class for Reading
-Reading intentionally uses multiple consistency classes:
-
-#### Strong truth-backed consistency
-Required for:
-- public visibility correctness
-- final allow/deny decision on public article exposure
-- safe handling of slug resolution followed by visibility validation
-- any truth-sensitive read that could otherwise leak non-public content
-
-#### Ordered / causality-sensitive consistency
-Required for:
-- slug resolve -> visibility check -> response composition
-- cause-before-effect behavior where a derived signal must not outrun truth
-- version-aware handling of derived enrichments where freshness markers exist
-- avoiding stale derived responses after a newer truth transition such as unpublish
-
-#### Eventual consistency
-Accepted for:
-- counters
-- non-critical SEO metadata enrichments
-- cached fragments
-- recommendations/related content
-- batch-generated summaries
-- response-shaping enrichments that do not define visibility truth
+Policy-controlled fallback may read source truth when correctness requires it, but fallback must be explicit and must not become hidden cross-module ownership.
 
 ---
 
-## 1) Idempotency
+## 2) Truth vs derived state
 
-### 1.1 Public reads are naturally idempotent
-List/detail/read endpoints are naturally idempotent:
-- repeated identical reads must not mutate business truth
-- repeated identical reads should return the same visibility result given the same truth state
+### 2.1 Source truth
 
-### 1.2 Read-side signals must be retry-safe
-If Reading emits view or telemetry signals, they must be retry-safe:
-
-- the read response must not depend on view tracking success
-- a duplicate signal must not break correctness
-- Interaction handles dedupe/idempotency by policy
-- telemetry write failure must not change the public visibility result
-
-### 1.3 Read success must not depend on side-effect completion
-A public read remains successful even if:
-- view tracking enqueue fails
-- broker is slow
-- aggregation is behind
-- telemetry persistence is delayed
-- a later batch summary build has not caught up
-
-These side effects are optional with respect to read correctness.
-
-### 1.4 Idempotency is preferred over singleton assumptions
-Reading correctness must not depend on:
-- only one renderer or composer instance being active
-- one cache warmer being “the current owner”
-- startup order or local process leadership
-- one worker “surely” handling a read-side signal
-- one rebuild worker being assumed exclusive without explicit protection
-
-Reading should instead rely on:
-- truth-backed composition
-- safe cache-aside behavior
-- retry-safe optional side signals
-- deterministic visibility enforcement
-- rerun-safe rebuild/reconciliation policy
-
-### 1.5 Derived read outputs must also be safe under replay
-If Reading consumes or maintains derived outputs such as:
-- counters
-- summary fragments
-- trending inputs
-- future projection-backed read fragments
-
-then duplicate input, replay, rerun, and late-arriving derived updates must be tolerated safely.
-
-**Rule:** read-side convenience must remain idempotent or safely replaceable under replay.
-
----
-
-## 2) Consistency expectations (non-negotiable)
-
-### 2.1 Publication-state correctness must be strict
-Reading must never expose drafts or unpublished content to public callers.
-
-Policy:
-- every public detail/list query MUST enforce Content visibility from truth
-- cached, projected, or precomputed data must never bypass truth visibility rules
-- if any dependency is stale or ambiguous, prefer safe denial over incorrect exposure
-
-### 2.2 Consistent-prefix / cause-before-effect rule
-Reading must prevent “effect before cause” anomalies.
+Source truth is committed synchronously in the owning module.
 
 Examples:
-- a slug may resolve while the corresponding article is not yet publicly visible
-- a cache entry may still exist after unpublish
-- a derived enrichment may imply content exists even though truth now denies it
-- a batch-generated summary may still mention content that truth no longer exposes
 
-Therefore, after resolving `slug -> articleId`, Reading MUST confirm visibility from Content truth before returning content.
+* Content publishes/unpublishes an article.
+* SEO changes canonical slug data.
+* Media changes primary media.
+* Interaction updates counter truth or aggregate state.
 
-### 2.3 Eventual consistency is allowed only for enrichments
-The following may be eventually consistent:
-- counters
-- non-critical SEO metadata enrichments
-- derived read-model fields
-- cache freshness
-- recommendation/related-item enrichments if introduced
-- batch-generated reading summaries or ranking inputs
+### 2.2 Reading derived state
 
-Reading must degrade gracefully:
-- missing counters -> display `0`, `unknown`, or omit section (policy-defined)
-- missing SEO metadata -> fallback to safe defaults
-- missing non-critical enrichments -> omit rather than fail the whole read
+Reading projection is derived state.
 
-### 2.4 Timeout ambiguity does not prove non-existence
-If a dependency times out during read composition, Reading must not conclude:
-- “the article definitely does not exist”
-- “the slug definitely does not map”
-- “the media definitely is absent”
-- “the summary definitely is empty”
+It may be:
 
-Instead, Reading should apply the configured fallback path:
-- retry inside bounded local policy if appropriate
-- fall back from cache to truth
-- or return a safe result consistent with truth-backed certainty
+* stale
+* missing
+* delayed
+* replayed
+* repaired
+* rebuilt
+* replaced
 
-**Rule:** truth-backed absence and ambiguous dependency failure are not the same thing.
+Reading projection must not silently become source truth.
 
-### 2.5 No global ordering assumption
-Reading does **not** assume:
-- one total global order across all read-enrichment inputs
-- one globally linearizable read-model view across all modules
-- one cluster-wide sequencing truth for all public reads
-
-**Rule:** Reading ordering is scoped to the minimal causal chain required for safe composition.
-
-### 2.6 Route success is not visibility success
-A successful slug resolution means:
-- SEO found a target
-
-It does **not** mean:
-- the target is public
-- the target is safe to serve
-- a stale route is acceptable to trust
-
-**Rule:** visibility must be confirmed after routing and before response publication.
+Reading projection must be rebuildable from authoritative source modules.
 
 ---
 
-## 3) Transaction boundary (V1)
+## 3) Delivery assumption
 
-### 3.1 Reading does not own business truth writes
-Reading is a read facade and does not define the primary transactional boundary for:
-- article lifecycle truth
-- slug uniqueness/routing truth
-- media attachment truth
-- interaction aggregate truth
-- identity or authorization truth
+CommercialNews V1 uses Outbox + RabbitMQ + consumers with at-least-once delivery.
 
-Its primary responsibility is:
-- correct composition
-- truth-first visibility enforcement
-- safe fallback across module-owned truth sources
+Reading must assume:
 
-### 3.2 Read-path composition is not a distributed transaction
-A public read may compose data from:
-- Content
-- SEO
-- Media
-- optional derived sources such as counters/cache
-- batch-generated summaries if introduced
+* events may be delivered more than once
+* broker may redeliver
+* outbox publisher may retry
+* consumers may crash and restart
+* older events may arrive after newer events
+* replay/rebuild may intentionally reprocess input
 
-Reading does not attempt a distributed atomic transaction across these sources.
+Reading targets effectively-once projection outcomes through:
 
-Instead, it preserves correctness with:
-- truth-first visibility checks
-- refusal to trust stale derived data for visibility/security decisions
-- safe fallback when one source is stale or unavailable
+* message-level identity
+* version-aware projection apply
+* idempotent upsert
+* stale event rejection
+* rebuild/reconciliation posture
 
-### 3.3 Allowed write-side effects in Reading flows
-Reading may emit lightweight side signals, such as:
-- view tracking signal/enqueue
-- access telemetry
-- cache-aside fill after a safe truth-backed read
+Exactly-once delivery is not assumed.
 
-These must not be required for read success.
+---
 
-### 3.4 Outside the critical read path
-The following MUST NOT be required for a successful public read:
-- interaction tracking completion
-- counter aggregation completion
-- cache invalidation completion
-- SEO consumer catch-up
-- broker publish completion
-- downstream projection refresh
-- batch summary rebuild completion
+## 4) Event identity
 
-Public reads must remain available even when these subsystems lag or fail.
+Important events consumed by Reading should carry:
 
-### 3.5 Transaction duration rule
-If Reading performs any local write-side signal inside the request path, it must remain short and bounded:
-- no waiting for downstream systems
-- no open transaction across external calls
-- no coupling between read latency and async side-effect completion
-- no retry loops that stretch the read path indefinitely
+| Field | Purpose |
+|---|---|
+| `MessageId` | Message-level identity and dedupe key |
+| `EventType` | Handler routing |
+| `AggregateId` | Source aggregate identity |
+| `Version` | Per-aggregate freshness marker |
+| `OccurredAtUtc` | Event timestamp for investigation and lag measurement |
+| `CorrelationId` | End-to-end tracing |
 
-### 3.6 Visibility-before-enrichment rule
-Reading must validate visibility from truth before treating derived enrichments as usable.
+Reading should log these fields for every important apply decision.
+
+---
+
+## 5) Message-level idempotency
+
+Message-level idempotency protects against the same delivered message being processed more than once.
+
+Primary key:
+
+```text
+MessageId
+```
+
+Reading may implement this through:
+
+* `LastEventMessageId`
+* durable processed-message table
+* unique apply log
+* idempotent repository/stored procedure behavior
+
+Duplicate processing of the same message must be harmless.
+
+---
+
+## 6) Projection-level idempotency
+
+Message-level dedupe alone is not sufficient.
+
+A different older message may arrive after a newer message.
+
+Therefore Reading must also protect projection state with source versioning.
+
+Primary freshness marker:
+
+```text
+SourceVersion
+```
+
+Approved apply rule:
+
+```text
+If IncomingVersion > CurrentSourceVersion:
+    apply event
+Else:
+    ignore or reject as duplicate/stale
+```
+
+The version guard should be enforced at the repository/stored procedure boundary, not only in application memory.
+
+---
+
+## 7) Duplicate vs stale delivery
+
+### 7.1 Duplicate delivery
+
+The same message arrives again.
+
+Example:
+
+```text
+MessageId = 01ABC
+Version = 7
+```
+
+Expected behavior:
+
+* no duplicate row
+* no harmful side effect
+* no projection corruption
+* duplicate metric/log may be emitted
+
+### 7.2 Stale delivery
+
+An older but different message arrives after newer state is already applied.
+
+Example:
+
+```text
+CurrentSourceVersion = 7
+IncomingVersion = 6
+```
+
+Expected behavior:
+
+* ignore or reject stale event
+* do not overwrite projection
+* emit stale-event metric
+* retain enough logs for investigation
+
+---
+
+## 8) Timestamp policy
+
+Reading must not use wall-clock timestamps as freshness authority.
+
+Do not use:
+
+* `largest UpdatedAtUtc wins`
+* `largest OccurredAtUtc wins`
+* `latest ProcessedAtUtc wins`
+
+Use:
+
+* `AggregateId + Version`
+* `SourceVersion / LastAppliedVersion`
+
+Timestamps are allowed for:
+
+* public display
+* audit/investigation
+* projection lag measurement
+* reporting
+* scheduling
+
+They are not ordering authority.
+
+---
+
+## 9) Version gap policy
+
+V1 default:
+
+* snapshot-like events may be applied when `IncomingVersion > CurrentSourceVersion`
+* delta-like events require strict ordering or resync
+* if exact prior state matters and a gap is detected, Reading must defer, resync, or rebuild according to policy
+
+Event shape must be explicit:
+
+```text
+Snapshot event => newer version can replace projection.
+Delta event => strict order or resync may be required.
+```
+
+---
+
+## 10) Public read idempotency
+
+Public read endpoints are naturally idempotent.
+
+Repeated reads must not mutate source truth.
+
+Affected endpoints:
+
+```text
+GET /api/v1/articles
+GET /api/v1/articles/{articlePublicId}
+GET /api/v1/articles/slug/{slug}
+GET /api/v1/articles/search
+GET /api/v1/articles/{articlePublicId}/related
+```
+
+A repeated read may return a newer projection if Reading has caught up between requests.
+
+This is acceptable.
+
+---
+
+## 11) Public visibility consistency
+
+Reading must fail closed for public visibility.
+
+Public APIs must not expose:
+
+* draft articles
+* unpublished articles
+* archived articles
+* soft-deleted articles
+* visibility-uncertain articles
+
+Public visibility requires:
+
+* source-derived status is `Published`
+* projection `IsPublic = true`
+* article is not archived
+* article is not soft-deleted
+* slug is active if accessed by slug
+* visibility is not uncertain
+
+If visibility is uncertain:
+
+```text
+Unknown visibility => not public.
+Safe 404 is preferred over incorrect public exposure.
+```
+
+---
+
+## 12) Projection lag behavior
+
+Projection lag is expected.
+
+### After publish
+
+If Content has published an article but Reading projection has not caught up yet:
+
+* article may be missing from list
+* detail by slug/public id may return safe `404`
+* search may not include the article yet
+
+This lag is acceptable within SLO and must be observable.
+
+### After unpublish/archive/soft-delete
+
+If source truth has hidden an article but Reading projection has not caught up yet:
+
+* visibility-sensitive stale exposure is not acceptable where detected
+* if projection freshness policy marks visibility as uncertain, Reading must fail closed
+* repair/reconciliation must correct projection drift
+
+---
+
+## 13) Optional enrichment consistency
+
+The following are allowed to be eventually consistent:
+
+* counters
+* cover media
+* media gallery
+* SEO metadata
+* related article signals
+* popularity/trending signals
+* summaries
+
+If optional enrichments are missing, stale, or unavailable, Reading may:
+
+* omit them
+* return null
+* return empty arrays
+* return safe defaults
+* return stale non-sensitive values where policy allows
+
+Optional enrichment failure must not make visibility permissive.
+
+---
+
+## 14) Counter consistency
+
+Counters are derived and may lag.
 
 Examples:
-- slug resolves -> still verify `Published` truth before returning detail
-- counters present -> may be shown if available, but must not override visibility rules
-- missing media/SEO enrichment -> degrade gracefully, not leak or fail incorrectly
-- batch summary present -> may shape response, but must not outrun truth visibility
 
-### 3.7 Cache is acceleration only
-Any cache used by Reading is an optimization layer only.
+* views
+* likes
+* comments
 
-A cache hit must never be trusted blindly for:
-- publication visibility
-- authorization-sensitive admin reads
-- security-sensitive self-state
-- truth-sensitive route resolution without visibility confirmation
+Reading must not blindly increment counters under at-least-once delivery.
 
-Where correctness is at risk, Reading must fall back to truth.
+Disallowed pattern:
 
-### 3.8 No heterogeneous distributed transaction
-Reading does **not** attempt one atomic workflow across:
-- Content truth
-- SEO truth
-- Media truth
-- Redis/cache
-- interaction counters
-- telemetry/view tracking systems
-- batch-generated summaries
+```text
+On every delivered view event:
+    ViewCount = ViewCount + 1
+```
 
-Correctness is achieved through:
-- truth-backed composition
-- causal validation order
-- safe fallback
-- optional side effects outside the correctness boundary
+Preferred patterns:
+
+```text
+Set ViewCount to known aggregate value.
+```
+
+or:
+
+```text
+Deduplicate raw interaction event before incrementing.
+```
+
+For V1, Reading should prefer absolute counter updates or default counters until Interaction counter projection is designed.
+
+Counter truth belongs to Interaction.
 
 ---
 
-## 4) Fallback behavior under lag or ambiguity (required)
+## 15) View tracking consistency
 
-### 4.1 Slug resolution fallback
-Routing can be cache-first, but must be correct:
+Reading does not expose interaction write endpoints in V1.
 
-1. Resolve `(scope, slug)` via Redis cache if enabled  
-2. On miss or suspicion of staleness, fall back to SEO truth store  
-3. After obtaining target id, validate Content visibility from truth  
-4. Only then compose the public response
+Recommended flow:
 
-### 4.2 Missing derived state fallback
-If projections/caches/summaries are stale or missing:
-- fall back to truth stores (`Content / SEO / Media`) for correctness
-- never return misleading 404/empty when truth indicates `Published` and readable
-- never return content when truth indicates non-public
+```text
+Reading returns article detail
+    ↓
+Client sends view signal to Interaction
+    ↓
+Interaction handles dedupe, counting, abuse controls, and aggregation
+```
 
-### 4.3 Safe 404 vs misleading 404
-Reading distinguishes between:
+Rules:
 
-#### Safe 404
-Used when authoritative truth indicates:
-- slug does not map to a visible target
-- article is not public
-- resource truly should not be exposed
-
-#### Misleading 404
-Would happen if Reading trusted:
-- a stale cache miss
-- a lagging projection
-- an unavailable enrichment source
-- a stale batch-generated summary
-without checking truth
-
-**Rule:** misleading 404 must be avoided where truth fallback can determine a correct public result.
-
-### 4.4 Non-critical subsystems must not block reads
-- interaction tracking failures must not degrade reading correctness
-- counter aggregation backlog must not affect article detail response
-- missing derived metadata must not force full read failure if truth-backed rendering is still possible
-- stale batch summaries must not block truth-safe response composition
-
-### 4.5 Safe omission beats stale invention
-If a non-critical enrichment is unavailable or suspiciously stale:
-- omit it
-- fallback to a safe default
-- or render the core truth-backed article response without it
-
-Do not invent or over-trust derived values to make the response “look complete.”
-
-### 4.6 Truth fallback is valid degraded behavior
-A truth-backed slower path is still a correct path.
-
-Reading should treat:
-- cache miss + truth success
-- stale projection + truth success
-- missing summary + truth-backed core response
-
-as degraded-but-correct behavior, not as correctness failure.
+* Reading success does not depend on view tracking success
+* view signal failure does not change article visibility
+* duplicate view signals must be tolerated by Interaction
+* Reading counters may lag behind Interaction
 
 ---
 
-## 5) Cache consistency (policy hook)
+## 16) Cache consistency
 
-### 5.1 Cache posture
-Reading caches must follow system cache policy:
-- cache-aside as default
-- event-driven invalidation where feasible + TTL fallback
-- no blind trust of cached visibility-sensitive data
+Cache is acceleration only.
 
-### 5.2 Suggested cache groups (if introduced)
-Possible cache groups:
-- list endpoints (short TTL)
-- detail response fragments
-- SEO routing cache (owned by SEO, hot-path relevant)
-- non-critical enrichment fragments
-- bounded summary fragments if they remain clearly derived
+Cache must not become hidden truth.
 
-### 5.3 Visibility-sensitive cache rule
-Article detail/list caches must respect visibility changes immediately at the truth boundary.
+Rules:
 
-Therefore:
-- cache lag must never override truth-backed visibility checks
-- unpublish must win over stale cache presence
-- public correctness beats cache hit ratio
+* cache hit must not bypass source-derived visibility
+* stale cache must not expose unpublished, archived, or soft-deleted content
+* cache refresh must be harmless under duplicate requests/signals
+* cache refresh failure must not break a safe projection-backed response
+* cache data must not override Reading projection visibility
 
-### 5.4 Canary/rollout guardrail
-Caches must not hide regressions during rollouts.
+If cache conflicts with projection visibility:
 
-During canary or staged releases:
-- monitor fallback rates
-- monitor truth-read amplification
-- monitor error rates and latency
-- ensure stale caches are not masking broken routing or composition behavior
+```text
+Projection visibility wins.
+```
 
-### 5.5 Cache refresh safety
-Cache refresh or cache-aside refill must be safe under:
-- repeated requests
-- replayed refresh signals
-- late-arriving derived updates
-- overlapping rebuild/reconciliation activity
+If projection visibility is uncertain:
 
-A stale cache write must not regain authority over fresher truth-backed composition.
+```text
+Fail closed unless explicit fallback confirms visibility safely.
+```
 
 ---
 
-## 6) Freshness and ordering of derived enrichments
+## 17) Transaction boundary
 
-### 6.1 Derived enrichment freshness is secondary to visibility truth
-Reading may consume enrichments that are behind current truth.
+Reading projection updates use bounded local transactions.
 
-That is acceptable if:
-- visibility is still validated from truth
-- enrichment omission is safe
-- stale enrichment does not create incorrect exposure
+A Reading projection transaction may update:
 
-### 6.2 Timestamps are informational, not freshness authority
-If enrichments carry `UpdatedAt` or `OccurredAt`, those timestamps are useful for:
-- debugging
-- approximate chronology
-- telemetry
+* projection fields
+* `SourceVersion`
+* `LastEventMessageId`
+* `LastSourceOccurredAtUtc`
+* `LastSyncedAtUtc`
 
-They are not sufficient authority for:
-- deciding public visibility
-- resolving truth conflicts
-- overriding authoritative module truth
+It must not update source module truth.
 
-### 6.3 Version-aware enrichments are preferred when available
-If a projection or enrichment source carries:
-- aggregate version
-- last applied version
-- revision marker
+It must not open long-running cross-module transactions.
 
-Reading should prefer those signals over timestamps when deciding whether derived data is stale enough to ignore or refresh.
-
-### 6.4 Causal ordering beats global recency
-Reading does not need one globally newest view of all modules at once.
-It does need:
-- visibility checked after route resolution
-- enrichments not trusted ahead of authoritative truth
-- stale derived fragments not allowed to outrun truth transitions
-
-This is a causal-composition rule, not a global-order rule.
-
-### 6.5 Batch-generated enrichments follow the same rule
-If Reading consumes outputs from bounded aggregation/rebuild workflows, those outputs remain:
-- derived
-- lag-tolerant
-- subordinate to truth
-- safe to omit if freshness is uncertain
-
-### 6.6 Late-arriving enrichments must not outrun newer truth
-If a counter, summary, projection fragment, or rebuild candidate arrives later:
-- it must not make content appear readable if truth would deny it
-- it must not overwrite fresher already-known derived state blindly
-- it should be ignored, replaced, or rebuilt according to module policy
+Source modules must not wait for Reading projection completion as part of their truth transactions.
 
 ---
 
-## 7) Rebuild / replay / reconciliation posture (Reading)
+## 18) Producer-side vs consumer-side failure
 
-### 7.1 Rebuildable reading-derived outputs
-Reading-side derived outputs such as:
-- counters
-- trending inputs
-- summary enrichments
-- future projection-backed read fragments
+Reading distinguishes producer-side and consumer-side failures.
 
-should be treated as rebuildable by policy.
+### Producer-side failure
 
-### 7.2 Reconciliation over blind trust
-If truth and derived reading outputs diverge, Reading prefers:
-- truth-backed fallback for immediate correctness
-- bounded reconciliation workflows for later repair
-- candidate-before-publication for repaired or rebuilt derived outputs where needed
+Examples:
 
-### 7.3 Rerun safety
-Important rebuild/reconciliation workflows affecting reading-derived outputs must be safe to rerun on the same bounded input.
+* outbox publication is delayed
+* outbox publisher cannot publish to RabbitMQ
+* message is not yet handed off to the broker
 
-### 7.4 Partial rebuild output is not active truth
-Partially built summaries, counters, or projections must not be treated as complete active outputs if their workflow has not successfully completed publication/cutover.
+This is not a Reading consumer failure.
 
-### 7.5 Full rebuild is acceptable when safer than partial repair
-If a derived reading output is cheap enough to regenerate from bounded truth/log inputs:
-- full rebuild is preferred over fragile partial patching
-- bounded recompute is preferred over hidden exactly-once assumptions
-- explicit repair is preferred over silent divergence
+### Consumer-side failure
 
-### 7.6 Recovery outputs remain derived
-Mismatch reports, repaired summary candidates, rebuilt projection fragments, and regenerated trending inputs remain derived outputs.
+Examples:
 
-They improve quality and performance.
-They do not become publication truth.
+* Reading receives event but cannot apply projection
+* Reading repository is unavailable
+* version conflict or stale event is detected
+* projection update fails transiently
+
+This belongs to Reading consumer/retry/recovery behavior.
+
+These must be logged and measured separately.
 
 ---
 
-## 8) Coordination and ownership posture (Reading)
+## 19) Rebuild and reconciliation posture
 
-### 8.1 Reading does not require global singleton coordination by default
-Ordinary Reading correctness must not depend on:
-- one global read-model leader
-- one process being “the only composer”
-- startup order deciding which renderer is current
-- timeout-only assumptions about ownership
+`ArticleReadModel` is derived state.
 
-Reading correctness should instead be achieved through:
-- truth-backed composition
-- safe cache fallbacks
-- deterministic visibility enforcement
-- retry-safe optional side signals
+It must have a documented recovery path.
 
-### 8.2 If future ownership-sensitive workflows are introduced
-If a future Reading workflow truly requires one current owner
-(for example exclusive rebuild of a read-model partition or one-current cache repair owner),
-that workflow must define:
-- ownership source of truth
-- monotonic generation/fencing token
-- resource-side rejection of stale owner actions
+Approved recovery strategies:
 
-Naive leader/lock patterns are not acceptable.
+* rebuild from Content truth
+* rebuild from SEO truth
+* rebuild from Media truth
+* rebuild/reconcile counters from Interaction
+* bounded recomputation
+* replay from retained operational history where policy allows
 
-### 8.3 Safe non-progress beats unsafe double-apply
-If ownership is ambiguous for a correctness-sensitive rebuild or publication workflow, Reading must prefer:
-- delayed rebuild
-- operator retry
-- stale-owner rejection
-- continued truth-safe fallback
+RabbitMQ is not the permanent replay source.
 
-over unsafe dual publication or unsafe repair mutation.
+Production rebuild should avoid exposing partial output as complete.
+
+Candidate-before-cutover or equivalent safe publication is preferred for full rebuilds.
 
 ---
 
-## 9) Observability signals (Reading-specific)
+## 20) Rerun safety
 
-### 9.1 Minimum signals
-Minimum signals include:
-- P95/P99 latency and error rate for list/detail
-- SEO slug resolve latency + error rate
-- SEO DB fallback rate (%)
-- truth fallback rate for stale/missing derived inputs
-- “visibility denied after slug resolve” rate for debugging (must not leak to clients)
-- interaction enqueue/backlog signals (non-blocking)
-- counter freshness lag indicators (if available)
-- misleading-404 prevention signals where measurable
-- omitted-enrichment rate due to stale/missing derived inputs
-- rebuild/reconciliation mismatch count for reading-derived outputs
-- active-summary freshness age where summaries exist
-- candidate publication/cutover failures for important derived outputs
-- ownership-generation mismatch count if future ownership-sensitive workflows are introduced
+Important rebuild/reconciliation workflows must be safe to rerun on the same bounded input.
 
-### 9.2 Health layering for Reading
-Reading observability should distinguish:
-- API process health
-- dependency health (SEO truth, Content truth, Redis)
-- business-flow health (public list/detail correctness and latency)
-- derived-path lag (counters/projections/cache fallback)
-- rebuild/reconciliation health for reading-derived outputs
+Rerun must not:
 
-### 9.3 Logging requirements
+* duplicate articles
+* double-count counters
+* expose non-public content
+* overwrite newer projection state with older data
+* publish partial candidate output as complete
+
+---
+
+## 21) Coordination and ownership posture
+
+Reading should not depend on global singleton assumptions by default.
+
+Correctness should come from:
+
+* source-derived projection state
+* version-aware apply
+* idempotent upsert
+* safe cache behavior
+* rerun-safe rebuild/reconciliation
+
+If a future rebuild or repair workflow requires exclusive ownership, it must define:
+
+* ownership source of truth
+* monotonic generation/fencing token
+* resource-side rejection of stale owner actions
+
+Safe non-progress is preferred over unsafe dual publication or unsafe repair.
+
+---
+
+## 22) Timeout and ambiguity
+
+Timeouts are ambiguous.
+
+A timeout does not prove:
+
+* a source event was not published
+* a projection update did not apply
+* an article does not exist
+* a slug does not map
+* a media/counter enrichment is absent
+
+Reading must handle ambiguity through:
+
+* bounded retry where safe
+* safe degradation
+* fail-closed visibility
+* explicit fallback policy
+* rebuild/reconciliation
+
+---
+
+## 23) Safe non-progress rule
+
+When Reading cannot establish safe forward progress, it must prefer:
+
+* no-op
+* reject
+* retry
+* defer
+* resync
+* rebuild
+* operator-controlled remediation
+
+over applying a possibly wrong effect.
+
+This applies especially to:
+
+* public visibility
+* slug routing
+* stale projection writes
+* rebuild/cutover
+* counter exactness
+
+---
+
+## 24) Observability signals
+
+Reading should expose or log:
+
+* projection apply count
+* projection apply failure count
+* duplicate message count
+* stale version reject count
+* version gap detected count
+* projection lag / freshness age
+* rebuild/reconciliation count
+* rebuild/reconciliation failure count
+* fallback count
+* degraded response count
+* omitted enrichment count
+* cache hit/miss count
+* visibility uncertain count
+
 Logs should include:
-- `correlationId / traceId`
-- scope + slug (when safe)
-- resolved target id
-- visibility outcome (`published` vs denied)
-- fallback path taken (`cache hit`, `DB fallback`, `truth fallback`)
-- whether enrichments were omitted due to staleness or failure
-- rebuild/reconciliation workflow identifiers where applicable
 
-Logs must help operators answer:
-- was this truly not found?
-- was it denied by truth?
-- did we fall back correctly?
-- did a derived store lag or fail?
-- is the issue in request composition or in a delayed rebuild/reconciliation path?
+* `MessageId`
+* `EventType`
+* `AggregateId`
+* `IncomingVersion`
+* `CurrentSourceVersion`
+* `CorrelationId`
+* apply decision
+* failure/reject reason
 
 ---
 
-## 10) Summary
+## 25) Summary
 
-Reading correctness in V1 rests on fourteen rules:
+Reading consistency in V1 rests on these rules:
 
-1. Reading is a facade over truth owned elsewhere; it must compose, not invent truth.  
-2. Visibility correctness comes from Content truth and is never delegated to stale derived data.  
-3. Slug resolution is not enough; visibility must still be confirmed before returning content.  
-4. Missing or stale enrichments are acceptable; incorrect exposure is not.  
-5. Timeout or cache miss does not automatically prove absence; fallback to truth is the safe path.  
-6. Read latency may degrade under lag, but public correctness must not.  
-7. No global ordering or distributed transaction is assumed for Reading composition.  
-8. Causal validation order matters more than globally freshest derived data.  
-9. Reading-side signals are optional and retry-safe.  
-10. Reading-derived outputs are rebuildable and subordinate to truth.  
-11. Reconciliation and rebuild support reading quality, but do not redefine publication truth.  
-12. Replay, rerun, and late-arriving derived updates are normal and must remain safe.  
-13. Truth-backed degraded behavior is acceptable; stale derived confidence is not.  
-14. Singleton/ownership semantics are not relied on unless explicitly protected by authoritative generation/fencing rules.
+* Reading is a derived public read projection module.
+* Source modules own truth; Reading owns projection.
+* Normal public path reads from Reading projection.
+* Delivery is at-least-once; handlers must be idempotent.
+* `MessageId` protects duplicate delivery.
+* `SourceVersion` protects stale overwrite.
+* Timestamps are not freshness authority.
+* Public visibility fails closed.
+* Optional enrichments may lag or degrade.
+* Counters must not increment blindly under replay.
+* Cache is acceleration only, not hidden truth.
+* Source modules do not wait for Reading projection completion.
+* RabbitMQ is delivery infrastructure, not permanent replay history.
+* Rebuild/reconciliation is required for important derived outputs.
+* Safe non-progress beats unsafe stale apply.
