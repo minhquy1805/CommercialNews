@@ -1,29 +1,118 @@
 // =====================================================
-// CommercialNews — Reading Experience (V1) — Composition View
+// CommercialNews — Reading Experience (V1) — Projection View
 // File: explanation/architecture/arc42/diagrams/erd/reading-composition-v1.dbml
 //
 // Purpose
-// - Show how the public read model composes data across modules via ArticleId.
-// - Reading owns no tables in V1. This is not a physical schema.
+// - Show Reading V1 as a derived public read projection.
+// - Reading serves public APIs from Reading-owned projection data in the normal path.
+// - Source modules remain authoritative for source truth.
+// - Reading projection is derived, version-aware, idempotent, and rebuildable.
 //
 // Notes
-// - Reading must enforce Content visibility (Published + NotDeleted) even if slug resolves.
-// - Interaction view tracking is NOT shown here (non-blocking side effect).
+// - Content owns article lifecycle and editorial truth.
+// - SEO owns slug and canonical routing truth.
+// - Media owns media asset and primary media truth.
+// - Interaction owns engagement/counter truth.
+// - Reading owns projected public serving data only.
+// - Reading must fail closed when public visibility is uncertain.
+// - RabbitMQ/outbox delivery is not shown as a table relationship here.
 // =====================================================
 
-// -------- Content (truth) --------
+// -------- Reading (derived public serving projection) --------
+Table Reading_ArticleReadModel {
+  ArticleId bigint [pk]
+  ArticlePublicId varchar [unique, not null]
+
+  // Source-derived routing/display fields
+  Slug nvarchar [unique]
+  Title nvarchar
+  Summary nvarchar
+  Body nvarchar
+
+  // Source-derived taxonomy/author fields
+  CategoryId bigint
+  CategoryName nvarchar
+  AuthorUserId bigint
+  AuthorDisplayName nvarchar
+
+  // Source-derived media fields
+  CoverMediaId bigint [null]
+  CoverMediaUrl nvarchar [null]
+  CoverAlt nvarchar [null]
+
+  // Source-derived SEO fields
+  CanonicalUrl nvarchar [null]
+  MetaTitle nvarchar [null]
+  MetaDescription nvarchar [null]
+
+  // Source-derived visibility fields
+  Status varchar
+  IsPublic bit
+  PublishedAtUtc datetime
+  UpdatedAtUtc datetime
+
+  // Derived search / ranking / counters
+  SearchText nvarchar [null]
+  ViewCount bigint [default: 0]
+  LikeCount bigint [default: 0]
+  CommentCount bigint [default: 0]
+  PopularityScore float [null]
+
+  // Projection freshness / idempotency
+  SourceVersion bigint
+  LastEventMessageId varchar [null]
+  LastSourceOccurredAtUtc datetime [null]
+  LastSyncedAtUtc datetime
+
+  Note: "DERIVED: Reading-owned public serving projection. Normal public path reads here. SourceVersion prevents stale overwrite. IsPublic must fail closed when uncertain."
+}
+
+Table Reading_ArticleReadModelMedia {
+  ArticleId bigint
+  MediaId bigint
+  Url nvarchar
+  Alt nvarchar [null]
+  MediaType varchar
+  SortOrder int
+  IsPrimary bit
+
+  Indexes {
+    (ArticleId, MediaId) [pk]
+  }
+
+  Note: "DERIVED: Optional projected media gallery for public detail. Missing rows degrade safely."
+}
+
+Table Reading_ArticleReadModelTag {
+  ArticleId bigint
+  TagId bigint
+  Name nvarchar
+  Slug nvarchar
+
+  Indexes {
+    (ArticleId, TagId) [pk]
+  }
+
+  Note: "DERIVED: Optional projected tags for detail/filtering."
+}
+
+// -------- Content (source truth) --------
 Table Content_Article {
   ArticleId bigint [pk]
+  ArticlePublicId varchar [unique]
   CategoryId bigint
   AuthorUserId bigint
 
   Title nvarchar
   Summary nvarchar
+  Body nvarchar
   Status varchar
-  PublishedAt datetime
+  PublishedAtUtc datetime
+  UpdatedAtUtc datetime
   IsDeleted bit
+  Version bigint
 
-  Note: "TRUTH: publication state + time sorting. Reads must filter Published + NotDeleted."
+  Note: "TRUTH: article lifecycle/editorial state. Reading follows this asynchronously."
 }
 
 Table Content_Category {
@@ -46,15 +135,16 @@ Table Content_ArticleTag {
   }
 }
 
-// -------- SEO (routing + metadata sidecar) --------
+// -------- SEO (source truth for slug + metadata) --------
 Table Seo_SlugRegistry {
   SlugId bigint [pk]
   ArticleId bigint
   Scope varchar
   Slug nvarchar
   IsActive bit
+  Version bigint
 
-  Note: "HOT PATH: (Scope,Slug)->ArticleId. Reading must still validate article visibility."
+  Note: "TRUTH: slug/canonical routing. Reading may project active slug for public hot path."
 }
 
 Table Seo_SeoMetadata {
@@ -63,9 +153,10 @@ Table Seo_SeoMetadata {
   CanonicalUrl nvarchar
   MetaTitle nvarchar
   MetaDescription nvarchar
+  Version bigint
 }
 
-// -------- Media (cover + attachments) --------
+// -------- Media (source truth for cover + attachments) --------
 Table Media_ArticleMedia {
   ArticleMediaId bigint [pk]
   ArticleId bigint
@@ -73,26 +164,29 @@ Table Media_ArticleMedia {
   SortOrder int
   IsPrimary bit
   IsDeleted bit
+  Version bigint
 
-  Note: "Primary cover + ordered attachments (degrade gracefully if missing/deleted)."
+  Note: "TRUTH: primary cover + ordered attachments. Reading projects public-safe media fields."
 }
 
 Table Media_MediaAsset {
   MediaId bigint [pk]
   Url nvarchar
+  Alt nvarchar [null]
   MediaType varchar
   IsDeleted bit
 }
 
-// -------- Interaction (projection + comments) --------
+// -------- Interaction (source/aggregate truth for engagement) --------
 Table Interaction_Stats {
   ArticleId bigint [pk]
   ViewsTotal bigint
   LikesTotal bigint
   CommentsTotal bigint
   PopularityScore float
+  Version bigint
 
-  Note: "Projection. Missing row => treat totals/score as 0."
+  Note: "AGGREGATE/TRUTH for engagement summary. Reading should project absolute values, not blindly increment."
 }
 
 Table Interaction_Comment {
@@ -101,12 +195,12 @@ Table Interaction_Comment {
   UserId bigint
   ParentCommentId bigint [null]
   Status varchar
-  CreatedAt datetime
+  CreatedAtUtc datetime
 
-  Note: "Paged. Public reads only Status=Visible."
+  Note: "Interaction-owned. Public reads only visible comments if comments are exposed later."
 }
 
-// -------- Relationships (composition joins) --------
+// -------- Relationships (source ownership + projection lineage) --------
 Ref: Content_Article.CategoryId > Content_Category.CategoryId
 Ref: Content_ArticleTag.ArticleId > Content_Article.ArticleId
 Ref: Content_ArticleTag.TagId > Content_Tag.TagId
@@ -120,3 +214,12 @@ Ref: Media_ArticleMedia.MediaId > Media_MediaAsset.MediaId
 Ref: Interaction_Stats.ArticleId > Content_Article.ArticleId
 Ref: Interaction_Comment.ArticleId > Content_Article.ArticleId
 Ref: Interaction_Comment.ParentCommentId > Interaction_Comment.CommentId
+
+// Projection lineage references.
+// These are logical lineage references, not ownership transfer.
+Ref: Reading_ArticleReadModel.ArticleId > Content_Article.ArticleId
+Ref: Reading_ArticleReadModel.CategoryId > Content_Category.CategoryId
+Ref: Reading_ArticleReadModel.CoverMediaId > Media_MediaAsset.MediaId
+
+Ref: Reading_ArticleReadModelMedia.ArticleId > Reading_ArticleReadModel.ArticleId
+Ref: Reading_ArticleReadModelTag.ArticleId > Reading_ArticleReadModel.ArticleId
