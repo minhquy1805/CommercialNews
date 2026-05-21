@@ -10,7 +10,7 @@ public sealed class ArticleUnpublishedReadingPayload
 
     public string ToStatus { get; init; } = string.Empty;
 
-    public string? Reason { get; init; }
+    public string Reason { get; init; } = string.Empty;
 
     public long ActorUserId { get; init; }
 

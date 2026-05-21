@@ -581,13 +581,31 @@ BEGIN
     DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
     DECLARE @Applied BIT = 0;
     DECLARE @CurrentSourceVersion BIGINT = NULL;
+    DECLARE @CurrentPublishedAtUtc DATETIME2(3) = NULL;
+    DECLARE @EffectivePublishedAtUtc DATETIME2(3) = NULL;
+    DECLARE @EffectiveIsPublic BIT = 0;
 
     BEGIN TRANSACTION;
 
     SELECT
-        @CurrentSourceVersion = [SourceVersion]
+        @CurrentSourceVersion = [SourceVersion],
+        @CurrentPublishedAtUtc = [PublishedAtUtc]
     FROM [reading].[ArticleReadModel] WITH (UPDLOCK, HOLDLOCK)
     WHERE [ArticleId] = @ArticleId;
+
+    SET @EffectivePublishedAtUtc =
+        CASE
+            WHEN @Status = N'Published' THEN COALESCE(@PublishedAtUtc, @CurrentPublishedAtUtc)
+            ELSE NULL
+        END;
+
+    SET @EffectiveIsPublic =
+        CASE
+            WHEN @Status = N'Published'
+             AND @IsPublic = 1
+             AND @EffectivePublishedAtUtc IS NOT NULL THEN 1
+            ELSE 0
+        END;
 
     IF @CurrentSourceVersion IS NULL
     BEGIN
@@ -643,8 +661,8 @@ BEGIN
             NULL,
             NULL,
             @Status,
-            @IsPublic,
-            @PublishedAtUtc,
+            @EffectiveIsPublic,
+            @EffectivePublishedAtUtc,
             @UpdatedAtUtc,
             CONCAT_WS(N' ', @Title, @Summary, @Body, @CategoryName, @AuthorDisplayName),
             0,
@@ -673,8 +691,8 @@ BEGIN
             [AuthorUserId] = @AuthorUserId,
             [AuthorDisplayName] = @AuthorDisplayName,
             [Status] = @Status,
-            [IsPublic] = @IsPublic,
-            [PublishedAtUtc] = @PublishedAtUtc,
+            [IsPublic] = @EffectiveIsPublic,
+            [PublishedAtUtc] = @EffectivePublishedAtUtc,
             [UpdatedAtUtc] = @UpdatedAtUtc,
             [SearchText] = CONCAT_WS(N' ', @Title, @Summary, @Body, @CategoryName, @AuthorDisplayName),
             [SourceVersion] = @SourceVersion,

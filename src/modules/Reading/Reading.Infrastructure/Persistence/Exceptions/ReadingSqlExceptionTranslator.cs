@@ -11,13 +11,78 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
 
         return exception.Number switch
         {
+            58201 => Reading(
+                "READING.DATABASE_NOT_FOUND",
+                "Database CommercialNews does not exist.",
+                exception),
+
+            58202 => Reading(
+                "READING.SCHEMA_NOT_FOUND",
+                "Schema reading does not exist.",
+                exception),
+
+            58203 or 58204 or 58205 => Reading(
+                "READING.PROJECTION_STORE_NOT_FOUND",
+                "A required Reading projection table does not exist.",
+                exception),
+
+            58210 or 58240 or 58251 => Reading(
+                "READING.INVALID_ARTICLE_PUBLIC_ID",
+                "Article public id must be a valid 26-character public id.",
+                exception),
+
+            58220 => Reading(
+                "READING.INVALID_SLUG",
+                "Slug is required.",
+                exception),
+
+            58230 => Reading(
+                "READING.INVALID_SEARCH_QUERY",
+                "Keyword is required.",
+                exception),
+
+            58250 or 58260 or 58270 or 58280 => Reading(
+                "READING.INVALID_ARTICLE_ID",
+                "Article id must be greater than zero.",
+                exception),
+
+            58252 => Reading(
+                "READING.INVALID_TITLE",
+                "Article title is required.",
+                exception),
+
+            58253 => Reading(
+                "READING.INVALID_SUMMARY",
+                "Article summary is required.",
+                exception),
+
+            58254 => Reading(
+                "READING.INVALID_BODY",
+                "Article body is required.",
+                exception),
+
+            58255 or 58261 => Reading(
+                "READING.INVALID_SOURCE_STATUS",
+                "Source article status is invalid.",
+                exception),
+
+            58256 or 58262 => Reading(
+                "READING.INVALID_SOURCE_VERSION",
+                "Source version must be greater than zero.",
+                exception),
+
+            58281 => Reading(
+                "READING.INVALID_COUNTER_VALUE",
+                "Reading counters must not be negative.",
+                exception),
+
             2601 or 2627 => MapUniqueConstraint(exception),
             547 => MapForeignKeyOrCheckConstraint(exception),
 
-            _ => new ReadingPersistenceException(
-                code: "READING.PERSISTENCE_ERROR",
-                message: "An unexpected SQL persistence error occurred.",
-                innerException: exception)
+            _ => Reading(
+                "READING.PERSISTENCE_ERROR",
+                "An unexpected SQL persistence error occurred.",
+                exception)
         };
     }
 
@@ -45,9 +110,10 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 innerException: exception);
         }
 
-        if (message.Contains(
-                "UX_ArticleReadModel_Slug_Public",
-                StringComparison.OrdinalIgnoreCase))
+        if (ContainsAny(
+                message,
+                "IX_ArticleReadModel_Public_Slug",
+                "UX_ArticleReadModel_Slug_Public"))
         {
             return new ReadingPersistenceException(
                 code: "READING.SLUG_ALREADY_PROJECTED",
@@ -75,10 +141,10 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 innerException: exception);
         }
 
-        return new ReadingPersistenceException(
-            code: "READING.UNIQUE_CONSTRAINT_VIOLATED",
-            message: "A persistence uniqueness constraint was violated.",
-            innerException: exception);
+        return Reading(
+            "READING.UNIQUE_CONSTRAINT_VIOLATED",
+            "A persistence uniqueness constraint was violated.",
+            exception);
     }
 
     private static Exception MapForeignKeyOrCheckConstraint(SqlException exception)
@@ -98,9 +164,10 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 innerException: exception);
         }
 
-        if (message.Contains(
-                "CK_ArticleReadModel_ArticlePublicId_NotBlank",
-                StringComparison.OrdinalIgnoreCase))
+        if (ContainsAny(
+                message,
+                "CK_ArticleReadModel_ArticlePublicId_Length",
+                "CK_ArticleReadModel_ArticlePublicId_NotBlank"))
         {
             return new ReadingPersistenceException(
                 code: "READING.INVALID_ARTICLE_PUBLIC_ID",
@@ -148,9 +215,12 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 innerException: exception);
         }
 
-        if (message.Contains(
+        if (ContainsAny(
+                message,
+                "CK_ArticleReadModel_SourceVersion_NonNegative",
                 "CK_ArticleReadModel_SourceVersion_Positive",
-                StringComparison.OrdinalIgnoreCase))
+                "CK_ArticleReadModelTag_SourceVersion_NonNegative",
+                "CK_ArticleReadModelMedia_SourceVersion_NonNegative"))
         {
             return new ReadingPersistenceException(
                 code: "READING.INVALID_SOURCE_VERSION",
@@ -158,9 +228,10 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 innerException: exception);
         }
 
-        if (message.Contains(
-                "CK_ArticleReadModel_LastEventMessageId_NotBlank",
-                StringComparison.OrdinalIgnoreCase))
+        if (ContainsAny(
+                message,
+                "CK_ArticleReadModel_LastEventMessageId_Length",
+                "CK_ArticleReadModel_LastEventMessageId_NotBlank"))
         {
             return new ReadingPersistenceException(
                 code: "READING.INVALID_MESSAGE_ID",
@@ -168,15 +239,12 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 innerException: exception);
         }
 
-        if (message.Contains(
+        if (ContainsAny(
+                message,
+                "CK_ArticleReadModel_Counters_NonNegative",
                 "CK_ArticleReadModel_ViewCount_NonNegative",
-                StringComparison.OrdinalIgnoreCase) ||
-            message.Contains(
                 "CK_ArticleReadModel_LikeCount_NonNegative",
-                StringComparison.OrdinalIgnoreCase) ||
-            message.Contains(
-                "CK_ArticleReadModel_CommentCount_NonNegative",
-                StringComparison.OrdinalIgnoreCase))
+                "CK_ArticleReadModel_CommentCount_NonNegative"))
         {
             return new ReadingPersistenceException(
                 code: "READING.INVALID_COUNTER_VALUE",
@@ -224,9 +292,74 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 innerException: exception);
         }
 
+        if (message.Contains(
+                "CK_ArticleReadModel_PublicRequiresPublished",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.PUBLIC_REQUIRES_PUBLISHED",
+                "Public Reading projection requires Published status and a publish timestamp.",
+                exception);
+        }
+
+        if (ContainsAny(
+                message,
+                "CK_ArticleReadModel_PublishedAtUtc",
+                "CK_ArticleReadModel_UpdatedAtUtc"))
+        {
+            return Reading(
+                "READING.OBSOLETE_SOURCE_TIMESTAMP_CONSTRAINT",
+                "Reading projection has an obsolete source timestamp constraint. Re-run reading table migration script to drop it.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_ArticleReadModel_LastSyncedAtUtc",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_PROJECTION_SYNC_TIMESTAMP",
+                "Reading projection sync timestamp is invalid.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_ArticleReadModelTag_TagPublicId_Length",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_TAG_PUBLIC_ID",
+                "Tag public id must be a valid 26-character public id.",
+                exception);
+        }
+
+        return Reading(
+            "READING.CONSTRAINT_VIOLATED",
+            "A foreign key or check constraint was violated.",
+            exception);
+    }
+
+    private static bool ContainsAny(string source, params string[] values)
+    {
+        foreach (string value in values)
+        {
+            if (source.Contains(value, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static ReadingPersistenceException Reading(
+        string code,
+        string message,
+        Exception exception)
+    {
         return new ReadingPersistenceException(
-            code: "READING.CONSTRAINT_VIOLATED",
-            message: "A foreign key or check constraint was violated.",
+            code: code,
+            message: message,
             innerException: exception);
     }
 }

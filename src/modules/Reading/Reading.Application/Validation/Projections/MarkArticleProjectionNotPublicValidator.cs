@@ -31,11 +31,6 @@ public static class MarkArticleProjectionNotPublicValidator
             return ReadingErrors.Projection.InvalidSourceStatus;
         }
 
-        if (SourceArticleStatuses.IsPublished(command.Status))
-        {
-            return ReadingErrors.Projection.InvalidSourceStatus;
-        }
-
         if (command.SourceVersion <= 0)
         {
             return ReadingErrors.Projection.InvalidSourceVersion;

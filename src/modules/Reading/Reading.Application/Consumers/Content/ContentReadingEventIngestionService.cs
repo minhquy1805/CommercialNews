@@ -10,6 +10,8 @@ namespace Reading.Application.Consumers.Content;
 public sealed class ContentReadingEventIngestionService
     : IContentReadingEventIngestionService
 {
+    private const string PublishedStatus = "Published";
+
     private readonly IApplyContentArticleProjectionUseCase _applyContentArticleProjectionUseCase;
     private readonly IMarkArticleProjectionNotPublicUseCase _markArticleProjectionNotPublicUseCase;
 
@@ -34,20 +36,28 @@ public sealed class ContentReadingEventIngestionService
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(payload);
 
+        string title = NormalizeTitle(
+            payload.Title,
+            payload.ArticlePublicId);
+
+        string summary = NormalizeSummary(
+            payload.Summary,
+            title);
+
         var command = new ApplyContentArticleProjectionCommand(
             ArticleId: payload.ArticleId,
             ArticlePublicId: payload.ArticlePublicId,
-            Title: payload.Title,
-            Summary: payload.Summary,
-            Body: payload.Body,
-            CategoryId: payload.CategoryId,
-            CategoryName: payload.CategoryName,
-            AuthorUserId: payload.AuthorUserId,
-            AuthorDisplayName: payload.AuthorDisplayName,
-            Status: payload.Status,
-            IsPublic: payload.IsPublic,
+            Title: title,
+            Summary: summary,
+            Body: summary,
+            CategoryId: null,
+            CategoryName: null,
+            AuthorUserId: null,
+            AuthorDisplayName: null,
+            Status: payload.ToStatus,
+            IsPublic: IsPublished(payload.ToStatus),
             PublishedAtUtc: payload.PublishedAtUtc,
-            UpdatedAtUtc: payload.UpdatedAtUtc,
+            UpdatedAtUtc: payload.PublishedAtUtc,
             SourceVersion: payload.Version,
             MessageId: context.MessageId,
             SourceOccurredAtUtc: context.OccurredAtUtc);
@@ -65,19 +75,29 @@ public sealed class ContentReadingEventIngestionService
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(payload);
 
+        string title = NormalizeTitle(
+            payload.Title,
+            payload.ArticlePublicId);
+
+        string summary = NormalizeSummary(
+            payload.Summary,
+            title);
+
         var command = new ApplyContentArticleProjectionCommand(
             ArticleId: payload.ArticleId,
             ArticlePublicId: payload.ArticlePublicId,
-            Title: payload.Title,
-            Summary: payload.Summary,
-            Body: payload.Body,
-            CategoryId: payload.CategoryId,
-            CategoryName: payload.CategoryName,
-            AuthorUserId: payload.AuthorUserId,
-            AuthorDisplayName: payload.AuthorDisplayName,
+            Title: title,
+            Summary: summary,
+            Body: summary,
+            CategoryId: payload.CategoryId > 0
+                ? payload.CategoryId
+                : null,
+            CategoryName: null,
+            AuthorUserId: null,
+            AuthorDisplayName: null,
             Status: payload.Status,
-            IsPublic: payload.IsPublic,
-            PublishedAtUtc: payload.PublishedAtUtc,
+            IsPublic: IsPublished(payload.Status),
+            PublishedAtUtc: null,
             UpdatedAtUtc: payload.UpdatedAtUtc,
             SourceVersion: payload.Version,
             MessageId: context.MessageId,
@@ -146,5 +166,37 @@ public sealed class ContentReadingEventIngestionService
         return _markArticleProjectionNotPublicUseCase.ExecuteAsync(
             command,
             cancellationToken);
+    }
+
+    private static string NormalizeTitle(
+        string? title,
+        string articlePublicId)
+    {
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            return title.Trim();
+        }
+
+        return articlePublicId.Trim();
+    }
+
+    private static string NormalizeSummary(
+        string? summary,
+        string fallbackTitle)
+    {
+        if (!string.IsNullOrWhiteSpace(summary))
+        {
+            return summary.Trim();
+        }
+
+        return fallbackTitle;
+    }
+
+    private static bool IsPublished(string? status)
+    {
+        return string.Equals(
+            status?.Trim(),
+            PublishedStatus,
+            StringComparison.OrdinalIgnoreCase);
     }
 }

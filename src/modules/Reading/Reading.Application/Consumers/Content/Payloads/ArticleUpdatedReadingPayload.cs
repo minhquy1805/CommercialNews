@@ -6,31 +6,31 @@ public sealed class ArticleUpdatedReadingPayload
 
     public string ArticlePublicId { get; init; } = string.Empty;
 
-    public string Title { get; init; } = string.Empty;
-
-    public string Summary { get; init; } = string.Empty;
-
-    public string Body { get; init; } = string.Empty;
-
-    public long? CategoryId { get; init; }
-
-    public string? CategoryName { get; init; }
-
-    public long? AuthorUserId { get; init; }
-
-    public string? AuthorDisplayName { get; init; }
-
     public string Status { get; init; } = string.Empty;
 
-    public bool IsPublic { get; init; }
+    public long CategoryId { get; init; }
 
-    public DateTime? PublishedAtUtc { get; init; }
+    public long ActorUserId { get; init; }
 
-    public DateTime UpdatedAtUtc { get; init; }
+    public long RevisionId { get; init; }
+
+    public string? ChangeSummary { get; init; }
+
+    public string? Slug { get; init; }
+
+    public string? CanonicalUrl { get; init; }
+
+    public string? Title { get; init; }
+
+    public string? Summary { get; init; }
+
+    public string? CoverImageUrl { get; init; }
+
+    public IReadOnlyCollection<long> TagIds { get; init; } = Array.Empty<long>();
 
     public long Version { get; init; }
 
-    public string? ChangeSummary { get; init; }
+    public DateTime UpdatedAtUtc { get; init; }
 
     public string BusinessDedupeKey { get; init; } = string.Empty;
 }
