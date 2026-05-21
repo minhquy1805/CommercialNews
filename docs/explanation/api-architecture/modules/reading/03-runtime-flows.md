@@ -37,9 +37,12 @@ Used for:
 
 Used for:
 
-* consuming source events from Content, SEO, Media, and Interaction
+* consuming baseline source events from Content
+* optionally consuming Media and Interaction events if those event flows are adopted
+* not depending on SEO-emitted events in baseline V1
 * applying idempotent updates to Reading-owned read models
-* refreshing projected public visibility, slug, media, counters, and searchable text
+* refreshing projected public visibility, media, counters, and searchable text
+* treating slug/canonical routing as an explicit SEO resolve dependency in baseline V1
 * handling replay, duplicate delivery, and stale event arrival safely
 
 ### C) Batch / rebuild / reconciliation lane
@@ -111,36 +114,43 @@ Reading returns response quickly
 
 ### Goal
 
-Resolve slug from the Reading projection and return article detail without leaking non-public content.
+Resolve a public slug through SEO routing truth, then return article detail from Reading projection without leaking non-public content.
 
 ### Normal path
 
 ```text
 Client opens /articles/slug/{slug}
     ↓
-Reading looks up slug in reading.ArticleReadModel
+Reading calls SEO resolve with scope=public and slug
+    ↓
+SEO resolves Scope + Slug -> ResourcePublicId
+    ↓
+Reading loads reading.ArticleReadModel by ArticlePublicId
     ↓
 Reading verifies source-derived public visibility from projection
     ↓
 Reading composes article detail from projected fields
     ↓
-Reading returns response
+Reading returns response or safe 404
 ```
 
 ### Runtime rules
 
-* Reading may resolve slug from its projected read model in the normal public path.
-* SEO remains the source of truth for slug generation and canonical routing rules.
-* If canonical redirect behavior or projection freshness is uncertain, Reading may use SEO `/resolve` according to explicit policy.
-* Projected slug match alone is not sufficient; projected public visibility must also pass.
-* If the slug is unknown, inactive, non-public, or visibility-uncertain, Reading must return safe 404 / safe deny.
-* Detail response success is defined by source-derived public visibility and safe response composition, not by completion of counters, telemetry, or cache refresh.
+* SEO owns `Scope + Slug -> ResourcePublicId` routing truth.
+* Reading does not treat `ArticleReadModel.Slug` as the baseline routing authority in V1.
+* SEO resolve is a routing helper, not final public visibility authority.
+* Reading projection remains the serving source for article content.
+* Reading must require source-derived public visibility to pass before returning content.
+* Projected slug or SEO metadata inside Reading is optional and may lag.
+* If the slug is unknown, inactive, missing, non-public, or visibility-uncertain, Reading must return safe 404 / safe deny.
+* Detail response success is defined by source-derived public visibility and safe response composition, not by completion of counters, telemetry, cache refresh, or SEO projection sync.
 
 ### Failure modes
 
-* Slug missing from Reading projection: return safe 404 or use explicit fallback policy.
-* Projection marks article non-public or uncertain: return safe 404.
-* SEO/canonical fallback fails when invoked: return safe 404 unless policy defines another safe response.
+* SEO cannot resolve slug: return safe 404.
+* SEO store is degraded: slug-based detail may fail safely; monitor as hot-path dependency.
+* SEO resolves slug but Reading projection is missing: return safe 404 or use explicit fallback policy if documented.
+* Reading projection marks article non-public or uncertain: return safe 404.
 * Interaction projection lag: detail still succeeds; counters may be stale, defaulted, or omitted.
 * Media projection lag: return fallback media or omit media fields safely.
 * Stale projected detail still contains now-non-public content: it must fail closed once visibility is known or uncertain.
@@ -148,9 +158,10 @@ Reading returns response
 ### Observability notes
 
 * Track detail latency/error.
-* Track slug lookup miss rate.
-* Track visibility-denied-after-slug-match rate (internal only).
-* Track SEO resolve fallback rate where policy invokes it.
+* Track SEO resolve latency/error.
+* Track SEO resolve miss rate.
+* Track Reading projection miss after SEO resolve.
+* Track visibility-denied-after-SEO-resolve rate.
 * Track derived-detail omitted-enrichment rate.
 
 ---
@@ -211,10 +222,21 @@ reading.ArticleReadModel is updated
 
 ### Typical source events
 
+Baseline V1:
+
 * Content article published/updated/unpublished/archived/soft-deleted
-* SEO slug or metadata changed
+
+Optional / adopted flows:
+
 * Media primary media changed
 * Interaction counters updated
+
+Future optimization only:
+
+* SEO slug route changed
+* SEO metadata updated
+
+Reading must not depend on SEO-emitted events for baseline slug correctness. Slug-based public reads use explicit SEO route resolution.
 
 ### Rules
 
@@ -298,7 +320,8 @@ Detect and repair divergence between source truth and Reading-owned projections.
 * counters/trending input missing after consumer lag
 * stale derived summary beyond freshness policy
 * cache/projection mismatch detected by reconciliation policy
-* projected slug, media, or SEO metadata differs from source-owned state
+* optional projected slug or SEO metadata differs from SEO truth
+* projected media differs from Media truth
 
 ### Typical workflow shape
 
@@ -313,6 +336,7 @@ Detect and repair divergence between source truth and Reading-owned projections.
 
 * Repair workflow must not redefine publication truth.
 * Public APIs must fail closed for missing or uncertain visibility while repair is pending.
+* Slug routing correctness is handled by SEO resolve in the baseline hot path; Reading slug projection repair is an optimization, not correctness authority.
 * Repair output must follow candidate-before-apply discipline where correctness matters.
 * If derived state is too uncertain, bounded rebuild from source inputs is preferred over fragile patch mutation.
 * Reconciliation may correct Reading projection state, but it must not create hidden cross-module ownership.
@@ -390,7 +414,7 @@ Preserve correct public behavior when read-side projections, counters, summaries
 * article is public in projection, but counters are stale
 * article is public in projection, but trending enrichment is missing
 * a source visibility change is delayed and projection freshness becomes uncertain by policy
-* slug exists in SEO, but Reading projection is missing or visibility-uncertain
+* SEO resolves a slug, but Reading projection is missing or visibility-uncertain
 
 ### Rules
 
