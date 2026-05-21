@@ -10,7 +10,7 @@ public sealed class GetArticlesHttpRequest
 
     public long? TagId { get; init; }
 
-    public string? Q { get; init; }
+    public string? Keyword { get; init; }
 
     public string? Sort { get; init; }
 }
