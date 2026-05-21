@@ -1,6 +1,6 @@
 namespace CommercialNews.Api.Api.Public.Contracts.Reading.Responses;
 
-public sealed class ArticleListItemHttpResponse
+public sealed class ArticleDetailHttpResponse
 {
     public string ArticlePublicId { get; init; } = string.Empty;
 
@@ -9,6 +9,8 @@ public sealed class ArticleListItemHttpResponse
     public string Title { get; init; } = string.Empty;
 
     public string Summary { get; init; } = string.Empty;
+
+    public string Body { get; init; } = string.Empty;
 
     public long? CategoryId { get; init; }
 
@@ -24,6 +26,12 @@ public sealed class ArticleListItemHttpResponse
 
     public string? CoverAlt { get; init; }
 
+    public string? CanonicalUrl { get; init; }
+
+    public string? MetaTitle { get; init; }
+
+    public string? MetaDescription { get; init; }
+
     public DateTime? PublishedAtUtc { get; init; }
 
     public DateTime UpdatedAtUtc { get; init; }
@@ -31,4 +39,8 @@ public sealed class ArticleListItemHttpResponse
     public ArticleCountersHttpResponse Counters { get; init; } = new();
 
     public double? PopularityScore { get; init; }
+
+    public IReadOnlyList<ArticleTagHttpResponse> Tags { get; init; } = [];
+
+    public IReadOnlyList<ArticleMediaHttpResponse> Media { get; init; } = [];
 }

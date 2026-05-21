@@ -1,6 +1,6 @@
 namespace CommercialNews.Api.Api.Public.Contracts.Reading.Responses;
 
-public sealed class MediaSummaryHttpResponse
+public sealed class ArticleMediaHttpResponse
 {
     public long MediaId { get; init; }
 
@@ -8,7 +8,9 @@ public sealed class MediaSummaryHttpResponse
 
     public string? Alt { get; init; }
 
+    public string MediaType { get; init; } = string.Empty;
+
     public bool IsPrimary { get; init; }
 
-    public int Order { get; init; }
+    public int SortOrder { get; init; }
 }
