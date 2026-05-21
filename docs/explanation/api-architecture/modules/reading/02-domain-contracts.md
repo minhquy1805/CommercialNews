@@ -6,7 +6,7 @@ Reading owns public query semantics, response composition, and derived read proj
 
 Reading does not own article truth.
 
-Reading follows upstream source truth asynchronously and serves website-facing APIs from Reading-owned projection data in the normal public path.
+Reading follows upstream source truth asynchronously and serves article content from Reading-owned projection data. In baseline V1, slug-based reads use explicit SEO route resolution before Reading loads the article projection.
 
 ---
 
@@ -43,7 +43,7 @@ Reading is not responsible for:
 | Article lifecycle | Content | Projected status and visibility |
 | Article title/body/summary | Content | Projected public content |
 | Category/tag data | Content | Projected filters and display fields |
-| Slug and canonical metadata | SEO | Projected slug and SEO fields |
+| Slug and canonical metadata | SEO | Explicit route resolution for slug-based reads; optional projected SEO fields for response/rebuild optimization |
 | Media assets and primary media | Media | Projected cover/media fields |
 | Views, likes, comments | Interaction | Projected counters or summaries |
 | Public read model | Reading | Owned derived serving data |
@@ -72,7 +72,10 @@ Expected fields:
 |---|---|
 | `ArticleId` | Internal source article id from Content |
 | `ArticlePublicId` | Public article identifier |
-| `Slug` | Projected public slug from SEO |
+| `Slug` | Optional projected public slug from SEO; not the baseline routing authority in V1 |
+| `CanonicalUrl` | Optional projected canonical URL from SEO |
+| `MetaTitle` | Optional projected SEO title |
+| `MetaDescription` | Optional projected SEO description |
 | `Title` | Projected public title |
 | `Summary` | Projected public summary |
 | `Body` | Projected public body/rendered content |
@@ -108,7 +111,7 @@ Public visibility requires:
 * projection `IsPublic = true`
 * article is not archived
 * article is not soft-deleted
-* slug is active if accessed by slug
+* SEO route is active if accessed by slug
 * visibility is not uncertain
 
 If visibility is uncertain:
@@ -161,6 +164,7 @@ They are not ordering authority.
 ## 6) Event identity contract
 
 Important events consumed by Reading should carry:
+Baseline V1 Reading consumes Content events for core article projection. Other source events are optional or future optimizations unless explicitly adopted.
 
 | Field | Purpose |
 |---|---|
@@ -251,24 +255,35 @@ Expected behavior:
 * set `IsPublic = false`
 * preserve projection row unless a later hard-purge policy is introduced
 
-### 7.6 SEO metadata or slug changed
+### 7.6 SEO route / metadata synchronization
 
-Source event example:
+Baseline V1:
+
+* SEO does not have to emit integration events for Reading.
+* SEO consumes Content events and maintains SEO-owned slug routing and metadata truth.
+* Reading obtains slug routing through explicit SEO route resolution on slug-based reads.
+
+Possible future optimization:
 
 ```text
-seo.slug_updated
+seo.slug_route_changed
 seo.metadata_updated
 ```
 
-Expected behavior:
+If SEO event emission is adopted later, Reading may consume SEO route/metadata events to update optional projected SEO fields.
 
-* update projected slug and SEO metadata
-* preserve source ownership: SEO remains canonical owner
-* do not expose article unless Reading visibility is public
+Expected baseline behavior:
+
+* Reading must not depend on SEO-emitted events for correctness.
+* `GET /articles/slug/{slug}` resolves the slug through SEO.
+* SEO returns `ResourcePublicId` as a routing aid.
+* Reading fetches `ArticleReadModel` by `ArticlePublicId`.
+* Reading visibility still decides whether public response may be returned.
+* Projected slug/metadata fields in Reading are optional and may lag.
 
 ### 7.7 Media primary changed
 
-Source event example:
+If Media event emission is adopted, Reading may consume:
 
 ```text
 media.article_primary_media_changed
@@ -282,7 +297,7 @@ Expected behavior:
 
 ### 7.8 Interaction counters changed
 
-Source event example:
+If Interaction counter event emission is adopted, Reading may consume:
 
 ```text
 interaction.article_counters_updated
@@ -336,12 +351,30 @@ Rules:
 
 Returns one public article detail by slug.
 
+Baseline V1 flow:
+
+```text
+Client requests article by slug
+    ↓
+Reading calls SEO resolve with scope=public and slug
+    ↓
+SEO returns ResourcePublicId and route metadata
+    ↓
+Reading loads ArticleReadModel by ArticlePublicId
+    ↓
+Reading applies public visibility rules
+    ↓
+Return detail or safe 404
+```
+
 Rules:
 
-* normal public path may resolve slug from Reading projection
-* SEO remains source of truth for canonical slug rules
-* projected slug match alone is not sufficient if visibility is not public
-* unknown, inactive, non-public, or visibility-uncertain slugs return safe 404
+* SEO owns `Scope + Slug -> ResourcePublicId` routing truth.
+* Reading does not treat projected slug as the baseline routing authority in V1.
+* SEO resolve is a routing aid, not final public visibility authority.
+* Reading must still require `Status = Published`, `IsPublic = true`, and non-uncertain visibility.
+* Unknown slug, inactive route, missing projection, non-public article, or visibility uncertainty returns safe 404.
+* If future SEO events or rebuild sync projected slug into Reading, direct Reading slug lookup may be used as an optimization only.
 
 ### 8.4 SearchArticles
 
@@ -511,9 +544,9 @@ Different older messages may arrive after newer ones.
 
 Approved recovery strategies:
 
-* rebuild from Content truth
-* rebuild from SEO truth
-* rebuild from Media truth
+* rebuild article core projection from Content truth
+* resolve/reconcile slug and metadata from SEO truth
+* rebuild media projection from Media truth
 * rebuild/reconcile counters from Interaction
 * bounded recomputation
 * replay from retained operational history where policy allows
@@ -548,7 +581,7 @@ Content, SEO, Media, and Interaction must not wait for Reading projection comple
 
 ## 16) Normal path and fallback contract
 
-Normal public read path:
+Normal public read path for list/detail/search/related:
 
 ```text
 Public API
@@ -557,6 +590,28 @@ Reading projection
     ↓
 Response
 ```
+
+Slug-based public read path:
+
+```text
+Public API
+    ↓
+SEO route resolve
+    ↓
+Reading projection by ResourcePublicId
+    ↓
+Reading visibility check
+    ↓
+Response
+```
+
+Rules:
+
+* SEO resolve is an explicit hot-path dependency for slug routing in baseline V1.
+* SEO resolve does not make content public.
+* Reading projection remains the serving source for article content.
+* Reading visibility still decides safe public response.
+* Source fallback must remain explicit and observable.
 
 Policy-controlled fallback may be used when correctness requires it.
 

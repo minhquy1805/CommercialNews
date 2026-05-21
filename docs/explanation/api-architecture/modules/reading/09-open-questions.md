@@ -52,17 +52,20 @@ Future ADR should define:
 Questions:
 
 - Should `GET /articles/slug/{slug}` be the preferred public website route?
-- Should clients ever call SEO `/resolve` directly?
-- When should Reading use projected slug lookup vs SEO fallback?
+- Should clients ever call SEO `/resolve` directly, or should Reading hide SEO resolution behind its public API?
+- Should Reading ever use projected slug lookup as an optimization?
 - How should canonical redirects be handled?
 - Should old slugs redirect or return safe `404`?
+- If SEO route resolution is unavailable, should slug-based reads fail safe `404`, return `503`, or use a documented fallback?
 
 Current V1 decision:
 
 - Reading exposes `GET /articles/slug/{slug}` as the preferred public detail route for website clients.
-- In the normal public path, Reading may resolve slug from its projected read model.
-- SEO remains the source of truth for slug generation, canonical routing, and redirect rules.
-- SEO `/resolve` is a policy-controlled fallback, not the mandatory normal path.
+- Baseline V1 slug-based reads resolve route through SEO first.
+- SEO owns `Scope + Slug -> ResourcePublicId` routing truth.
+- Reading uses SEO `ResourcePublicId` to load `ArticleReadModel`.
+- SEO `/resolve` is an explicit hot-path dependency for slug routing, not a fallback.
+- Projected slug lookup inside Reading is optional future optimization only.
 - A slug match or route resolve is not serve authority; Reading visibility must still pass.
 
 Future ADR should define:
@@ -71,7 +74,8 @@ Future ADR should define:
 - old slug retention
 - slug conflict handling
 - redirect cache rules
-- SEO fallback policy
+- SEO route resolve timeout/fallback policy
+- direct projected-slug optimization policy
 - route-level observability
 
 ---
@@ -138,10 +142,13 @@ Potential invalidation inputs:
 - `content.article_unpublished`
 - `content.article_archived`
 - `content.article_soft_deleted`
-- `seo.slug_updated`
-- `seo.metadata_updated`
-- `media.article_primary_media_changed`
-- `interaction.article_counters_updated`
+- optional future SEO events such as:
+  - `seo.slug_route_changed`
+  - `seo.metadata_updated`
+- optional Media events such as:
+  - `media.article_primary_media_changed`
+- optional Interaction events such as:
+  - `interaction.article_counters_updated`
 
 ---
 
@@ -181,7 +188,8 @@ Questions:
 - Should Content events be snapshot events or delta events?
 - Which fields must be included in `content.article_published`?
 - Which fields must be included in `content.article_updated`?
-- Should SEO/Media/Interaction events carry full projection fields or only ids requiring later lookup?
+- Should Media/Interaction events, if adopted, carry full projection fields or only ids requiring later lookup?
+- If SEO emits route/metadata events in the future, should Reading consume them for projected SEO fields or keep SEO resolve as the only routing authority?
 - What event schema versioning strategy should be used?
 
 Current V1 decision:
@@ -190,6 +198,8 @@ Current V1 decision:
 - Important events should carry `MessageId`, `EventType`, `AggregateId`, `Version`, `OccurredAtUtc`, and `CorrelationId`.
 - Snapshot-like events are easier for Reading projection apply.
 - Delta-like events require stricter ordering or resync behavior.
+- Baseline V1 Reading does not depend on SEO-emitted events.
+- Slug correctness comes from explicit SEO route resolution.
 
 Future ADR should define:
 
@@ -321,13 +331,15 @@ Questions:
 - When may Reading fall back to source truth?
 - Which endpoints may use fallback?
 - Should fallback be allowed for list, detail, slug, search, and related?
+- Which fallback cases are distinct from the baseline SEO route resolve dependency?
 - What are the latency and dependency budgets?
 - How do we prevent fallback from becoming hidden normal ownership?
 
 Current V1 decision:
 
-- Normal public path should read from Reading projection.
-- Source fallback is exceptional, explicit, and observable.
+- Normal list/detail-by-public-id/search/related paths should read from Reading projection.
+- Slug-based reads use SEO route resolution as part of the baseline hot path.
+- Source fallback beyond SEO route resolution is exceptional, explicit, and observable.
 - If visibility is uncertain and no safe fallback confirms it, Reading must fail closed.
 
 Future ADR should define:
@@ -448,7 +460,7 @@ Future ADR should define:
 Open questions that must be resolved before production-hardening:
 
 1. Popularity formula and time window.
-2. Slug canonical redirect behavior.
+2. Slug canonical redirect behavior and projected-slug optimization policy.
 3. Search backend and indexing strategy.
 4. Reading cache TTL and invalidation policy.
 5. Counter response and freshness policy.
@@ -457,7 +469,7 @@ Open questions that must be resolved before production-hardening:
 8. Version gap and resync behavior.
 9. Rebuild/cutover/fencing strategy.
 10. Related articles strategy.
-11. Source fallback policy.
+11. Source fallback policy beyond baseline SEO route resolution.
 12. Draft/admin preview boundary.
 13. Personalization boundary.
 14. External search/recommendation integration.

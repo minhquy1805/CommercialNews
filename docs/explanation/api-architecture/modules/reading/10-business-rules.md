@@ -17,7 +17,11 @@ Source truth remains owned by:
 * Media for media asset and primary media data
 * Interaction for views, likes, comments, and engagement counters
 
-Reading follows source truth asynchronously and serves public APIs from Reading-owned projections in the normal path.
+Reading follows source truth asynchronously and serves public APIs from Reading-owned projections.
+
+For list, detail-by-public-id, search, and related articles, the normal public path reads from Reading-owned projections.
+
+For slug-based reads, baseline V1 first resolves the route through SEO, then loads the Reading projection by `ResourcePublicId`, and finally applies Reading public visibility rules.
 
 ---
 
@@ -31,7 +35,7 @@ Public content requires:
 * projection `IsPublic = true`
 * article is not archived
 * article is not soft-deleted
-* slug is active if accessed by slug
+* SEO route resolution returns an active public route if accessed by slug
 * visibility is not uncertain
 
 If any condition is not satisfied, Reading must not return the article publicly.
@@ -107,9 +111,11 @@ Examples:
 |---|---|
 | Title, summary, body | Content |
 | Status | Content |
-| Slug | SEO |
+| Optional projected slug / SEO metadata | SEO |
 | Cover media | Media |
 | View count | Interaction |
+
+Slug routing truth remains owned by SEO. Reading may store projected slug or SEO metadata as optional optimization data, but baseline slug-based reads must resolve the route through SEO.
 
 Reading owns the projected copy.
 
@@ -117,9 +123,9 @@ The source module owns the source fact.
 
 ---
 
-## Rule 6: Normal public path uses Reading projection
+## Rule 6: Normal public paths use Reading projection; slug path uses SEO route resolution
 
-The normal public read path is:
+Normal public path for list/detail-by-public-id/search/related:
 
 ```text
 Public API
@@ -129,9 +135,25 @@ Reading projection
 Response
 ```
 
-Reading public APIs should not synchronously compose from Content, SEO, Media, and Interaction on every request.
+Slug-based public path:
 
-Source fallback may exist, but it must be:
+```text
+Public API
+    ↓
+SEO route resolve
+    ↓
+Reading projection by ResourcePublicId
+    ↓
+Reading visibility check
+    ↓
+Response
+```
+
+Reading public APIs should not synchronously compose article bodies from Content, SEO, Media, and Interaction on every request.
+
+Slug-based reads are the explicit baseline exception for route resolution only. SEO resolves `Scope + Slug -> ResourcePublicId`; Reading still serves article content from its projection and must still apply public visibility rules.
+
+Source fallback beyond SEO route resolution may exist, but it must be:
 
 * explicit
 * bounded
@@ -268,31 +290,53 @@ Timestamps are not ordering authority.
 
 ---
 
-## Rule 12: Slug match is not serve authority
+## Rule 12: SEO route resolution is not serve authority
 
-A slug match does not automatically mean the article is public.
+A route match does not automatically mean the article is public.
 
-Reading may resolve slug from projected read model in the normal path.
+Baseline V1 slug-based reads use SEO route resolution:
 
-SEO remains the owner of canonical slug and routing rules.
+```text
+GET /api/v1/articles/slug/{slug}
+    ↓
+SEO resolve with scope=public and slug
+    ↓
+SEO returns ResourcePublicId and route metadata
+    ↓
+Reading loads ArticleReadModel by ResourcePublicId
+    ↓
+Reading projection visibility check
+    ↓
+Response or safe 404
+```
+
+SEO owns canonical slug and routing truth.
+
+Reading may store optional projected slug and SEO metadata, but projected slug lookup is not the baseline routing authority in V1.
 
 Reading must still require public visibility to pass before serving content.
 
-If slug exists but visibility is not public, return safe `404`.
+If SEO resolves a slug but Reading projection is missing, non-public, or visibility-uncertain, Reading must return safe `404` unless an explicit fallback policy safely confirms visibility.
 
 ---
 
-## Rule 13: Route fallback must be explicit
+## Rule 13: Source fallback beyond SEO route resolution must be explicit
 
-SEO `/resolve` fallback may be used only according to explicit policy.
+SEO route resolution is part of the baseline slug-based read path.
+
+It is not considered source fallback.
+
+Source fallback beyond baseline SEO route resolution may be used only according to explicit policy.
 
 Fallback must define:
 
 * when it is allowed
+* target source module
 * timeout budget
-* what happens if SEO fallback fails
-* whether canonical redirect behavior is required
+* what happens if fallback fails
+* how visibility is safely confirmed
 * how fallback is logged and measured
+* whether feature flags or disable switches are required
 
 Fallback must not become hidden normal ownership.
 
@@ -342,10 +386,12 @@ Optional enrichments include:
 * counters
 * cover media
 * media gallery
-* SEO metadata
+* optional projected SEO metadata
 * related signals
 * popularity/trending signals
 * summaries
+
+Slug routing for slug-based reads is handled by explicit SEO route resolution in baseline V1. Projected slug fields inside Reading are optional optimization data and must not become public visibility authority.
 
 If optional enrichments are missing, stale, or unavailable, Reading may:
 
@@ -484,7 +530,7 @@ Reading projections are derived state and must be recoverable.
 Approved recovery strategies:
 
 * rebuild from Content truth
-* rebuild from SEO truth
+* resolve/reconcile optional projected slug and SEO metadata from SEO truth
 * rebuild from Media truth
 * rebuild/reconcile counters from Interaction
 * bounded recomputation
@@ -568,7 +614,7 @@ A timeout does not prove:
 * source event was not published
 * projection update did not apply
 * article does not exist
-* slug does not map
+* SEO route resolution did not complete or did not map the slug
 * enrichment is absent
 * rebuild did not partially run
 

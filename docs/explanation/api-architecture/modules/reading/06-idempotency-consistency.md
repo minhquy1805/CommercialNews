@@ -59,12 +59,26 @@ Source ownership remains:
 
 Reading follows source truth asynchronously.
 
-Normal public path:
+Normal public path for list/detail-by-public-id/search/related:
 
 ```text
 Public API
     ↓
 Reading projection
+    ↓
+Response
+```
+
+Slug-based public path:
+
+```text
+Public API
+    ↓
+SEO route resolve
+    ↓
+Reading projection by ResourcePublicId
+    ↓
+Reading visibility check
     ↓
 Response
 ```
@@ -132,6 +146,8 @@ Exactly-once delivery is not assumed.
 ---
 
 ## 4) Event identity
+
+Baseline V1 Reading consumes Content events for core article projection. Media and Interaction events are optional/adopted flows. SEO-emitted events are future optimization only; baseline slug correctness comes from explicit SEO route resolution.
 
 Important events consumed by Reading should carry:
 
@@ -320,7 +336,7 @@ Public visibility requires:
 * projection `IsPublic = true`
 * article is not archived
 * article is not soft-deleted
-* slug is active if accessed by slug
+* SEO route resolution returns an active public route if accessed by slug
 * visibility is not uncertain
 
 If visibility is uncertain:
@@ -363,10 +379,12 @@ The following are allowed to be eventually consistent:
 * counters
 * cover media
 * media gallery
-* SEO metadata
+* optional projected SEO metadata
 * related article signals
 * popularity/trending signals
 * summaries
+
+Slug routing for slug-based reads is handled by explicit SEO route resolution in baseline V1; projected slug fields in Reading are optional optimization data.
 
 If optional enrichments are missing, stale, or unavailable, Reading may:
 
@@ -526,7 +544,7 @@ It must have a documented recovery path.
 Approved recovery strategies:
 
 * rebuild from Content truth
-* rebuild from SEO truth
+* resolve/reconcile optional projected slug and metadata from SEO truth
 * rebuild from Media truth
 * rebuild/reconcile counters from Interaction
 * bounded recomputation
@@ -585,7 +603,7 @@ A timeout does not prove:
 * a source event was not published
 * a projection update did not apply
 * an article does not exist
-* a slug does not map
+* SEO route resolution did not complete or did not map the slug
 * a media/counter enrichment is absent
 
 Reading must handle ambiguity through:
@@ -659,7 +677,7 @@ Reading consistency in V1 rests on these rules:
 
 * Reading is a derived public read projection module.
 * Source modules own truth; Reading owns projection.
-* Normal public path reads from Reading projection.
+* Normal list/detail/search/related paths read from Reading projection; slug-based reads resolve route through SEO before loading Reading projection.
 * Delivery is at-least-once; handlers must be idempotent.
 * `MessageId` protects duplicate delivery.
 * `SourceVersion` protects stale overwrite.
