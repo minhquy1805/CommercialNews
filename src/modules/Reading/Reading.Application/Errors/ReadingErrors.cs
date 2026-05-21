@@ -45,7 +45,10 @@ public static class ReadingErrors
             Error.Validation(
                 code: "READING.INVALID_ARTICLE_PUBLIC_ID",
                 message: "Article public id must be a valid 26-character value.");
+    }
 
+    public static class Route
+    {
         public static readonly Error SlugRequired =
             Error.Validation(
                 code: "READING.SLUG_REQUIRED",
@@ -56,15 +59,25 @@ public static class ReadingErrors
                 code: "READING.SLUG_TOO_LONG",
                 message: "Slug must not exceed 300 characters.");
 
-        public static readonly Error SearchQueryRequired =
-            Error.Validation(
-                code: "READING.SEARCH_QUERY_REQUIRED",
-                message: "Search query is required.");
+        public static readonly Error RouteNotResolved =
+            Error.NotFound(
+                code: "READING.NOT_FOUND",
+                message: "Article was not found.");
 
-        public static readonly Error SearchQueryTooLong =
-            Error.Validation(
-                code: "READING.SEARCH_QUERY_TOO_LONG",
-                message: "Search query must not exceed 300 characters.");
+        public static readonly Error RouteInactive =
+            Error.NotFound(
+                code: "READING.NOT_FOUND",
+                message: "Article was not found.");
+
+        public static readonly Error RouteResourceTypeInvalid =
+            Error.NotFound(
+                code: "READING.NOT_FOUND",
+                message: "Article was not found.");
+
+        public static readonly Error RouteResolutionUnavailable =
+            Error.Failure(
+                code: "READING.ROUTE_RESOLUTION_UNAVAILABLE",
+                message: "Article route resolution is temporarily unavailable.");
     }
 
     public static class Query
@@ -108,6 +121,16 @@ public static class ReadingErrors
             Error.Validation(
                 code: "READING.LIMIT_TOO_LARGE",
                 message: "Limit exceeds the maximum allowed value.");
+
+        public static readonly Error SearchQueryRequired =
+            Error.Validation(
+                code: "READING.SEARCH_QUERY_REQUIRED",
+                message: "Search query is required.");
+
+        public static readonly Error SearchQueryTooLong =
+            Error.Validation(
+                code: "READING.SEARCH_QUERY_TOO_LONG",
+                message: "Search query must not exceed 300 characters.");
     }
 
     public static class Projection
