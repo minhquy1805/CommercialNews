@@ -1,3 +1,4 @@
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Reading.Application.Errors;
 using Reading.Application.Models.Commands;
@@ -49,6 +50,19 @@ public sealed class ApplyContentArticleProjectionUseCase
             await _unitOfWork.CommitAsync(cancellationToken);
 
             return Result<ArticleProjectionApplyResult>.Success(result);
+        }
+        catch (PersistenceException exception)
+        {
+            if (_unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+
+            return Result<ArticleProjectionApplyResult>.Failure(
+                Error.Failure(
+                    code: exception.Code,
+                    message: exception.Message,
+                    exception.InnerException?.Message ?? string.Empty));
         }
         catch
         {

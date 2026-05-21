@@ -38,10 +38,9 @@ public static class ApplyContentArticleProjectionValidator
             return ReadingErrors.ValidationFailed;
         }
 
-        if (string.IsNullOrWhiteSpace(command.Body))
-        {
-            return ReadingErrors.ValidationFailed;
-        }
+        // Reading projection is tolerant:
+        // Body may be missing from lightweight Content events.
+        // Normalize(...) will fallback Body to Summary when Body is blank.
 
         if (command.CategoryId.HasValue && command.CategoryId.Value <= 0)
         {
@@ -83,12 +82,18 @@ public static class ApplyContentArticleProjectionValidator
         string? normalizedStatus = SourceArticleStatuses.NormalizeOrNull(
             command.Status);
 
+        string normalizedSummary = command.Summary.Trim();
+
+        string normalizedBody = string.IsNullOrWhiteSpace(command.Body)
+            ? normalizedSummary
+            : command.Body.Trim();
+
         return command with
         {
             ArticlePublicId = command.ArticlePublicId.Trim(),
             Title = command.Title.Trim(),
-            Summary = command.Summary.Trim(),
-            Body = command.Body.Trim(),
+            Summary = normalizedSummary,
+            Body = normalizedBody,
             CategoryName = NormalizeNullable(command.CategoryName),
             AuthorDisplayName = NormalizeNullable(command.AuthorDisplayName),
             Status = normalizedStatus ?? command.Status.Trim(),

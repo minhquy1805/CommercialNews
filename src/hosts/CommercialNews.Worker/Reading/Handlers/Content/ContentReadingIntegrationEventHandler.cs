@@ -86,14 +86,18 @@ public abstract class ContentReadingIntegrationEventHandler<TPayload>
         if (result.IsFailure)
         {
             Error error = result.Error!;
+            string errorDetails = error.Details.Count > 0
+                ? string.Join(" | ", error.Details)
+                : string.Empty;
 
             _logger.LogWarning(
-                "Failed to ingest content {EventDisplayName} reading event. MessageId={MessageId}, EventType={EventType}, ErrorCode={ErrorCode}, ErrorMessage={ErrorMessage}",
+                "Failed to ingest content {EventDisplayName} reading event. MessageId={MessageId}, EventType={EventType}, ErrorCode={ErrorCode}, ErrorMessage={ErrorMessage}, ErrorDetails={ErrorDetails}",
                 EventDisplayName,
                 envelope.MessageId,
                 envelope.EventType,
                 error.Code,
-                error.Message);
+                error.Message,
+                errorDetails);
 
             return Result.Failure(error);
         }

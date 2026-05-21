@@ -309,21 +309,6 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         {
             using SqlCommand command = CreateTransactionalCommand(UpsertFromContentProc);
 
-            SqlParameter appliedParameter = new("@Applied", SqlDbType.Bit)
-            {
-                Direction = ParameterDirection.Output
-            };
-
-            SqlParameter decisionParameter = new("@Decision", SqlDbType.VarChar, 50)
-            {
-                Direction = ParameterDirection.Output
-            };
-
-            SqlParameter previousSourceVersionParameter = new("@PreviousSourceVersion", SqlDbType.BigInt)
-            {
-                Direction = ParameterDirection.Output
-            };
-
             command.Parameters.AddRange(
             [
                 new SqlParameter("@ArticleId", SqlDbType.BigInt)
@@ -382,28 +367,23 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = commandModel.SourceVersion
                 },
-                new SqlParameter("@LastEventMessageId", SqlDbType.Char, 26)
+                new SqlParameter("@MessageId", SqlDbType.Char, 26)
                 {
                     Value = ToDbValue(commandModel.MessageId)
                 },
-                new SqlParameter("@LastSourceOccurredAtUtc", SqlDbType.DateTime2)
+                new SqlParameter("@SourceOccurredAtUtc", SqlDbType.DateTime2)
                 {
                     Value = ToDbValue(commandModel.SourceOccurredAtUtc)
-                },
-                appliedParameter,
-                decisionParameter,
-                previousSourceVersionParameter
+                }
             ]);
 
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            using SqlDataReader reader =
+                await command.ExecuteReaderAsync(cancellationToken);
 
-            return new ArticleProjectionApplyResult
-            {
-                Applied = GetOutputBoolean(appliedParameter),
-                Decision = GetOutputString(decisionParameter),
-                PreviousSourceVersion = GetOutputNullableInt64(previousSourceVersionParameter),
-                IncomingSourceVersion = commandModel.SourceVersion
-            };
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
         }
         catch (SqlException exception)
         {
@@ -421,21 +401,6 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         {
             using SqlCommand command = CreateTransactionalCommand(MarkNotPublicProc);
 
-            SqlParameter appliedParameter = new("@Applied", SqlDbType.Bit)
-            {
-                Direction = ParameterDirection.Output
-            };
-
-            SqlParameter decisionParameter = new("@Decision", SqlDbType.VarChar, 50)
-            {
-                Direction = ParameterDirection.Output
-            };
-
-            SqlParameter previousSourceVersionParameter = new("@PreviousSourceVersion", SqlDbType.BigInt)
-            {
-                Direction = ParameterDirection.Output
-            };
-
             command.Parameters.AddRange(
             [
                 new SqlParameter("@ArticleId", SqlDbType.BigInt)
@@ -450,28 +415,23 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = commandModel.SourceVersion
                 },
-                new SqlParameter("@LastEventMessageId", SqlDbType.Char, 26)
+                new SqlParameter("@MessageId", SqlDbType.Char, 26)
                 {
                     Value = ToDbValue(commandModel.MessageId)
                 },
-                new SqlParameter("@LastSourceOccurredAtUtc", SqlDbType.DateTime2)
+                new SqlParameter("@SourceOccurredAtUtc", SqlDbType.DateTime2)
                 {
                     Value = ToDbValue(commandModel.SourceOccurredAtUtc)
-                },
-                appliedParameter,
-                decisionParameter,
-                previousSourceVersionParameter
+                }
             ]);
 
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            using SqlDataReader reader =
+                await command.ExecuteReaderAsync(cancellationToken);
 
-            return new ArticleProjectionApplyResult
-            {
-                Applied = GetOutputBoolean(appliedParameter),
-                Decision = GetOutputString(decisionParameter),
-                PreviousSourceVersion = GetOutputNullableInt64(previousSourceVersionParameter),
-                IncomingSourceVersion = commandModel.SourceVersion
-            };
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
         }
         catch (SqlException exception)
         {
@@ -683,24 +643,43 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
     private static object ToDbValue(object? value) => value ?? DBNull.Value;
 
-    private static bool GetOutputBoolean(SqlParameter parameter)
+    private static async Task<ArticleProjectionApplyResult> ReadProjectionApplyResultAsync(
+        SqlDataReader reader,
+        long incomingSourceVersion,
+        CancellationToken cancellationToken)
     {
-        return parameter.Value is not DBNull and not null
-               && Convert.ToBoolean(parameter.Value);
-    }
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return new ArticleProjectionApplyResult
+            {
+                Applied = false,
+                Decision = "NoResult",
+                IncomingSourceVersion = incomingSourceVersion
+            };
+        }
 
-    private static string GetOutputString(SqlParameter parameter)
-    {
-        return parameter.Value is DBNull or null
-            ? string.Empty
-            : Convert.ToString(parameter.Value) ?? string.Empty;
-    }
+        int appliedOrdinal = TryGetOrdinal(reader, "Applied");
+        int decisionOrdinal = TryGetOrdinal(reader, "Decision");
+        int previousSourceVersionOrdinal = TryGetOrdinal(reader, "PreviousSourceVersion");
+        int incomingSourceVersionOrdinal = TryGetOrdinal(reader, "IncomingSourceVersion");
 
-    private static long? GetOutputNullableInt64(SqlParameter parameter)
-    {
-        return parameter.Value is DBNull or null
-            ? null
-            : Convert.ToInt64(parameter.Value);
+        return new ArticleProjectionApplyResult
+        {
+            Applied = appliedOrdinal >= 0
+                      && !reader.IsDBNull(appliedOrdinal)
+                      && reader.GetBoolean(appliedOrdinal),
+            Decision = decisionOrdinal >= 0 && !reader.IsDBNull(decisionOrdinal)
+                ? reader.GetString(decisionOrdinal)
+                : string.Empty,
+            PreviousSourceVersion = previousSourceVersionOrdinal >= 0
+                                    && !reader.IsDBNull(previousSourceVersionOrdinal)
+                ? reader.GetInt64(previousSourceVersionOrdinal)
+                : null,
+            IncomingSourceVersion = incomingSourceVersionOrdinal >= 0
+                                    && !reader.IsDBNull(incomingSourceVersionOrdinal)
+                ? reader.GetInt64(incomingSourceVersionOrdinal)
+                : incomingSourceVersion
+        };
     }
 
     private static string? GetNullableString(SqlDataReader reader, string columnName)

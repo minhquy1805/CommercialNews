@@ -135,12 +135,6 @@ BEGIN
                 OR ([Status] = N'Published' AND [PublishedAtUtc] IS NOT NULL)
             ),
 
-        CONSTRAINT [CK_ArticleReadModel_UpdatedAtUtc]
-            CHECK ([UpdatedAtUtc] >= [CreatedAtUtc]),
-
-        CONSTRAINT [CK_ArticleReadModel_PublishedAtUtc]
-            CHECK ([PublishedAtUtc] IS NULL OR [PublishedAtUtc] >= [CreatedAtUtc]),
-
         CONSTRAINT [CK_ArticleReadModel_LastSyncedAtUtc]
             CHECK ([LastSyncedAtUtc] >= [CreatedAtUtc]),
 
@@ -160,6 +154,30 @@ END
 ELSE
 BEGIN
     PRINT N'Table exists: [reading].[ArticleReadModel]';
+END
+GO
+
+/*
+  Source timestamps are owned by Content and may legitimately be earlier than
+  the Reading projection row creation time. Older databases may still have
+  these projection/source timestamp comparison constraints from an earlier
+  draft, so drop them idempotently.
+*/
+IF OBJECT_ID(N'[reading].[CK_ArticleReadModel_UpdatedAtUtc]', N'C') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP CONSTRAINT [CK_ArticleReadModel_UpdatedAtUtc];
+
+    PRINT N'Dropped obsolete constraint: [CK_ArticleReadModel_UpdatedAtUtc]';
+END
+GO
+
+IF OBJECT_ID(N'[reading].[CK_ArticleReadModel_PublishedAtUtc]', N'C') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP CONSTRAINT [CK_ArticleReadModel_PublishedAtUtc];
+
+    PRINT N'Dropped obsolete constraint: [CK_ArticleReadModel_PublishedAtUtc]';
 END
 GO
 
