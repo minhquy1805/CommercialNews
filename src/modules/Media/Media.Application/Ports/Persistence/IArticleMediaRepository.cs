@@ -32,6 +32,10 @@ public interface IArticleMediaRepository
         long articleMediaId,
         CancellationToken cancellationToken = default);
 
+    Task<ArticleMediaListResultItem?> GetListItemByIdAsync(
+        long articleMediaId,
+        CancellationToken cancellationToken = default);
+
     Task<ArticleMediaListResultItem?> GetPrimaryByArticleIdAsync(
         long articleId,
         CancellationToken cancellationToken = default);

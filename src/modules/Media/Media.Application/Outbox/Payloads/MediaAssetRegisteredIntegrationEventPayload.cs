@@ -13,6 +13,7 @@ public sealed record MediaAssetRegisteredIntegrationEventPayload(
     int? Width,
     int? Height,
     int? DurationSeconds,
+    string? AltText,
     long ActorUserId,
     long Version,
     DateTime RegisteredAtUtc,
