@@ -23,7 +23,7 @@
     <Folder Include="CompositionRoot\" />
   </ItemGroup>
 
-  <ItemGroup>
+    <ItemGroup>
     <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
 
     <ProjectReference Include="..\..\modules\Identity\Identity.Application\Identity.Application.csproj" />
@@ -40,6 +40,9 @@
 
     <ProjectReference Include="..\..\modules\Seo\Seo.Application\Seo.Application.csproj" />
     <ProjectReference Include="..\..\modules\Seo\Seo.Infrastructure\Seo.Infrastructure.csproj" />
+
+    <ProjectReference Include="..\..\modules\Reading\Reading.Application\Reading.Application.csproj" />
+    <ProjectReference Include="..\..\modules\Reading\Reading.Infrastructure\Reading.Infrastructure.csproj" />
 
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Application\Notifications.Application.csproj" />
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Infrastructure\Notifications.Infrastructure.csproj" />

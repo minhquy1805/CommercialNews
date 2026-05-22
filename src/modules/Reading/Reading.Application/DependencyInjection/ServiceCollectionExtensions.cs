@@ -1,9 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
-using Reading.Application.UseCases.GetArticleById;
-using Reading.Application.UseCases.GetArticleBySlug;
-using Reading.Application.UseCases.GetArticles;
-using Reading.Application.UseCases.GetRelatedArticles;
-using Reading.Application.UseCases.SearchArticles;
+using Reading.Application.Consumers.Content;
+using Reading.Application.UseCases.Articles.GetArticleByPublicId;
+using Reading.Application.UseCases.Articles.GetArticleBySlug;
+using Reading.Application.UseCases.Articles.GetArticles;
+using Reading.Application.UseCases.Articles.GetRelatedArticles;
+using Reading.Application.UseCases.Articles.SearchArticles;
+using Reading.Application.UseCases.Projections.ApplyContentArticleProjection;
+using Reading.Application.UseCases.Projections.MarkArticleProjectionNotPublic;
 
 namespace Reading.Application.DependencyInjection;
 
@@ -14,10 +17,15 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<IGetArticlesUseCase, GetArticlesUseCase>();
-        services.AddScoped<IGetArticleByIdUseCase, GetArticleByIdUseCase>();
+        services.AddScoped<IGetArticleByPublicIdUseCase, GetArticleByPublicIdUseCase>();
         services.AddScoped<IGetArticleBySlugUseCase, GetArticleBySlugUseCase>();
         services.AddScoped<IGetRelatedArticlesUseCase, GetRelatedArticlesUseCase>();
         services.AddScoped<ISearchArticlesUseCase, SearchArticlesUseCase>();
+
+        services.AddScoped<IApplyContentArticleProjectionUseCase, ApplyContentArticleProjectionUseCase>();
+        services.AddScoped<IMarkArticleProjectionNotPublicUseCase, MarkArticleProjectionNotPublicUseCase>();
+
+        services.AddScoped<IContentReadingEventIngestionService, ContentReadingEventIngestionService>();
 
         return services;
     }

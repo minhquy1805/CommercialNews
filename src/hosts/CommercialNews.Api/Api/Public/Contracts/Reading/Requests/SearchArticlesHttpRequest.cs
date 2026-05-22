@@ -2,7 +2,7 @@ namespace CommercialNews.Api.Api.Public.Contracts.Reading.Requests;
 
 public sealed class SearchArticlesHttpRequest
 {
-    public string Q { get; init; } = string.Empty;
+    public string Query { get; init; } = string.Empty;
 
     public int Page { get; init; } = 1;
 

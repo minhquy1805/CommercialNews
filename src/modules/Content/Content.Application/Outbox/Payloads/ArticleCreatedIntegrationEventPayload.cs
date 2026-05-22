@@ -11,6 +11,8 @@ public sealed record ArticleCreatedIntegrationEventPayload(
     string? CanonicalUrl,
     string? Title,
     string? Summary,
+    string? Body,
+    long? CoverMediaId,
     string? CoverImageUrl,
     IReadOnlyCollection<long> TagIds,
     long Version,
