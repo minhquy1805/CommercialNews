@@ -347,6 +347,10 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = ToDbValue(commandModel.AuthorDisplayName)
                 },
+                new SqlParameter("@CoverMediaId", SqlDbType.BigInt)
+                {
+                    Value = ToDbValue(commandModel.CoverMediaId)
+                },
                 new SqlParameter("@Status", SqlDbType.VarChar, 30)
                 {
                     Value = commandModel.Status

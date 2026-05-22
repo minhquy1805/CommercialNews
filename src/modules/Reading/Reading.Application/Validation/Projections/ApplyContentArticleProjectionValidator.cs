@@ -52,6 +52,11 @@ public static class ApplyContentArticleProjectionValidator
             return ReadingErrors.ValidationFailed;
         }
 
+        if (command.CoverMediaId.HasValue && command.CoverMediaId.Value <= 0)
+        {
+            return ReadingErrors.ValidationFailed;
+        }
+
         if (string.IsNullOrWhiteSpace(command.Status))
         {
             return ReadingErrors.Projection.InvalidSourceStatus;

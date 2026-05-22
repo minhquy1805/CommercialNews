@@ -44,16 +44,25 @@ public sealed class ContentReadingEventIngestionService
             payload.Summary,
             title);
 
+        string body = NormalizeBody(
+            payload.Body,
+            summary);
+
         var command = new ApplyContentArticleProjectionCommand(
             ArticleId: payload.ArticleId,
             ArticlePublicId: payload.ArticlePublicId,
             Title: title,
             Summary: summary,
-            Body: summary,
-            CategoryId: null,
+            Body: body,
+            CategoryId: payload.CategoryId > 0
+                ? payload.CategoryId
+                : null,
             CategoryName: null,
-            AuthorUserId: null,
+            AuthorUserId: payload.AuthorUserId > 0
+                ? payload.AuthorUserId
+                : null,
             AuthorDisplayName: null,
+            CoverMediaId: payload.CoverMediaId,
             Status: payload.ToStatus,
             IsPublic: IsPublished(payload.ToStatus),
             PublishedAtUtc: payload.PublishedAtUtc,
@@ -83,18 +92,25 @@ public sealed class ContentReadingEventIngestionService
             payload.Summary,
             title);
 
+        string body = NormalizeBody(
+            payload.Body,
+            summary);
+
         var command = new ApplyContentArticleProjectionCommand(
             ArticleId: payload.ArticleId,
             ArticlePublicId: payload.ArticlePublicId,
             Title: title,
             Summary: summary,
-            Body: summary,
+            Body: body,
             CategoryId: payload.CategoryId > 0
                 ? payload.CategoryId
                 : null,
             CategoryName: null,
-            AuthorUserId: null,
+            AuthorUserId: payload.AuthorUserId > 0
+                ? payload.AuthorUserId
+                : null,
             AuthorDisplayName: null,
+            CoverMediaId: payload.CoverMediaId,
             Status: payload.Status,
             IsPublic: IsPublished(payload.Status),
             PublishedAtUtc: null,
@@ -198,5 +214,17 @@ public sealed class ContentReadingEventIngestionService
             status?.Trim(),
             PublishedStatus,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeBody(
+        string? body,
+        string fallbackSummary)
+    {
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            return body.Trim();
+        }
+
+        return fallbackSummary;
     }
 }

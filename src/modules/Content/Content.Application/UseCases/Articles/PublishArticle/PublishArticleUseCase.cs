@@ -17,6 +17,7 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
 {
     private readonly IArticleRepository _articleRepository;
     private readonly IArticleLifecycleEventRepository _articleLifecycleEventRepository;
+    private readonly IArticleTagRepository _articleTagRepository;
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
@@ -25,6 +26,7 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
     public PublishArticleUseCase(
         IArticleRepository articleRepository,
         IArticleLifecycleEventRepository articleLifecycleEventRepository,
+        IArticleTagRepository articleTagRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext,
@@ -33,6 +35,8 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
         _articleRepository = articleRepository ?? throw new ArgumentNullException(nameof(articleRepository));
         _articleLifecycleEventRepository = articleLifecycleEventRepository
             ?? throw new ArgumentNullException(nameof(articleLifecycleEventRepository));
+        _articleTagRepository = articleTagRepository
+            ?? throw new ArgumentNullException(nameof(articleTagRepository));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
@@ -129,17 +133,32 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
                         ContentErrors.WriteCommitFailed);
                 }
 
+                IReadOnlyList<ArticleTag> articleTags =
+                    await _articleTagRepository.GetByArticleIdAsync(
+                        publishedArticle.ArticleId,
+                        cancellationToken);
+
+                IReadOnlyCollection<long> tagIds = articleTags
+                    .Select(articleTag => articleTag.TagId)
+                    .Distinct()
+                    .ToArray();
+
                 await _contentOutboxWriter.EnqueueArticlePublishedAsync(
                     unitOfWork: _unitOfWork,
                     articleId: publishedArticle.ArticleId,
                     articlePublicId: publishedArticle.ArticlePublicId,
                     fromStatus: fromStatus,
                     toStatus: publishedArticle.Status,
+                    categoryId: publishedArticle.CategoryId,
+                    authorUserId: publishedArticle.AuthorUserId,
                     slug: null,
                     canonicalUrl: null,
                     title: publishedArticle.Title,
                     summary: publishedArticle.Summary,
+                    body: publishedArticle.Body,
+                    coverMediaId: publishedArticle.CoverMediaId,
                     coverImageUrl: null,
+                    tagIds: tagIds,
                     actorUserId: actorUserId,
                     version: publishedArticle.Version,
                     publishedAtUtc: publishedArticle.PublishedAt ?? nowUtc,
