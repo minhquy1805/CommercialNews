@@ -57,7 +57,7 @@ public sealed class ContentReadingEventIngestionService
             CategoryId: payload.CategoryId > 0
                 ? payload.CategoryId
                 : null,
-            CategoryName: null,
+            CategoryName: NormalizeOptional(payload.CategoryName),
             AuthorUserId: payload.AuthorUserId > 0
                 ? payload.AuthorUserId
                 : null,
@@ -105,7 +105,7 @@ public sealed class ContentReadingEventIngestionService
             CategoryId: payload.CategoryId > 0
                 ? payload.CategoryId
                 : null,
-            CategoryName: null,
+            CategoryName: NormalizeOptional(payload.CategoryName),
             AuthorUserId: payload.AuthorUserId > 0
                 ? payload.AuthorUserId
                 : null,
@@ -226,5 +226,12 @@ public sealed class ContentReadingEventIngestionService
         }
 
         return fallbackSummary;
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }

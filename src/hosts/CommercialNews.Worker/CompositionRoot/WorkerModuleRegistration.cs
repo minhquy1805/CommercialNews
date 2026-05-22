@@ -36,6 +36,7 @@ using Reading.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Reading.Consumers;
 using CommercialNews.Worker.Reading.Handlers;
 using CommercialNews.Worker.Reading.Handlers.Content;
+using CommercialNews.Worker.Reading.Handlers.Media;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -211,6 +212,10 @@ public static class WorkerModuleRegistration
         services.AddScoped<IReadingIntegrationEventHandler, ContentArticleUnpublishedReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, ContentArticleArchivedReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, ContentArticleSoftDeletedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, MediaArticleMediaAttachedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, MediaArticlePrimaryMediaSetReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, MediaArticleMediaReorderedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, MediaArticleMediaDetachedReadingHandler>();
 
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));

@@ -63,6 +63,12 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'[reading].[ArticleMediaProjectionState]', N'U') IS NULL
+BEGIN
+    THROW 56106, 'Table [reading].[ArticleMediaProjectionState] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
    1) [reading].[ArticleReadModel]
    ========================================================= */
@@ -170,6 +176,7 @@ BEGIN
         [CategoryName],
         [AuthorUserId],
         [AuthorDisplayName],
+        [CoverMediaId],
         [CoverMediaUrl],
         [CoverAlt],
         [ViewCount],
@@ -211,6 +218,7 @@ BEGIN
         [Summary],
         [CategoryId],
         [CategoryName],
+        [CoverMediaId],
         [CoverMediaUrl],
         [CoverAlt],
         [ViewCount],
@@ -292,40 +300,6 @@ BEGIN
 END
 GO
 
-/* Public search fallback support */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = N'IX_ArticleReadModel_Public_SearchFields'
-      AND object_id = OBJECT_ID(N'[reading].[ArticleReadModel]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_ArticleReadModel_Public_SearchFields]
-    ON [reading].[ArticleReadModel]
-    (
-        [PublishedAtUtc] DESC,
-        [ArticleId] DESC
-    )
-    INCLUDE
-    (
-        [ArticlePublicId],
-        [Slug],
-        [Title],
-        [Summary],
-        [CategoryId],
-        [CategoryName]
-    )
-    WHERE [IsPublic] = 1;
-
-    PRINT N'Created index: [IX_ArticleReadModel_Public_SearchFields]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_ArticleReadModel_Public_SearchFields]';
-END
-GO
-
 /* =========================================================
    2) [reading].[ArticleReadModelTag]
    ========================================================= */
@@ -397,6 +371,30 @@ GO
    3) [reading].[ArticleReadModelMedia]
    ========================================================= */
 
+/* Enforce at most one projected primary media per article */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'UX_ArticleReadModelMedia_Article_Primary'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleReadModelMedia]')
+)
+BEGIN
+    CREATE UNIQUE NONCLUSTERED INDEX [UX_ArticleReadModelMedia_Article_Primary]
+    ON [reading].[ArticleReadModelMedia]
+    (
+        [ArticleId] ASC
+    )
+    WHERE [IsPrimary] = 1;
+
+    PRINT N'Created index: [UX_ArticleReadModelMedia_Article_Primary]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [UX_ArticleReadModelMedia_Article_Primary]';
+END
+GO
+
 /* Detail media gallery / primary-first ordering */
 IF NOT EXISTS
 (
@@ -416,8 +414,10 @@ BEGIN
     )
     INCLUDE
     (
+        [MediaPublicId],
         [Url],
         [Alt],
+        [Caption],
         [MediaType],
         [SourceVersion],
         [LastSyncedAtUtc]
@@ -431,7 +431,7 @@ BEGIN
 END
 GO
 
-/* Media projection diagnostics */
+/* Reverse lookup: articles currently referencing one media asset */
 IF NOT EXISTS
 (
     SELECT 1
@@ -448,9 +448,14 @@ BEGIN
     )
     INCLUDE
     (
+        [MediaPublicId],
+        [Url],
+        [Alt],
+        [Caption],
         [IsPrimary],
         [SortOrder],
         [MediaType],
+        [SourceVersion],
         [LastSyncedAtUtc]
     );
 
@@ -459,5 +464,39 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [IX_ArticleReadModelMedia_MediaId]';
+END
+GO
+
+/* =========================================================
+   4) [reading].[ArticleMediaProjectionState]
+   ========================================================= */
+
+/* Media attachment projection freshness scan / reconciliation */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleMediaProjectionState_LastSyncedAtUtc'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleMediaProjectionState]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_ArticleMediaProjectionState_LastSyncedAtUtc]
+    ON [reading].[ArticleMediaProjectionState]
+    (
+        [LastSyncedAtUtc] ASC,
+        [ArticleId] ASC
+    )
+    INCLUDE
+    (
+        [SourceVersion],
+        [LastEventMessageId],
+        [LastSourceOccurredAtUtc]
+    );
+
+    PRINT N'Created index: [IX_ArticleMediaProjectionState_LastSyncedAtUtc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_ArticleMediaProjectionState_LastSyncedAtUtc]';
 END
 GO

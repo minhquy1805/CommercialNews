@@ -75,11 +75,11 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
 
         try
         {
-            bool categoryUsable = await _categoryRepository.ExistsActiveByIdAsync(
+            Category? category = await _categoryRepository.GetByIdAsync(
                 request.CategoryId,
                 cancellationToken);
 
-            if (!categoryUsable)
+            if (category is null || !category.CanBeUsedByArticle)
             {
                 return Result<CreateArticleResponseDto>.Failure(
                     ContentErrors.Category.InactiveOrDeleted);
@@ -151,6 +151,7 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
                     articleId: articleId,
                     articlePublicId: article.ArticlePublicId,
                     categoryId: article.CategoryId,
+                    categoryName: category.Name,
                     authorUserId: article.AuthorUserId,
                     createdByUserId: createdByUserId,
                     status: article.Status,

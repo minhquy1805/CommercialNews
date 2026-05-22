@@ -12,6 +12,8 @@ public sealed class ArticlePublishedReadingPayload
 
     public long CategoryId { get; init; }
 
+    public string? CategoryName { get; init; }
+
     public long AuthorUserId { get; init; }
 
     public string? Slug { get; init; }
