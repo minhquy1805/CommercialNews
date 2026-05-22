@@ -540,6 +540,7 @@ CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModel_UpsertFromContent]
 
     @AuthorUserId              BIGINT = NULL,
     @AuthorDisplayName         NVARCHAR(200) = NULL,
+    @CoverMediaId              BIGINT = NULL,
 
     @Status                    NVARCHAR(30),
     @IsPublic                  BIT,
@@ -571,6 +572,9 @@ BEGIN
 
     IF @Status NOT IN (N'Draft', N'Published', N'Archived')
         THROW 58255, 'Status is invalid.', 1;
+
+    IF @CoverMediaId IS NOT NULL AND @CoverMediaId <= 0
+        THROW 58257, 'CoverMediaId must be > 0 when provided.', 1;
 
     IF @SourceVersion IS NULL OR @SourceVersion <= 0
         THROW 58256, 'SourceVersion must be > 0.', 1;
@@ -654,7 +658,7 @@ BEGIN
             @CategoryName,
             @AuthorUserId,
             @AuthorDisplayName,
-            NULL,
+            @CoverMediaId,
             NULL,
             NULL,
             NULL,
@@ -690,6 +694,7 @@ BEGIN
             [CategoryName] = @CategoryName,
             [AuthorUserId] = @AuthorUserId,
             [AuthorDisplayName] = @AuthorDisplayName,
+            [CoverMediaId] = @CoverMediaId,
             [Status] = @Status,
             [IsPublic] = @EffectiveIsPublic,
             [PublishedAtUtc] = @EffectivePublishedAtUtc,

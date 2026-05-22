@@ -10,6 +10,8 @@ public sealed class ArticleUpdatedReadingPayload
 
     public long CategoryId { get; init; }
 
+    public long AuthorUserId { get; init; }
+
     public long ActorUserId { get; init; }
 
     public long RevisionId { get; init; }
@@ -23,6 +25,10 @@ public sealed class ArticleUpdatedReadingPayload
     public string? Title { get; init; }
 
     public string? Summary { get; init; }
+
+    public string? Body { get; init; }
+
+    public long? CoverMediaId { get; init; }
 
     public string? CoverImageUrl { get; init; }
 

@@ -10,6 +10,7 @@ public sealed record ApplyContentArticleProjectionCommand(
     string? CategoryName,
     long? AuthorUserId,
     string? AuthorDisplayName,
+    long? CoverMediaId,
     string Status,
     bool IsPublic,
     DateTime? PublishedAtUtc,
