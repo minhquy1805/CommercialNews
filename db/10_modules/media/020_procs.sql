@@ -1286,6 +1286,51 @@ BEGIN
 END;
 GO
 
+CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_SelectListItemById]
+    @ArticleMediaId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        AM.[ArticleMediaId],
+        AM.[ArticleId],
+        AMS.[Version] AS [AttachmentSetVersion],
+        AM.[MediaId],
+        MA.[PublicId],
+        MA.[StorageProvider],
+        MA.[Url],
+        MA.[StoragePath],
+        MA.[FileName],
+        MA.[MediaType],
+        MA.[MimeType],
+        MA.[FileSizeBytes],
+        MA.[Width],
+        MA.[Height],
+        MA.[DurationSeconds],
+        MA.[AltText] AS [DefaultAltText],
+        MA.[IsDeleted] AS [MediaIsDeleted],
+        AM.[AltTextOverride],
+        AM.[Caption],
+        AM.[SortOrder],
+        AM.[IsPrimary],
+        AM.[CreatedAt],
+        AM.[CreatedBy],
+        AM.[UpdatedAt],
+        AM.[UpdatedBy],
+        AM.[Version],
+        AM.[IsDeleted],
+        AM.[DeletedAt],
+        AM.[DeletedBy]
+    FROM [media].[ArticleMedia] AM
+    INNER JOIN [media].[ArticleMediaSet] AMS
+        ON AMS.[ArticleId] = AM.[ArticleId]
+    INNER JOIN [media].[MediaAsset] MA
+        ON MA.[MediaId] = AM.[MediaId]
+    WHERE AM.[ArticleMediaId] = @ArticleMediaId;
+END;
+GO
+
 CREATE OR ALTER PROCEDURE [media].[Media_ArticleMedia_SelectAllByArticleId]
     @ArticleId BIGINT,
     @IncludeDeleted BIT = 0

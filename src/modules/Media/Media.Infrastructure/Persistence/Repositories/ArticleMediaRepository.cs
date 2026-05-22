@@ -21,6 +21,7 @@ public sealed class ArticleMediaRepository : IArticleMediaRepository
     private const string ArticleMediaReorderByIdsProc = "[media].[Media_ArticleMedia_ReorderByIds]";
 
     private const string ArticleMediaSelectByIdProc = "[media].[Media_ArticleMedia_SelectById]";
+    private const string ArticleMediaSelectListItemByIdProc = "[media].[Media_ArticleMedia_SelectListItemById]";
     private const string ArticleMediaSelectPrimaryByArticleIdProc = "[media].[Media_ArticleMedia_SelectPrimaryByArticleId]";
     private const string ArticleMediaSelectSkipAndTakeByArticleIdProc = "[media].[Media_ArticleMedia_SelectSkipAndTakeByArticleId]";
     private const string ArticleMediaGetRecordCountByArticleIdProc = "[media].[Media_ArticleMedia_GetRecordCountByArticleId]";
@@ -279,6 +280,47 @@ public sealed class ArticleMediaRepository : IArticleMediaRepository
                 }
 
                 return MapArticleMedia(reader);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<ArticleMediaListResultItem?> GetListItemByIdAsync(
+        long articleMediaId,
+        CancellationToken cancellationToken = default)
+    {
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateReadCommandAsync(ArticleMediaSelectListItemByIdProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@ArticleMediaId", SqlDbType.BigInt) { Value = articleMediaId });
+
+                using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return null;
+                }
+
+                return MapArticleMediaListResultItem(reader);
             }
         }
         catch (SqlException exception)
