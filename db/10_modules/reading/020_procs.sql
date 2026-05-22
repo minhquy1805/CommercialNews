@@ -63,6 +63,12 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'[reading].[ArticleMediaProjectionState]', N'U') IS NULL
+BEGIN
+    THROW 58206, 'Table [reading].[ArticleMediaProjectionState] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
    1) PUBLIC ARTICLE DETAIL BY PUBLIC ID
    ========================================================= */
@@ -134,8 +140,10 @@ BEGIN
     /* Result set 3: media */
     SELECT
         [m].[MediaId],
+        [m].[MediaPublicId],
         [m].[Url],
         [m].[Alt],
+        [m].[Caption],
         [m].[MediaType],
         [m].[IsPrimary],
         [m].[SortOrder]
@@ -217,8 +225,10 @@ BEGIN
         /* Empty result set 3 */
         SELECT
             CAST(NULL AS BIGINT) AS [MediaId],
+            CAST(NULL AS CHAR(26)) AS [MediaPublicId],
             CAST(NULL AS NVARCHAR(1000)) AS [Url],
             CAST(NULL AS NVARCHAR(300)) AS [Alt],
+            CAST(NULL AS NVARCHAR(300)) AS [Caption],
             CAST(NULL AS NVARCHAR(50)) AS [MediaType],
             CAST(NULL AS BIT) AS [IsPrimary],
             CAST(NULL AS INT) AS [SortOrder]
@@ -430,12 +440,20 @@ BEGIN
             CAST(NULL AS NVARCHAR(300)) AS [Slug],
             CAST(NULL AS NVARCHAR(300)) AS [Title],
             CAST(NULL AS NVARCHAR(1000)) AS [Summary],
+
             CAST(NULL AS BIGINT) AS [CategoryId],
             CAST(NULL AS NVARCHAR(200)) AS [CategoryName],
+
+            CAST(NULL AS BIGINT) AS [AuthorUserId],
+            CAST(NULL AS NVARCHAR(200)) AS [AuthorDisplayName],
+
             CAST(NULL AS BIGINT) AS [CoverMediaId],
             CAST(NULL AS NVARCHAR(1000)) AS [CoverMediaUrl],
             CAST(NULL AS NVARCHAR(300)) AS [CoverAlt],
+
             CAST(NULL AS DATETIME2(3)) AS [PublishedAtUtc],
+            CAST(NULL AS DATETIME2(3)) AS [UpdatedAtUtc],
+
             CAST(NULL AS BIGINT) AS [ViewCount],
             CAST(NULL AS BIGINT) AS [LikeCount],
             CAST(NULL AS BIGINT) AS [CommentCount],
@@ -457,11 +475,15 @@ BEGIN
             [a].[CategoryId],
             [a].[CategoryName],
 
+            [a].[AuthorUserId],
+            [a].[AuthorDisplayName],
+
             [a].[CoverMediaId],
             [a].[CoverMediaUrl],
             [a].[CoverAlt],
 
             [a].[PublishedAtUtc],
+            [a].[UpdatedAtUtc],
 
             [a].[ViewCount],
             [a].[LikeCount],
@@ -469,7 +491,9 @@ BEGIN
             [a].[PopularityScore],
 
             CASE
-                WHEN @CategoryId IS NOT NULL AND [a].[CategoryId] = @CategoryId THEN 1
+                WHEN @CategoryId IS NOT NULL
+                 AND [a].[CategoryId] = @CategoryId THEN 1
+
                 WHEN EXISTS
                 (
                     SELECT 1
@@ -483,6 +507,7 @@ BEGIN
                             AND [currentTag].[TagId] = [candidateTag].[TagId]
                       )
                 ) THEN 2
+
                 ELSE 3
             END AS [MatchRank]
         FROM [reading].[ArticleReadModel] AS [a]
@@ -500,11 +525,15 @@ BEGIN
         [CategoryId],
         [CategoryName],
 
+        [AuthorUserId],
+        [AuthorDisplayName],
+
         [CoverMediaId],
         [CoverMediaUrl],
         [CoverAlt],
 
         [PublishedAtUtc],
+        [UpdatedAtUtc],
 
         [ViewCount],
         [LikeCount],
@@ -573,33 +602,47 @@ BEGIN
     IF @Status NOT IN (N'Draft', N'Published', N'Archived')
         THROW 58255, 'Status is invalid.', 1;
 
-    IF @CoverMediaId IS NOT NULL AND @CoverMediaId <= 0
-        THROW 58257, 'CoverMediaId must be > 0 when provided.', 1;
-
     IF @SourceVersion IS NULL OR @SourceVersion <= 0
         THROW 58256, 'SourceVersion must be > 0.', 1;
+
+    IF @CoverMediaId IS NOT NULL AND @CoverMediaId <= 0
+        THROW 58257, 'CoverMediaId must be > 0 when provided.', 1;
 
     IF @UpdatedAtUtc IS NULL
         SET @UpdatedAtUtc = SYSUTCDATETIME();
 
     DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+
     DECLARE @Applied BIT = 0;
     DECLARE @CurrentSourceVersion BIGINT = NULL;
     DECLARE @CurrentPublishedAtUtc DATETIME2(3) = NULL;
+
+    DECLARE @CurrentCoverMediaId BIGINT = NULL;
+    DECLARE @CurrentCoverMediaUrl NVARCHAR(1000) = NULL;
+    DECLARE @CurrentCoverAlt NVARCHAR(300) = NULL;
+
     DECLARE @EffectivePublishedAtUtc DATETIME2(3) = NULL;
     DECLARE @EffectiveIsPublic BIT = 0;
+
+    DECLARE @ResolvedCoverMediaId BIGINT = NULL;
+    DECLARE @ResolvedCoverMediaUrl NVARCHAR(1000) = NULL;
+    DECLARE @ResolvedCoverAlt NVARCHAR(300) = NULL;
 
     BEGIN TRANSACTION;
 
     SELECT
         @CurrentSourceVersion = [SourceVersion],
-        @CurrentPublishedAtUtc = [PublishedAtUtc]
+        @CurrentPublishedAtUtc = [PublishedAtUtc],
+        @CurrentCoverMediaId = [CoverMediaId],
+        @CurrentCoverMediaUrl = [CoverMediaUrl],
+        @CurrentCoverAlt = [CoverAlt]
     FROM [reading].[ArticleReadModel] WITH (UPDLOCK, HOLDLOCK)
     WHERE [ArticleId] = @ArticleId;
 
     SET @EffectivePublishedAtUtc =
         CASE
-            WHEN @Status = N'Published' THEN COALESCE(@PublishedAtUtc, @CurrentPublishedAtUtc)
+            WHEN @Status = N'Published'
+                THEN COALESCE(@PublishedAtUtc, @CurrentPublishedAtUtc)
             ELSE NULL
         END;
 
@@ -610,6 +653,48 @@ BEGIN
              AND @EffectivePublishedAtUtc IS NOT NULL THEN 1
             ELSE 0
         END;
+
+    /*
+      Cover ownership:
+      - Media primary projection is authoritative for public cover rendering.
+      - Content CoverMediaId is only a seed/fallback when no media primary is projected.
+    */
+
+    SELECT TOP (1)
+        @ResolvedCoverMediaId = [MediaId],
+        @ResolvedCoverMediaUrl = [Url],
+        @ResolvedCoverAlt = [Alt]
+    FROM [reading].[ArticleReadModelMedia] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticleId] = @ArticleId
+      AND [IsPrimary] = 1
+    ORDER BY [SortOrder] ASC, [MediaId] ASC;
+
+    IF @ResolvedCoverMediaId IS NULL AND @CoverMediaId IS NOT NULL
+    BEGIN
+        SELECT TOP (1)
+            @ResolvedCoverMediaId = [MediaId],
+            @ResolvedCoverMediaUrl = [Url],
+            @ResolvedCoverAlt = [Alt]
+        FROM [reading].[ArticleReadModelMedia] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [ArticleId] = @ArticleId
+          AND [MediaId] = @CoverMediaId;
+    END
+
+    IF @ResolvedCoverMediaId IS NULL
+    BEGIN
+        IF @CurrentSourceVersion IS NOT NULL
+        BEGIN
+            SET @ResolvedCoverMediaId = @CurrentCoverMediaId;
+            SET @ResolvedCoverMediaUrl = @CurrentCoverMediaUrl;
+            SET @ResolvedCoverAlt = @CurrentCoverAlt;
+        END
+        ELSE
+        BEGIN
+            SET @ResolvedCoverMediaId = @CoverMediaId;
+            SET @ResolvedCoverMediaUrl = NULL;
+            SET @ResolvedCoverAlt = NULL;
+        END
+    END
 
     IF @CurrentSourceVersion IS NULL
     BEGIN
@@ -658,9 +743,9 @@ BEGIN
             @CategoryName,
             @AuthorUserId,
             @AuthorDisplayName,
-            @CoverMediaId,
-            NULL,
-            NULL,
+            @ResolvedCoverMediaId,
+            @ResolvedCoverMediaUrl,
+            @ResolvedCoverAlt,
             NULL,
             NULL,
             NULL,
@@ -694,12 +779,17 @@ BEGIN
             [CategoryName] = @CategoryName,
             [AuthorUserId] = @AuthorUserId,
             [AuthorDisplayName] = @AuthorDisplayName,
-            [CoverMediaId] = @CoverMediaId,
+
+            [CoverMediaId] = @ResolvedCoverMediaId,
+            [CoverMediaUrl] = @ResolvedCoverMediaUrl,
+            [CoverAlt] = @ResolvedCoverAlt,
+
             [Status] = @Status,
             [IsPublic] = @EffectiveIsPublic,
             [PublishedAtUtc] = @EffectivePublishedAtUtc,
             [UpdatedAtUtc] = @UpdatedAtUtc,
             [SearchText] = CONCAT_WS(N' ', @Title, @Summary, @Body, @CategoryName, @AuthorDisplayName),
+
             [SourceVersion] = @SourceVersion,
             [LastEventMessageId] = @MessageId,
             [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
@@ -716,7 +806,8 @@ BEGIN
         @Applied AS [Applied],
         CASE
             WHEN @Applied = 1 THEN N'Applied'
-            WHEN @CurrentSourceVersion IS NOT NULL AND @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
+            WHEN @CurrentSourceVersion IS NOT NULL
+             AND @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
             ELSE N'Ignored'
         END AS [Decision],
         @CurrentSourceVersion AS [PreviousSourceVersion],
@@ -860,5 +951,552 @@ BEGIN
     SELECT
         CAST(CASE WHEN @@ROWCOUNT = 1 THEN 1 ELSE 0 END AS BIT) AS [Applied],
         CASE WHEN @@ROWCOUNT = 1 THEN N'Applied' ELSE N'IgnoredMissingArticle' END AS [Decision];
+END
+GO
+
+/* =========================================================
+   10) MEDIA PROJECTION STATE + ARTICLE MEDIA
+   ========================================================= */
+
+IF TYPE_ID(N'[reading].[ArticleMediaOrderListType]') IS NULL
+BEGIN
+    EXEC(N'
+        CREATE TYPE [reading].[ArticleMediaOrderListType] AS TABLE
+        (
+            [MediaId] BIGINT NOT NULL,
+            [SortOrder] INT NOT NULL
+        );
+    ');
+END
+GO
+
+CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModelMedia_UpsertFromMediaAttachment]
+    @ArticleId                 BIGINT,
+    @MediaId                   BIGINT,
+    @MediaPublicId             CHAR(26),
+    @Url                       NVARCHAR(1000),
+    @Alt                       NVARCHAR(300) = NULL,
+    @Caption                   NVARCHAR(300) = NULL,
+    @MediaType                 NVARCHAR(50),
+    @SortOrder                 INT,
+    @IsPrimary                 BIT,
+    @SourceVersion             BIGINT,
+    @MessageId                 CHAR(26) = NULL,
+    @SourceOccurredAtUtc       DATETIME2(3) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @ArticleId IS NULL OR @ArticleId <= 0
+        THROW 58300, 'ArticleId must be > 0.', 1;
+
+    IF @MediaId IS NULL OR @MediaId <= 0
+        THROW 58301, 'MediaId must be > 0.', 1;
+
+    IF @MediaPublicId IS NULL OR LEN(@MediaPublicId) <> 26
+        THROW 58302, 'MediaPublicId must be a valid 26-character public id.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@Url, N'')))) = 0
+        THROW 58303, 'Url is required.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@MediaType, N'')))) = 0
+        THROW 58304, 'MediaType is required.', 1;
+
+    IF @SortOrder IS NULL OR @SortOrder < 0
+        THROW 58305, 'SortOrder must be non-negative.', 1;
+
+    IF @SourceVersion IS NULL OR @SourceVersion <= 0
+        THROW 58306, 'SourceVersion must be > 0.', 1;
+
+    DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @Applied BIT = 0;
+    DECLARE @CurrentSourceVersion BIGINT = NULL;
+
+    BEGIN TRANSACTION;
+
+    SELECT @CurrentSourceVersion = [SourceVersion]
+    FROM [reading].[ArticleMediaProjectionState] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticleId] = @ArticleId;
+
+    IF @CurrentSourceVersion IS NULL
+    BEGIN
+        INSERT INTO [reading].[ArticleMediaProjectionState]
+        (
+            [ArticleId],
+            [SourceVersion],
+            [LastEventMessageId],
+            [LastSourceOccurredAtUtc],
+            [LastSyncedAtUtc]
+        )
+        VALUES
+        (
+            @ArticleId,
+            0,
+            NULL,
+            NULL,
+            @Now
+        );
+
+        SET @CurrentSourceVersion = 0;
+    END
+
+    IF @SourceVersion > @CurrentSourceVersion
+    BEGIN
+        IF @IsPrimary = 1
+        BEGIN
+            UPDATE [reading].[ArticleReadModelMedia]
+            SET
+                [IsPrimary] = 0,
+                [SourceVersion] = @SourceVersion,
+                [LastSyncedAtUtc] = @Now
+            WHERE [ArticleId] = @ArticleId
+              AND [MediaId] <> @MediaId
+              AND [IsPrimary] = 1;
+        END
+
+        UPDATE [reading].[ArticleReadModelMedia]
+        SET
+            [MediaPublicId] = @MediaPublicId,
+            [Url] = @Url,
+            [Alt] = @Alt,
+            [Caption] = @Caption,
+            [MediaType] = @MediaType,
+            [SortOrder] = @SortOrder,
+            [IsPrimary] = @IsPrimary,
+            [SourceVersion] = @SourceVersion,
+            [LastSyncedAtUtc] = @Now
+        WHERE [ArticleId] = @ArticleId
+          AND [MediaId] = @MediaId;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            INSERT INTO [reading].[ArticleReadModelMedia]
+            (
+                [ArticleId],
+                [MediaId],
+                [MediaPublicId],
+                [Url],
+                [Alt],
+                [Caption],
+                [MediaType],
+                [SortOrder],
+                [IsPrimary],
+                [SourceVersion],
+                [LastSyncedAtUtc]
+            )
+            VALUES
+            (
+                @ArticleId,
+                @MediaId,
+                @MediaPublicId,
+                @Url,
+                @Alt,
+                @Caption,
+                @MediaType,
+                @SortOrder,
+                @IsPrimary,
+                @SourceVersion,
+                @Now
+            );
+        END
+
+        IF @IsPrimary = 1
+        BEGIN
+            UPDATE [reading].[ArticleReadModel]
+            SET
+                [CoverMediaId] = @MediaId,
+                [CoverMediaUrl] = @Url,
+                [CoverAlt] = @Alt,
+                [LastEventMessageId] = @MessageId,
+                [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+                [LastSyncedAtUtc] = @Now
+            WHERE [ArticleId] = @ArticleId;
+        END
+
+        UPDATE [reading].[ArticleMediaProjectionState]
+        SET
+            [SourceVersion] = @SourceVersion,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now
+        WHERE [ArticleId] = @ArticleId;
+
+        SET @Applied = 1;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @Applied AS [Applied],
+        CASE
+            WHEN @Applied = 1 THEN N'Applied'
+            WHEN @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
+            ELSE N'Ignored'
+        END AS [Decision],
+        @CurrentSourceVersion AS [PreviousSourceVersion],
+        @SourceVersion AS [IncomingSourceVersion];
+END
+GO
+
+CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModelMedia_SetPrimaryFromMedia]
+    @ArticleId                 BIGINT,
+    @MediaId                   BIGINT,
+    @MediaPublicId             CHAR(26),
+    @Url                       NVARCHAR(1000),
+    @Alt                       NVARCHAR(300) = NULL,
+    @Caption                   NVARCHAR(300) = NULL,
+    @MediaType                 NVARCHAR(50),
+    @SortOrder                 INT,
+    @SourceVersion             BIGINT,
+    @MessageId                 CHAR(26) = NULL,
+    @SourceOccurredAtUtc       DATETIME2(3) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @ArticleId IS NULL OR @ArticleId <= 0
+        THROW 58320, 'ArticleId must be > 0.', 1;
+
+    IF @MediaId IS NULL OR @MediaId <= 0
+        THROW 58321, 'MediaId must be > 0.', 1;
+
+    IF @MediaPublicId IS NULL OR LEN(@MediaPublicId) <> 26
+        THROW 58322, 'MediaPublicId must be a valid 26-character public id.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@Url, N'')))) = 0
+        THROW 58323, 'Url is required.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@MediaType, N'')))) = 0
+        THROW 58324, 'MediaType is required.', 1;
+
+    IF @SortOrder IS NULL OR @SortOrder < 0
+        THROW 58325, 'SortOrder must be non-negative.', 1;
+
+    IF @SourceVersion IS NULL OR @SourceVersion <= 0
+        THROW 58326, 'SourceVersion must be > 0.', 1;
+
+    DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @Applied BIT = 0;
+    DECLARE @CurrentSourceVersion BIGINT = NULL;
+
+    BEGIN TRANSACTION;
+
+    SELECT @CurrentSourceVersion = [SourceVersion]
+    FROM [reading].[ArticleMediaProjectionState] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticleId] = @ArticleId;
+
+    IF @CurrentSourceVersion IS NULL
+    BEGIN
+        INSERT INTO [reading].[ArticleMediaProjectionState]
+        (
+            [ArticleId],
+            [SourceVersion],
+            [LastEventMessageId],
+            [LastSourceOccurredAtUtc],
+            [LastSyncedAtUtc]
+        )
+        VALUES
+        (
+            @ArticleId,
+            0,
+            NULL,
+            NULL,
+            @Now
+        );
+
+        SET @CurrentSourceVersion = 0;
+    END
+
+    IF @SourceVersion > @CurrentSourceVersion
+    BEGIN
+        UPDATE [reading].[ArticleReadModelMedia]
+        SET
+            [IsPrimary] = 0,
+            [SourceVersion] = @SourceVersion,
+            [LastSyncedAtUtc] = @Now
+        WHERE [ArticleId] = @ArticleId
+          AND [MediaId] <> @MediaId
+          AND [IsPrimary] = 1;
+
+        UPDATE [reading].[ArticleReadModelMedia]
+        SET
+            [MediaPublicId] = @MediaPublicId,
+            [Url] = @Url,
+            [Alt] = @Alt,
+            [Caption] = @Caption,
+            [MediaType] = @MediaType,
+            [SortOrder] = @SortOrder,
+            [IsPrimary] = 1,
+            [SourceVersion] = @SourceVersion,
+            [LastSyncedAtUtc] = @Now
+        WHERE [ArticleId] = @ArticleId
+          AND [MediaId] = @MediaId;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            INSERT INTO [reading].[ArticleReadModelMedia]
+            (
+                [ArticleId],
+                [MediaId],
+                [MediaPublicId],
+                [Url],
+                [Alt],
+                [Caption],
+                [MediaType],
+                [SortOrder],
+                [IsPrimary],
+                [SourceVersion],
+                [LastSyncedAtUtc]
+            )
+            VALUES
+            (
+                @ArticleId,
+                @MediaId,
+                @MediaPublicId,
+                @Url,
+                @Alt,
+                @Caption,
+                @MediaType,
+                @SortOrder,
+                1,
+                @SourceVersion,
+                @Now
+            );
+        END
+
+        UPDATE [reading].[ArticleReadModel]
+        SET
+            [CoverMediaId] = @MediaId,
+            [CoverMediaUrl] = @Url,
+            [CoverAlt] = @Alt,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now
+        WHERE [ArticleId] = @ArticleId;
+
+        UPDATE [reading].[ArticleMediaProjectionState]
+        SET
+            [SourceVersion] = @SourceVersion,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now
+        WHERE [ArticleId] = @ArticleId;
+
+        SET @Applied = 1;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @Applied AS [Applied],
+        CASE
+            WHEN @Applied = 1 THEN N'Applied'
+            WHEN @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
+            ELSE N'Ignored'
+        END AS [Decision],
+        @CurrentSourceVersion AS [PreviousSourceVersion],
+        @SourceVersion AS [IncomingSourceVersion];
+END
+GO
+
+CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModelMedia_ReorderFromMedia]
+    @ArticleId                 BIGINT,
+    @Orders                    [reading].[ArticleMediaOrderListType] READONLY,
+    @SourceVersion             BIGINT,
+    @MessageId                 CHAR(26) = NULL,
+    @SourceOccurredAtUtc       DATETIME2(3) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @ArticleId IS NULL OR @ArticleId <= 0
+        THROW 58340, 'ArticleId must be > 0.', 1;
+
+    IF @SourceVersion IS NULL OR @SourceVersion <= 0
+        THROW 58341, 'SourceVersion must be > 0.', 1;
+
+    IF NOT EXISTS (SELECT 1 FROM @Orders)
+        THROW 58342, 'Orders are required.', 1;
+
+    IF EXISTS (SELECT 1 FROM @Orders WHERE [MediaId] <= 0 OR [SortOrder] < 0)
+        THROW 58343, 'Orders contain invalid values.', 1;
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM @Orders
+        GROUP BY [MediaId]
+        HAVING COUNT(1) > 1
+    )
+        THROW 58344, 'Orders contain duplicate media ids.', 1;
+
+    DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @Applied BIT = 0;
+    DECLARE @CurrentSourceVersion BIGINT = NULL;
+
+    BEGIN TRANSACTION;
+
+    SELECT @CurrentSourceVersion = [SourceVersion]
+    FROM [reading].[ArticleMediaProjectionState] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticleId] = @ArticleId;
+
+    IF @CurrentSourceVersion IS NULL
+    BEGIN
+        INSERT INTO [reading].[ArticleMediaProjectionState]
+        (
+            [ArticleId],
+            [SourceVersion],
+            [LastEventMessageId],
+            [LastSourceOccurredAtUtc],
+            [LastSyncedAtUtc]
+        )
+        VALUES
+        (
+            @ArticleId,
+            0,
+            NULL,
+            NULL,
+            @Now
+        );
+
+        SET @CurrentSourceVersion = 0;
+    END
+
+    IF @SourceVersion > @CurrentSourceVersion
+    BEGIN
+        UPDATE ARM
+        SET
+            [SortOrder] = O.[SortOrder],
+            [SourceVersion] = @SourceVersion,
+            [LastSyncedAtUtc] = @Now
+        FROM [reading].[ArticleReadModelMedia] ARM
+        INNER JOIN @Orders O
+            ON O.[MediaId] = ARM.[MediaId]
+        WHERE ARM.[ArticleId] = @ArticleId;
+
+        UPDATE [reading].[ArticleMediaProjectionState]
+        SET
+            [SourceVersion] = @SourceVersion,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now
+        WHERE [ArticleId] = @ArticleId;
+
+        SET @Applied = 1;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @Applied AS [Applied],
+        CASE
+            WHEN @Applied = 1 THEN N'Applied'
+            WHEN @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
+            ELSE N'Ignored'
+        END AS [Decision],
+        @CurrentSourceVersion AS [PreviousSourceVersion],
+        @SourceVersion AS [IncomingSourceVersion];
+END
+GO
+
+CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModelMedia_DetachFromMedia]
+    @ArticleId                 BIGINT,
+    @MediaId                   BIGINT,
+    @PrimaryCleared            BIT,
+    @SourceVersion             BIGINT,
+    @MessageId                 CHAR(26) = NULL,
+    @SourceOccurredAtUtc       DATETIME2(3) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @ArticleId IS NULL OR @ArticleId <= 0
+        THROW 58360, 'ArticleId must be > 0.', 1;
+
+    IF @MediaId IS NULL OR @MediaId <= 0
+        THROW 58361, 'MediaId must be > 0.', 1;
+
+    IF @SourceVersion IS NULL OR @SourceVersion <= 0
+        THROW 58362, 'SourceVersion must be > 0.', 1;
+
+    DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @Applied BIT = 0;
+    DECLARE @CurrentSourceVersion BIGINT = NULL;
+
+    BEGIN TRANSACTION;
+
+    SELECT
+        @CurrentSourceVersion = [SourceVersion]
+    FROM [reading].[ArticleMediaProjectionState] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticleId] = @ArticleId;
+
+    IF @CurrentSourceVersion IS NULL
+    BEGIN
+        INSERT INTO [reading].[ArticleMediaProjectionState]
+        (
+            [ArticleId],
+            [SourceVersion],
+            [LastEventMessageId],
+            [LastSourceOccurredAtUtc],
+            [LastSyncedAtUtc]
+        )
+        VALUES
+        (
+            @ArticleId,
+            0,
+            NULL,
+            NULL,
+            @Now
+        );
+
+        SET @CurrentSourceVersion = 0;
+    END
+
+    IF @SourceVersion > @CurrentSourceVersion
+    BEGIN
+        DELETE FROM [reading].[ArticleReadModelMedia]
+        WHERE [ArticleId] = @ArticleId
+          AND [MediaId] = @MediaId;
+
+        IF @PrimaryCleared = 1
+        BEGIN
+            UPDATE [reading].[ArticleReadModel]
+            SET
+                [CoverMediaId] = NULL,
+                [CoverMediaUrl] = NULL,
+                [CoverAlt] = NULL,
+                [LastEventMessageId] = @MessageId,
+                [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+                [LastSyncedAtUtc] = @Now
+            WHERE [ArticleId] = @ArticleId
+              AND [CoverMediaId] = @MediaId;
+        END
+
+        UPDATE [reading].[ArticleMediaProjectionState]
+        SET
+            [SourceVersion] = @SourceVersion,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now
+        WHERE [ArticleId] = @ArticleId;
+
+        SET @Applied = 1;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @Applied AS [Applied],
+        CASE
+            WHEN @Applied = 1 THEN N'Applied'
+            WHEN @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
+            ELSE N'Ignored'
+        END AS [Decision],
+        @CurrentSourceVersion AS [PreviousSourceVersion],
+        @SourceVersion AS [IncomingSourceVersion];
 END
 GO

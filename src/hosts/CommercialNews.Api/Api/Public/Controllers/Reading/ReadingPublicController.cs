@@ -328,8 +328,10 @@ public sealed class ReadingPublicController : ControllerBase
         return new ArticleMediaHttpResponse
         {
             MediaId = source.MediaId,
+            MediaPublicId = source.MediaPublicId,
             Url = source.Url,
             Alt = source.Alt,
+            Caption = source.Caption,
             MediaType = source.MediaType,
             IsPrimary = source.IsPrimary,
             SortOrder = source.SortOrder

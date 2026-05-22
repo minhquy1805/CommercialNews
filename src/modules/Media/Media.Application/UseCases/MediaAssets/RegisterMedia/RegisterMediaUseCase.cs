@@ -126,6 +126,7 @@ public sealed class RegisterMediaUseCase : IRegisterMediaUseCase
                     width: mediaAsset.Width,
                     height: mediaAsset.Height,
                     durationSeconds: mediaAsset.DurationSeconds,
+                    altText: mediaAsset.AltText,
                     actorUserId: actorUserId.Value,
                     version: insertResult.NewVersion,
                     registeredAtUtc: nowUtc,

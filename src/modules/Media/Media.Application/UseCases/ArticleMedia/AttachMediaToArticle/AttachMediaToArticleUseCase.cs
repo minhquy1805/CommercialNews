@@ -98,14 +98,46 @@ public sealed class AttachMediaToArticleUseCase : IAttachMediaToArticleUseCase
                     ?? throw new InvalidOperationException(
                         "Media_ArticleMedia_Attach did not return NewVersion.");
 
+                bool effectiveIsPrimary = request.IsPrimary;
+
                 if (attachResult.AffectedRows > 0)
                 {
+                    if (attachResult.ArticleMediaId is null or <= 0)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<AttachMediaToArticleResponse>.Failure(
+                            MediaErrors.PersistenceError);
+                    }
+
+                    ArticleMediaListResultItem? attachedMedia =
+                        await _articleMediaRepository.GetListItemByIdAsync(
+                            attachResult.ArticleMediaId.Value,
+                            cancellationToken);
+
+                    if (attachedMedia is null)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<AttachMediaToArticleResponse>.Failure(
+                            MediaErrors.PersistenceError);
+                    }
+
+                    effectiveIsPrimary = attachedMedia.IsPrimary;
+
                     await _mediaOutboxWriter.EnqueueArticleMediaAttachedAsync(
                         unitOfWork: _unitOfWork,
                         articleId: request.ArticleId,
                         mediaId: request.MediaId,
+                        mediaPublicId: attachedMedia.PublicId,
                         articleMediaId: attachResult.ArticleMediaId,
-                        isPrimary: request.IsPrimary,
+                        url: attachedMedia.Url,
+                        mediaType: attachedMedia.MediaType,
+                        altText: attachedMedia.DefaultAltText,
+                        altTextOverride: attachedMedia.AltTextOverride,
+                        caption: attachedMedia.Caption,
+                        sortOrder: attachedMedia.SortOrder,
+                        isPrimary: attachedMedia.IsPrimary,
                         primaryChanged: attachResult.PrimaryChanged,
                         actorUserId: actorUserId.Value,
                         attachmentSetVersion: attachmentSetVersion,
@@ -123,7 +155,7 @@ public sealed class AttachMediaToArticleUseCase : IAttachMediaToArticleUseCase
                         ArticleId = request.ArticleId,
                         MediaId = request.MediaId,
                         Attached = attachResult.AffectedRows > 0,
-                        IsPrimary = request.IsPrimary,
+                        IsPrimary = effectiveIsPrimary,
                         PrimaryChanged = attachResult.PrimaryChanged,
                         AffectedRows = attachResult.AffectedRows,
                         AttachmentSetVersion = attachmentSetVersion

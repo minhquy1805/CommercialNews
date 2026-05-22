@@ -29,4 +29,20 @@ public interface IArticleReadModelRepository
     Task<ArticleProjectionApplyResult> MarkNotPublicAsync(
         MarkArticleProjectionNotPublicCommand command,
         CancellationToken cancellationToken = default);
+
+    Task<ArticleProjectionApplyResult> UpsertMediaAttachmentAsync(
+        UpsertArticleMediaProjectionCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task<ArticleProjectionApplyResult> SetPrimaryMediaAsync(
+        SetPrimaryArticleMediaProjectionCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task<ArticleProjectionApplyResult> ReorderMediaAsync(
+        ReorderArticleMediaProjectionCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task<ArticleProjectionApplyResult> DetachMediaAsync(
+        DetachArticleMediaProjectionCommand command,
+        CancellationToken cancellationToken = default);
 }

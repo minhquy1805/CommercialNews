@@ -96,11 +96,11 @@ public sealed class UpdateArticleUseCase : IUpdateArticleUseCase
                     ContentErrors.ConcurrencyConflict);
             }
 
-            bool categoryUsable = await _categoryRepository.ExistsActiveByIdAsync(
+            Category? category = await _categoryRepository.GetByIdAsync(
                 request.CategoryId,
                 cancellationToken);
 
-            if (!categoryUsable)
+            if (category is null || !category.CanBeUsedByArticle)
             {
                 return Result<UpdateArticleResponseDto>.Failure(
                     ContentErrors.Category.InactiveOrDeleted);
@@ -210,6 +210,7 @@ public sealed class UpdateArticleUseCase : IUpdateArticleUseCase
                     articlePublicId: updatedArticle.ArticlePublicId,
                     status: updatedArticle.Status,
                     categoryId: updatedArticle.CategoryId,
+                    categoryName: category.Name,
                     authorUserId: updatedArticle.AuthorUserId,
                     actorUserId: actorUserId,
                     revisionId: insertedRevision.RevisionId,

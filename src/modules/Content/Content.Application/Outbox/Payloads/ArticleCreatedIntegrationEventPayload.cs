@@ -4,6 +4,7 @@ public sealed record ArticleCreatedIntegrationEventPayload(
     long ArticleId,
     string ArticlePublicId,
     long CategoryId,
+    string? CategoryName,
     long AuthorUserId,
     long CreatedByUserId,
     string Status,
