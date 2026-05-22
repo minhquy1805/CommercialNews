@@ -6,6 +6,7 @@ public sealed record ArticlePublishedIntegrationEventPayload(
     string FromStatus,
     string ToStatus,
     long CategoryId,
+    string? CategoryName,
     long AuthorUserId,
     string? Slug,
     string? CanonicalUrl,

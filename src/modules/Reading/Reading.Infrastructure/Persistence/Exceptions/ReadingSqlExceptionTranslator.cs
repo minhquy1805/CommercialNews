@@ -41,9 +41,34 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 "Keyword is required.",
                 exception),
 
-            58250 or 58260 or 58270 or 58280 => Reading(
+            58250 or 58260 or 58270 or 58280 or 58300 or 58320 or 58340 or 58360 => Reading(
                 "READING.INVALID_ARTICLE_ID",
                 "Article id must be greater than zero.",
+                exception),
+
+            58301 or 58321 or 58361 => Reading(
+                "READING.INVALID_MEDIA_ID",
+                "Media id must be greater than zero.",
+                exception),
+
+            58302 or 58322 => Reading(
+                "READING.INVALID_MEDIA_PUBLIC_ID",
+                "Media public id must be a valid 26-character public id.",
+                exception),
+
+            58303 or 58323 => Reading(
+                "READING.INVALID_MEDIA_URL",
+                "Media URL is required.",
+                exception),
+
+            58304 or 58324 => Reading(
+                "READING.INVALID_MEDIA_TYPE",
+                "Media type is required.",
+                exception),
+
+            58305 or 58325 or 58343 or 58344 => Reading(
+                "READING.INVALID_MEDIA_SORT_ORDER",
+                "Media sort order is invalid.",
                 exception),
 
             58252 => Reading(
@@ -66,9 +91,14 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 "Source article status is invalid.",
                 exception),
 
-            58256 or 58262 => Reading(
+            58256 or 58262 or 58306 or 58326 or 58341 or 58362 => Reading(
                 "READING.INVALID_SOURCE_VERSION",
                 "Source version must be greater than zero.",
+                exception),
+
+            58342 => Reading(
+                "READING.MEDIA_REORDER_ITEMS_REQUIRED",
+                "Media reorder items are required.",
                 exception),
 
             58281 => Reading(
@@ -220,7 +250,8 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 "CK_ArticleReadModel_SourceVersion_NonNegative",
                 "CK_ArticleReadModel_SourceVersion_Positive",
                 "CK_ArticleReadModelTag_SourceVersion_NonNegative",
-                "CK_ArticleReadModelMedia_SourceVersion_NonNegative"))
+                "CK_ArticleReadModelMedia_SourceVersion_NonNegative",
+                "CK_ArticleMediaProjectionState_SourceVersion_NonNegative"))
         {
             return new ReadingPersistenceException(
                 code: "READING.INVALID_SOURCE_VERSION",
@@ -269,6 +300,16 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
             return new ReadingPersistenceException(
                 code: "READING.INVALID_MEDIA_URL",
                 message: "Media URL is required.",
+                innerException: exception);
+        }
+
+        if (message.Contains(
+                "CK_ArticleReadModelMedia_MediaPublicId_Length",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return new ReadingPersistenceException(
+                code: "READING.INVALID_MEDIA_PUBLIC_ID",
+                message: "Media public id is invalid.",
                 innerException: exception);
         }
 

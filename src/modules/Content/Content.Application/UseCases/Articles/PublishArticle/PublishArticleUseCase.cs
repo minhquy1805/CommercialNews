@@ -18,6 +18,7 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
     private readonly IArticleRepository _articleRepository;
     private readonly IArticleLifecycleEventRepository _articleLifecycleEventRepository;
     private readonly IArticleTagRepository _articleTagRepository;
+    private readonly ICategoryRepository _categoryRepository;
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
@@ -27,6 +28,7 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
         IArticleRepository articleRepository,
         IArticleLifecycleEventRepository articleLifecycleEventRepository,
         IArticleTagRepository articleTagRepository,
+        ICategoryRepository categoryRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext,
@@ -37,6 +39,8 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
             ?? throw new ArgumentNullException(nameof(articleLifecycleEventRepository));
         _articleTagRepository = articleTagRepository
             ?? throw new ArgumentNullException(nameof(articleTagRepository));
+        _categoryRepository = categoryRepository
+            ?? throw new ArgumentNullException(nameof(categoryRepository));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
@@ -73,6 +77,16 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
         {
             return Result<PublishArticleResponseDto>.Failure(
                 ContentErrors.ConcurrencyConflict);
+        }
+
+        Category? category = await _categoryRepository.GetByIdAsync(
+            article.CategoryId,
+            cancellationToken);
+
+        if (category is null || !category.CanBeUsedByArticle)
+        {
+            return Result<PublishArticleResponseDto>.Failure(
+                ContentErrors.Category.InactiveOrDeleted);
         }
 
         DateTime nowUtc = _dateTimeProvider.UtcNow;
@@ -150,6 +164,7 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
                     fromStatus: fromStatus,
                     toStatus: publishedArticle.Status,
                     categoryId: publishedArticle.CategoryId,
+                    categoryName: category.Name,
                     authorUserId: publishedArticle.AuthorUserId,
                     slug: null,
                     canonicalUrl: null,

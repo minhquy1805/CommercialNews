@@ -236,9 +236,11 @@ BEGIN
     (
         [ArticleId]                 BIGINT               NOT NULL,
         [MediaId]                   BIGINT               NOT NULL,
+        [MediaPublicId]             CHAR(26)             NOT NULL,
 
         [Url]                       NVARCHAR(1000)       NOT NULL,
         [Alt]                       NVARCHAR(300)        NULL,
+        [Caption]                   NVARCHAR(300)        NULL,
         [MediaType]                 NVARCHAR(50)         NOT NULL,
 
         [SortOrder]                 INT                  NOT NULL
@@ -247,6 +249,12 @@ BEGIN
         [IsPrimary]                 BIT                  NOT NULL
             CONSTRAINT [DF_ArticleReadModelMedia_IsPrimary] DEFAULT (0),
 
+        /*
+          For ArticleReadModelMedia, SourceVersion means:
+          Media.ArticleMediaSet.AttachmentSetVersion.
+          It must not be compared with Content article version
+          or MediaAsset version.
+        */
         [SourceVersion]             BIGINT               NOT NULL
             CONSTRAINT [DF_ArticleReadModelMedia_SourceVersion] DEFAULT (0),
 
@@ -256,10 +264,14 @@ BEGIN
         CONSTRAINT [PK_ArticleReadModelMedia]
             PRIMARY KEY CLUSTERED ([ArticleId] ASC, [MediaId] ASC),
 
-        CONSTRAINT [FK_ArticleReadModelMedia_ArticleReadModel]
-            FOREIGN KEY ([ArticleId])
-            REFERENCES [reading].[ArticleReadModel]([ArticleId])
-            ON DELETE CASCADE,
+        CONSTRAINT [CK_ArticleReadModelMedia_ArticleId_Positive]
+            CHECK ([ArticleId] > 0),
+
+        CONSTRAINT [CK_ArticleReadModelMedia_MediaId_Positive]
+            CHECK ([MediaId] > 0),
+
+        CONSTRAINT [CK_ArticleReadModelMedia_MediaPublicId_Length]
+            CHECK (LEN([MediaPublicId]) = 26),
 
         CONSTRAINT [CK_ArticleReadModelMedia_Url_NotBlank]
             CHECK (LEN(LTRIM(RTRIM([Url]))) > 0),
@@ -279,5 +291,58 @@ END
 ELSE
 BEGIN
     PRINT N'Table exists: [reading].[ArticleReadModelMedia]';
+END
+GO
+
+/*
+  Media attachment projection can arrive before Content article projection.
+  Therefore ArticleReadModelMedia intentionally does not require a parent
+  ArticleReadModel row.
+*/
+IF OBJECT_ID(N'[reading].[FK_ArticleReadModelMedia_ArticleReadModel]', N'F') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModelMedia]
+        DROP CONSTRAINT [FK_ArticleReadModelMedia_ArticleReadModel];
+
+    PRINT N'Dropped FK to allow media projection before article publication: [FK_ArticleReadModelMedia_ArticleReadModel]';
+END
+GO
+
+/* =========================================================
+   4) [reading].[ArticleMediaProjectionState]
+   ========================================================= */
+IF OBJECT_ID(N'[reading].[ArticleMediaProjectionState]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [reading].[ArticleMediaProjectionState]
+    (
+        [ArticleId]                 BIGINT               NOT NULL,
+
+        [SourceVersion]             BIGINT               NOT NULL
+            CONSTRAINT [DF_ArticleMediaProjectionState_SourceVersion] DEFAULT (0),
+
+        [LastEventMessageId]        CHAR(26)             NULL,
+        [LastSourceOccurredAtUtc]   DATETIME2(3)         NULL,
+
+        [LastSyncedAtUtc]           DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_ArticleMediaProjectionState_LastSyncedAtUtc] DEFAULT (SYSUTCDATETIME()),
+
+        CONSTRAINT [PK_ArticleMediaProjectionState]
+            PRIMARY KEY CLUSTERED ([ArticleId] ASC),
+
+        CONSTRAINT [CK_ArticleMediaProjectionState_ArticleId_Positive]
+            CHECK ([ArticleId] > 0),
+
+        CONSTRAINT [CK_ArticleMediaProjectionState_SourceVersion_NonNegative]
+            CHECK ([SourceVersion] >= 0),
+
+        CONSTRAINT [CK_ArticleMediaProjectionState_LastEventMessageId_Length]
+            CHECK ([LastEventMessageId] IS NULL OR LEN([LastEventMessageId]) = 26)
+    );
+
+    PRINT N'Created table: [reading].[ArticleMediaProjectionState]';
+END
+ELSE
+BEGIN
+    PRINT N'Table exists: [reading].[ArticleMediaProjectionState]';
 END
 GO
