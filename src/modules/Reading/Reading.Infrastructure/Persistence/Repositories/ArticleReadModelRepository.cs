@@ -18,6 +18,10 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
     private const string SelectRelatedProc = "[reading].[Reading_ArticleReadModel_SelectRelated]";
     private const string UpsertFromContentProc = "[reading].[Reading_ArticleReadModel_UpsertFromContent]";
     private const string MarkNotPublicProc = "[reading].[Reading_ArticleReadModel_MarkNotPublic]";
+    private const string UpsertMediaAttachmentProc = "[reading].[Reading_ArticleReadModelMedia_UpsertFromMediaAttachment]";
+    private const string SetPrimaryMediaProc = "[reading].[Reading_ArticleReadModelMedia_SetPrimaryFromMedia]";
+    private const string ReorderMediaProc = "[reading].[Reading_ArticleReadModelMedia_ReorderFromMedia]";
+    private const string DetachMediaProc = "[reading].[Reading_ArticleReadModelMedia_DetachFromMedia]";
 
     private readonly ReadingUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
@@ -114,6 +118,9 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
         try
         {
+            int page = query.Page < 1 ? 1 : query.Page;
+            int pageSize = NormalizePageSize(query.PageSize);
+
             (SqlCommand command, SqlConnection? connection) =
                 await CreateReadCommandAsync(SelectSkipAndTakeProc, cancellationToken);
 
@@ -142,8 +149,8 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 return new PagedReadingResult<ArticleListItemResult>
                 {
                     Items = items,
-                    Page = query.Page,
-                    PageSize = query.PageSize,
+                    Page = page,
+                    PageSize = pageSize,
                     TotalItems = totalItems
                 };
             }
@@ -323,11 +330,11 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = commandModel.Title
                 },
-                new SqlParameter("@Summary", SqlDbType.NVarChar, 2000)
+                new SqlParameter("@Summary", SqlDbType.NVarChar, 1000)
                 {
                     Value = commandModel.Summary
                 },
-                new SqlParameter("@Body", SqlDbType.NVarChar)
+                new SqlParameter("@Body", SqlDbType.NVarChar, -1)
                 {
                     Value = commandModel.Body
                 },
@@ -351,7 +358,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = ToDbValue(commandModel.CoverMediaId)
                 },
-                new SqlParameter("@Status", SqlDbType.VarChar, 30)
+                new SqlParameter("@Status", SqlDbType.NVarChar, 30)
                 {
                     Value = commandModel.Status
                 },
@@ -359,14 +366,8 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = commandModel.IsPublic
                 },
-                new SqlParameter("@PublishedAtUtc", SqlDbType.DateTime2)
-                {
-                    Value = ToDbValue(commandModel.PublishedAtUtc)
-                },
-                new SqlParameter("@UpdatedAtUtc", SqlDbType.DateTime2)
-                {
-                    Value = commandModel.UpdatedAtUtc
-                },
+                CreateDateTime2Parameter("@PublishedAtUtc", commandModel.PublishedAtUtc),
+                CreateDateTime2Parameter("@UpdatedAtUtc", commandModel.UpdatedAtUtc),
                 new SqlParameter("@SourceVersion", SqlDbType.BigInt)
                 {
                     Value = commandModel.SourceVersion
@@ -375,10 +376,9 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = ToDbValue(commandModel.MessageId)
                 },
-                new SqlParameter("@SourceOccurredAtUtc", SqlDbType.DateTime2)
-                {
-                    Value = ToDbValue(commandModel.SourceOccurredAtUtc)
-                }
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
             ]);
 
             using SqlDataReader reader =
@@ -411,7 +411,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = commandModel.ArticleId
                 },
-                new SqlParameter("@Status", SqlDbType.VarChar, 30)
+                new SqlParameter("@Status", SqlDbType.NVarChar, 30)
                 {
                     Value = commandModel.Status
                 },
@@ -423,14 +423,167 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = ToDbValue(commandModel.MessageId)
                 },
-                new SqlParameter("@SourceOccurredAtUtc", SqlDbType.DateTime2)
-                {
-                    Value = ToDbValue(commandModel.SourceOccurredAtUtc)
-                }
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
             ]);
 
             using SqlDataReader reader =
                 await command.ExecuteReaderAsync(cancellationToken);
+
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
+    public async Task<ArticleProjectionApplyResult> UpsertMediaAttachmentAsync(
+        UpsertArticleMediaProjectionCommand commandModel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandModel);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(UpsertMediaAttachmentProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = commandModel.ArticleId },
+                new SqlParameter("@MediaId", SqlDbType.BigInt) { Value = commandModel.MediaId },
+                new SqlParameter("@MediaPublicId", SqlDbType.Char, 26) { Value = commandModel.MediaPublicId },
+                new SqlParameter("@Url", SqlDbType.NVarChar, 1000) { Value = commandModel.Url },
+                new SqlParameter("@Alt", SqlDbType.NVarChar, 300) { Value = ToDbValue(commandModel.Alt) },
+                new SqlParameter("@Caption", SqlDbType.NVarChar, 300) { Value = ToDbValue(commandModel.Caption) },
+                new SqlParameter("@MediaType", SqlDbType.NVarChar, 50) { Value = commandModel.MediaType },
+                new SqlParameter("@SortOrder", SqlDbType.Int) { Value = commandModel.SortOrder },
+                new SqlParameter("@IsPrimary", SqlDbType.Bit) { Value = commandModel.IsPrimary },
+                new SqlParameter("@SourceVersion", SqlDbType.BigInt) { Value = commandModel.SourceVersion },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26) { Value = ToDbValue(commandModel.MessageId) },
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
+    public async Task<ArticleProjectionApplyResult> SetPrimaryMediaAsync(
+        SetPrimaryArticleMediaProjectionCommand commandModel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandModel);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(SetPrimaryMediaProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = commandModel.ArticleId },
+                new SqlParameter("@MediaId", SqlDbType.BigInt) { Value = commandModel.MediaId },
+                new SqlParameter("@MediaPublicId", SqlDbType.Char, 26) { Value = commandModel.MediaPublicId },
+                new SqlParameter("@Url", SqlDbType.NVarChar, 1000) { Value = commandModel.Url },
+                new SqlParameter("@Alt", SqlDbType.NVarChar, 300) { Value = ToDbValue(commandModel.Alt) },
+                new SqlParameter("@Caption", SqlDbType.NVarChar, 300) { Value = ToDbValue(commandModel.Caption) },
+                new SqlParameter("@MediaType", SqlDbType.NVarChar, 50) { Value = commandModel.MediaType },
+                new SqlParameter("@SortOrder", SqlDbType.Int) { Value = commandModel.SortOrder },
+                new SqlParameter("@SourceVersion", SqlDbType.BigInt) { Value = commandModel.SourceVersion },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26) { Value = ToDbValue(commandModel.MessageId) },
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
+    public async Task<ArticleProjectionApplyResult> ReorderMediaAsync(
+        ReorderArticleMediaProjectionCommand commandModel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandModel);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(ReorderMediaProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = commandModel.ArticleId },
+                new SqlParameter("@Orders", SqlDbType.Structured)
+                {
+                    TypeName = "reading.ArticleMediaOrderListType",
+                    Value = BuildArticleMediaOrderDataTable(commandModel.Items)
+                },
+                new SqlParameter("@SourceVersion", SqlDbType.BigInt) { Value = commandModel.SourceVersion },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26) { Value = ToDbValue(commandModel.MessageId) },
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
+    public async Task<ArticleProjectionApplyResult> DetachMediaAsync(
+        DetachArticleMediaProjectionCommand commandModel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandModel);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(DetachMediaProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticleId", SqlDbType.BigInt) { Value = commandModel.ArticleId },
+                new SqlParameter("@MediaId", SqlDbType.BigInt) { Value = commandModel.MediaId },
+                new SqlParameter("@PrimaryCleared", SqlDbType.Bit) { Value = commandModel.PrimaryCleared },
+                new SqlParameter("@SourceVersion", SqlDbType.BigInt) { Value = commandModel.SourceVersion },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26) { Value = ToDbValue(commandModel.MessageId) },
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
+            ]);
+
+            using SqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
             return await ReadProjectionApplyResultAsync(
                 reader,
@@ -486,6 +639,12 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
     private SqlCommand CreateTransactionalCommand(string storedProcedureName)
     {
+        if (!_unitOfWork.HasActiveTransaction)
+        {
+            throw new InvalidOperationException(
+                "Reading projection mutation must execute inside an active transaction.");
+        }
+
         SqlCommand command = _unitOfWork.Connection.CreateCommand();
         command.Transaction = _unitOfWork.Transaction;
         command.CommandText = storedProcedureName;
@@ -601,8 +760,10 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         return new ArticleMediaResult
         {
             MediaId = reader.GetInt64(reader.GetOrdinal("MediaId")),
+            MediaPublicId = reader.GetString(reader.GetOrdinal("MediaPublicId")),
             Url = reader.GetString(reader.GetOrdinal("Url")),
             Alt = GetNullableString(reader, "Alt"),
+            Caption = GetNullableString(reader, "Caption"),
             MediaType = reader.GetString(reader.GetOrdinal("MediaType")),
             IsPrimary = reader.GetBoolean(reader.GetOrdinal("IsPrimary")),
             SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder"))
@@ -646,6 +807,32 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
     }
 
     private static object ToDbValue(object? value) => value ?? DBNull.Value;
+
+    private static SqlParameter CreateDateTime2Parameter(
+        string parameterName,
+        DateTime? value)
+    {
+        return new SqlParameter(parameterName, SqlDbType.DateTime2)
+        {
+            Scale = 3,
+            Value = ToDbValue(value)
+        };
+    }
+
+    private static DataTable BuildArticleMediaOrderDataTable(
+        IReadOnlyCollection<ArticleMediaProjectionOrderItem> items)
+    {
+        DataTable table = new();
+        table.Columns.Add("MediaId", typeof(long));
+        table.Columns.Add("SortOrder", typeof(int));
+
+        foreach (ArticleMediaProjectionOrderItem item in items)
+        {
+            table.Rows.Add(item.MediaId, item.SortOrder);
+        }
+
+        return table;
+    }
 
     private static async Task<ArticleProjectionApplyResult> ReadProjectionApplyResultAsync(
         SqlDataReader reader,

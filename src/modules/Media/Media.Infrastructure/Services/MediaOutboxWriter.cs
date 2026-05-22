@@ -42,6 +42,7 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
         int? width,
         int? height,
         int? durationSeconds,
+        string? altText,
         long actorUserId,
         long version,
         DateTime registeredAtUtc,
@@ -81,6 +82,7 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
             Width: width,
             Height: height,
             DurationSeconds: durationSeconds,
+            AltText: NormalizeOptional(altText),
             ActorUserId: actorUserId,
             Version: version,
             RegisteredAtUtc: registeredAtUtc,
@@ -269,7 +271,14 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
         IMediaUnitOfWork unitOfWork,
         long articleId,
         long mediaId,
+        string mediaPublicId,
         long? articleMediaId,
+        string url,
+        string mediaType,
+        string? altText,
+        string? altTextOverride,
+        string? caption,
+        int sortOrder,
         bool isPrimary,
         bool primaryChanged,
         long actorUserId,
@@ -287,6 +296,15 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
             attachmentSetVersion,
             attachedAtUtc);
 
+        ValidateRequired(mediaPublicId, nameof(mediaPublicId));
+        ValidateRequired(url, nameof(url));
+        ValidateRequired(mediaType, nameof(mediaType));
+        ValidateNonNegative(sortOrder, nameof(sortOrder));
+
+        string normalizedMediaPublicId = mediaPublicId.Trim();
+        string? normalizedAltText = NormalizeOptional(altText);
+        string? normalizedAltTextOverride = NormalizeOptional(altTextOverride);
+
         string businessDedupeKey = BuildArticleMediaSetBusinessDedupeKey(
             articleId,
             mediaId,
@@ -296,7 +314,15 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
         var payload = new ArticleMediaAttachedIntegrationEventPayload(
             ArticleId: articleId,
             MediaId: mediaId,
+            MediaPublicId: normalizedMediaPublicId,
             ArticleMediaId: articleMediaId,
+            Url: url.Trim(),
+            MediaType: mediaType.Trim(),
+            AltText: normalizedAltText,
+            AltTextOverride: normalizedAltTextOverride,
+            EffectiveAltText: normalizedAltTextOverride ?? normalizedAltText,
+            Caption: NormalizeOptional(caption),
+            SortOrder: sortOrder,
             IsPrimary: isPrimary,
             PrimaryChanged: primaryChanged,
             ActorUserId: actorUserId,
@@ -427,6 +453,13 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
         IMediaUnitOfWork unitOfWork,
         long articleId,
         long mediaId,
+        string mediaPublicId,
+        string url,
+        string mediaType,
+        string? altText,
+        string? altTextOverride,
+        string? caption,
+        int sortOrder,
         long actorUserId,
         long attachmentSetVersion,
         DateTime primarySetAtUtc,
@@ -442,6 +475,15 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
             attachmentSetVersion,
             primarySetAtUtc);
 
+        ValidateRequired(mediaPublicId, nameof(mediaPublicId));
+        ValidateRequired(url, nameof(url));
+        ValidateRequired(mediaType, nameof(mediaType));
+        ValidateNonNegative(sortOrder, nameof(sortOrder));
+
+        string normalizedMediaPublicId = mediaPublicId.Trim();
+        string? normalizedAltText = NormalizeOptional(altText);
+        string? normalizedAltTextOverride = NormalizeOptional(altTextOverride);
+
         string businessDedupeKey = BuildArticleMediaSetBusinessDedupeKey(
             articleId,
             mediaId,
@@ -451,6 +493,14 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
         var payload = new ArticlePrimaryMediaSetIntegrationEventPayload(
             ArticleId: articleId,
             MediaId: mediaId,
+            MediaPublicId: normalizedMediaPublicId,
+            Url: url.Trim(),
+            MediaType: mediaType.Trim(),
+            AltText: normalizedAltText,
+            AltTextOverride: normalizedAltTextOverride,
+            EffectiveAltText: normalizedAltTextOverride ?? normalizedAltText,
+            Caption: NormalizeOptional(caption),
+            SortOrder: sortOrder,
             ActorUserId: actorUserId,
             AttachmentSetVersion: attachmentSetVersion,
             PrimarySetAtUtc: primarySetAtUtc,
@@ -593,6 +643,14 @@ public sealed class MediaOutboxWriter : IMediaOutboxWriter
             throw new ArgumentException(
                 $"{parameterName} is required.",
                 parameterName);
+        }
+    }
+
+    private static void ValidateNonNegative(int value, string parameterName)
+    {
+        if (value < 0)
+        {
+            throw new ArgumentOutOfRangeException(parameterName);
         }
     }
 

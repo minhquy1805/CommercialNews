@@ -172,8 +172,10 @@ public sealed class GetArticleBySlugUseCase : IGetArticleBySlugUseCase
         return new ArticleMediaResponse
         {
             MediaId = media.MediaId,
+            MediaPublicId = media.MediaPublicId,
             Url = media.Url,
             Alt = media.Alt,
+            Caption = media.Caption,
             MediaType = media.MediaType,
             IsPrimary = media.IsPrimary,
             SortOrder = media.SortOrder

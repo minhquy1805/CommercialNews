@@ -5,6 +5,7 @@ public sealed record ArticleUpdatedIntegrationEventPayload(
     string ArticlePublicId,
     string Status,
     long CategoryId,
+    string? CategoryName,
     long AuthorUserId,
     long ActorUserId,
     long RevisionId,

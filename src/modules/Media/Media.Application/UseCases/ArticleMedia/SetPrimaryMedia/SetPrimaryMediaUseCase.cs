@@ -106,10 +106,30 @@ public sealed class SetPrimaryMediaUseCase : ISetPrimaryMediaUseCase
 
                 if (setPrimaryResult.AffectedRows > 0)
                 {
+                    ArticleMediaListResultItem? primaryMedia =
+                        await _articleMediaRepository.GetPrimaryByArticleIdAsync(
+                            request.ArticleId,
+                            cancellationToken);
+
+                    if (primaryMedia is null || primaryMedia.MediaId != request.MediaId)
+                    {
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<SetPrimaryMediaResponse>.Failure(
+                            MediaErrors.PersistenceError);
+                    }
+
                     await _mediaOutboxWriter.EnqueueArticlePrimaryMediaSetAsync(
                         unitOfWork: _unitOfWork,
                         articleId: request.ArticleId,
                         mediaId: request.MediaId,
+                        mediaPublicId: primaryMedia.PublicId,
+                        url: primaryMedia.Url,
+                        mediaType: primaryMedia.MediaType,
+                        altText: primaryMedia.DefaultAltText,
+                        altTextOverride: primaryMedia.AltTextOverride,
+                        caption: primaryMedia.Caption,
+                        sortOrder: primaryMedia.SortOrder,
                         actorUserId: actorUserId.Value,
                         attachmentSetVersion: attachmentSetVersion,
                         primarySetAtUtc: nowUtc,

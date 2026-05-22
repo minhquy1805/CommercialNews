@@ -35,6 +35,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         long articleId,
         string articlePublicId,
         long categoryId,
+        string? categoryName,
         long authorUserId,
         long createdByUserId,
         string status,
@@ -68,6 +69,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string? normalizedSummary = NormalizeOptional(summary);
         string? normalizedBody = NormalizeOptional(body);
         string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
+        string? normalizedCategoryName = NormalizeOptional(categoryName);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
             normalizedArticlePublicId,
@@ -78,6 +80,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             ArticleId: articleId,
             ArticlePublicId: normalizedArticlePublicId,
             CategoryId: categoryId,
+            CategoryName: normalizedCategoryName,
             AuthorUserId: authorUserId,
             CreatedByUserId: createdByUserId,
             Status: status.Trim(),
@@ -114,6 +117,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string articlePublicId,
         string status,
         long categoryId,
+        string? categoryName,
         long authorUserId,
         long actorUserId,
         long revisionId,
@@ -149,6 +153,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string? normalizedSummary = NormalizeOptional(summary);
         string? normalizedBody = NormalizeOptional(body);
         string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
+        string? normalizedCategoryName = NormalizeOptional(categoryName);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
             normalizedArticlePublicId,
@@ -160,6 +165,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             ArticlePublicId: normalizedArticlePublicId,
             Status: status.Trim(),
             CategoryId: categoryId,
+            CategoryName: normalizedCategoryName,
             AuthorUserId: authorUserId,
             ActorUserId: actorUserId,
             RevisionId: revisionId,
@@ -198,6 +204,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string fromStatus,
         string toStatus,
         long categoryId,
+        string? categoryName,
         long authorUserId,
         string? slug,
         string? canonicalUrl,
@@ -236,6 +243,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string? normalizedSummary = NormalizeOptional(summary);
         string? normalizedBody = NormalizeOptional(body);
         string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
+        string? normalizedCategoryName = NormalizeOptional(categoryName);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
             normalizedArticlePublicId,
@@ -248,6 +256,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             FromStatus: fromStatus.Trim(),
             ToStatus: toStatus.Trim(),
             CategoryId: categoryId,
+            CategoryName: normalizedCategoryName,
             AuthorUserId: authorUserId,
             Slug: normalizedSlug,
             CanonicalUrl: normalizedCanonicalUrl,
