@@ -4,7 +4,8 @@ Base path (Public): `/api/v1`
 
 > These endpoints are public-facing and must prioritize read-path performance and availability.
 > They must not block on interaction, telemetry, cache-refresh, or rebuild/reconciliation pipelines.
-> Public read success is defined by **truth-safe response composition**, not by completion of non-critical enrichments.
+> Public read success is defined by **source-derived visibility and safe response composition**, not by completion of non-critical enrichments.
+> If public visibility is uncertain, the endpoint must fail closed.
 
 ---
 
@@ -20,7 +21,6 @@ Public list endpoint with paging, filter, and sort.
 * `pageSize` (default `20`, max enforced)
 * `categoryId` (optional)
 * `tagId` (optional)
-* `q` (optional; basic keyword search in V1)
 * `sort` (optional allowlist):
 
   * `-publishedAt` (default)
@@ -34,7 +34,7 @@ Public list endpoint with paging, filter, and sort.
 {
   "items": [
     {
-      "articleId": "string",
+      "articlePublicId": "string",
       "title": "string",
       "summary": "string",
       "slug": "string",
@@ -65,24 +65,26 @@ Public list endpoint with paging, filter, and sort.
 
 **Rules**
 
-* Only Published content.
+* Only publicly visible content may be returned.
+* Public visibility requires source status `Published` and projection `IsPublic = true`.
+* Archived, soft-deleted, unpublished, or visibility-uncertain content must not be returned.
 * Counters, related ranking signals, and other enrichments may be missing or stale; must degrade gracefully.
-* Cache/projection presence must not bypass truth-backed visibility rules.
-* If a derived listing source is stale or unavailable, Reading must fall back to truth-backed composition where policy requires.
+* Projection visibility must be derived from source truth and fail closed when uncertain.
+* If a derived listing source is stale or unavailable, Reading may fall back to source-truth composition only where policy explicitly requires.
 
 ---
 
 ## 2) Article detail
 
-### GET `/articles/{articleId}`
+### GET `/articles/{articlePublicId}`
 
-Get public article detail by ID.
+Get public article detail by public ID.
 
 **Response (200)**
 
 ```json
 {
-  "articleId": "string",
+  "articlePublicId": "string",
   "title": "string",
   "body": "string",
   "summary": "string",
@@ -91,6 +93,11 @@ Get public article detail by ID.
   "category": {
     "categoryId": "string",
     "name": "string"
+  },
+  "cover": {
+    "mediaId": "string",
+    "url": "string",
+    "alt": "string"
   },
   "tags": [
     {
@@ -108,7 +115,7 @@ Get public article detail by ID.
     }
   ],
   "seo": {
-    "canonicalUrl": "/articles/slug",
+    "canonicalUrl": "/articles/example-slug",
     "metaTitle": "string",
     "metaDescription": "string"
   },
@@ -121,32 +128,36 @@ Get public article detail by ID.
 
 **Rules**
 
-* Only Published content.
+* Only publicly visible content may be returned.
+* Public visibility requires source status `Published` and projection `IsPublic = true`.
+* Archived, soft-deleted, unpublished, or visibility-uncertain content must not be returned.
 * If media, SEO, or counters are unavailable, return a valid response with fallbacks.
-* Public detail correctness is determined by truth-backed visibility, not by freshness of enrichments.
+* `cover` is the denormalized primary media shortcut; `media` is the ordered gallery/assets collection and may include an item with `isPrimary = true`.
+* Public detail correctness is determined by source-derived projection visibility, not by freshness of enrichments.
 * Missing enrichments should be omitted or defaulted safely rather than causing incorrect `404` or content exposure.
 
-### GET `/articles/slug/{slug}` (optional)
+### GET `/articles/slug/{slug}`
 
-Alternative convenience endpoint if clients prefer direct slug routing without calling SEO explicitly.
+This endpoint is included in V1 as the preferred public article detail route for website clients.
 
 **Response (200)**
 
-Same as `GET /articles/{articleId}`.
+Same as `GET /articles/{articlePublicId}`.
 
 **Rules**
 
-* Internally must use SEO `/resolve` first; do not couple slug routing to heavy reads.
-* SEO route resolution is not sufficient by itself; Reading must still validate Content truth before returning content.
+* In the normal public path, Reading may resolve slug from its projected read model.
+* SEO remains the source of truth for slug generation and canonical routing rules.
+* If projection freshness is uncertain or redirect/canonical behavior is needed, the system may fall back to SEO `/resolve` according to policy.
+* SEO route resolution is not sufficient by itself; Reading must still require source-derived public visibility before returning content.
 * Safe `404` for non-existent or non-public slugs.
 * A successful route resolution does not guarantee the article is still publicly visible.
-* If you prefer a single canonical route, you may omit this endpoint and let the client call SEO resolve.
 
 ---
 
 ## 3) Related articles
 
-### GET `/articles/{articleId}/related`
+### GET `/articles/{articlePublicId}/related`
 
 Return related articles deterministically.
 
@@ -161,7 +172,9 @@ Standard list envelope or fixed array; choose one and keep consistent (recommend
 **Rules**
 
 * Deterministic: prioritize same category, then shared tags, then fallback to recent published.
-* Only Published content.
+* Only publicly visible content may be returned.
+* Public visibility requires source status `Published` and projection `IsPublic = true`.
+* Archived, soft-deleted, unpublished, or visibility-uncertain content must not be returned.
 * Related-content enrichments may be eventually consistent; safe fallback must remain deterministic.
 * Missing or stale related-content signals must not block the core detail response path.
 
@@ -169,7 +182,7 @@ Standard list envelope or fixed array; choose one and keep consistent (recommend
 
 ## 4) Search (V1 basic)
 
-### GET `/search`
+### GET `/articles/search`
 
 Basic keyword search (V1 scope-dependent).
 
@@ -186,7 +199,9 @@ Same list envelope as `/articles`.
 
 **Rules**
 
-* Search results must still obey truth-backed publication visibility.
+* Only publicly visible content may be returned.
+* Public visibility requires source status `Published` and projection `IsPublic = true`.
+* Archived, soft-deleted, unpublished, or visibility-uncertain content must not be returned.
 * Search/materialized query outputs, if introduced, remain derived and may lag.
 * Safe fallback or safe omission is preferred over exposing non-public content due to stale search state.
 
@@ -194,12 +209,12 @@ Same list envelope as `/articles`.
 
 ## 5) View tracking (non-blocking signal)
 
-Reading itself should not expose interaction write endpoints, but in V1 you may send a non-blocking signal.
+Reading itself does not expose interaction write endpoints in V1.
 
-Two options:
+Preferred V1 decision:
 
-* **Option A (preferred):** client calls Interaction endpoint `POST /api/v1/articles/{id}/views`
-* **Option B:** Reading triggers an async view signal internally (still must be non-blocking)
+* Clients should call Interaction endpoint `POST /api/v1/articles/{articlePublicId}/views` after successful article rendering.
+* Reading-triggered internal view signals are deferred beyond V1 unless a later policy explicitly adopts them.
 
 **Rules**
 
@@ -214,5 +229,6 @@ Two options:
 
 * All endpoints are under `/api/v1`.
 * List response envelope and error model follow system standards.
-* Public read routes may consume derived inputs, but visibility decisions remain truth-backed.
-* Cache hit, route hit, or projection hit must not be treated as final authority for readability.
+* Static routes such as `/articles/search` and `/articles/slug/{slug}` must be registered before dynamic `/articles/{articlePublicId}` routes, or route constraints must be used.
+* Public read routes normally consume Reading projections, with visibility derived from source truth.
+* Cache hit, route hit, or projection hit must fail closed when public readability is uncertain.

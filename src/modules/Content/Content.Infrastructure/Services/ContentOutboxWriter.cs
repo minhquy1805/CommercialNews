@@ -42,6 +42,8 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string? canonicalUrl,
         string? title,
         string? summary,
+        string? body,
+        long? coverMediaId,
         string? coverImageUrl,
         IReadOnlyCollection<long> tagIds,
         long version,
@@ -57,12 +59,14 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         ValidatePositiveId(authorUserId, nameof(authorUserId));
         ValidatePositiveId(createdByUserId, nameof(createdByUserId));
         ValidateRequired(status, nameof(status));
+        ValidateOptionalPositiveId(coverMediaId, nameof(coverMediaId));
 
         string normalizedArticlePublicId = articlePublicId.Trim();
         string? normalizedSlug = NormalizeOptional(slug);
         string? normalizedCanonicalUrl = NormalizeOptional(canonicalUrl);
         string? normalizedTitle = NormalizeOptional(title);
         string? normalizedSummary = NormalizeOptional(summary);
+        string? normalizedBody = NormalizeOptional(body);
         string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
@@ -81,6 +85,8 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             CanonicalUrl: normalizedCanonicalUrl,
             Title: normalizedTitle,
             Summary: normalizedSummary,
+            Body: normalizedBody,
+            CoverMediaId: coverMediaId,
             CoverImageUrl: normalizedCoverImageUrl,
             TagIds: tagIds.ToArray(),
             Version: version,
@@ -108,6 +114,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string articlePublicId,
         string status,
         long categoryId,
+        long authorUserId,
         long actorUserId,
         long revisionId,
         string? changeSummary,
@@ -115,6 +122,8 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string? canonicalUrl,
         string? title,
         string? summary,
+        string? body,
+        long? coverMediaId,
         string? coverImageUrl,
         IReadOnlyCollection<long> tagIds,
         long version,
@@ -128,14 +137,17 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         ValidateArticleEnvelope(articleId, articlePublicId, version, updatedAtUtc);
         ValidateRequired(status, nameof(status));
         ValidatePositiveId(categoryId, nameof(categoryId));
+        ValidatePositiveId(authorUserId, nameof(authorUserId));
         ValidatePositiveId(actorUserId, nameof(actorUserId));
         ValidatePositiveId(revisionId, nameof(revisionId));
+        ValidateOptionalPositiveId(coverMediaId, nameof(coverMediaId));
 
         string normalizedArticlePublicId = articlePublicId.Trim();
         string? normalizedSlug = NormalizeOptional(slug);
         string? normalizedCanonicalUrl = NormalizeOptional(canonicalUrl);
         string? normalizedTitle = NormalizeOptional(title);
         string? normalizedSummary = NormalizeOptional(summary);
+        string? normalizedBody = NormalizeOptional(body);
         string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
@@ -148,6 +160,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             ArticlePublicId: normalizedArticlePublicId,
             Status: status.Trim(),
             CategoryId: categoryId,
+            AuthorUserId: authorUserId,
             ActorUserId: actorUserId,
             RevisionId: revisionId,
             ChangeSummary: NormalizeOptional(changeSummary),
@@ -155,6 +168,8 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             CanonicalUrl: normalizedCanonicalUrl,
             Title: normalizedTitle,
             Summary: normalizedSummary,
+            Body: normalizedBody,
+            CoverMediaId: coverMediaId,
             CoverImageUrl: normalizedCoverImageUrl,
             TagIds: tagIds.ToArray(),
             Version: version,
@@ -182,11 +197,16 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         string articlePublicId,
         string fromStatus,
         string toStatus,
+        long categoryId,
+        long authorUserId,
         string? slug,
         string? canonicalUrl,
         string? title,
         string? summary,
+        string? body,
+        long? coverMediaId,
         string? coverImageUrl,
+        IReadOnlyCollection<long> tagIds,
         long actorUserId,
         long version,
         DateTime publishedAtUtc,
@@ -194,6 +214,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
+        ArgumentNullException.ThrowIfNull(tagIds);
 
         ValidateArticleLifecycleEnvelope(
             articleId,
@@ -204,11 +225,16 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             version,
             publishedAtUtc);
 
+        ValidatePositiveId(categoryId, nameof(categoryId));
+        ValidatePositiveId(authorUserId, nameof(authorUserId));
+        ValidateOptionalPositiveId(coverMediaId, nameof(coverMediaId));
+
         string normalizedArticlePublicId = articlePublicId.Trim();
         string? normalizedSlug = NormalizeOptional(slug);
         string? normalizedCanonicalUrl = NormalizeOptional(canonicalUrl);
         string? normalizedTitle = NormalizeOptional(title);
         string? normalizedSummary = NormalizeOptional(summary);
+        string? normalizedBody = NormalizeOptional(body);
         string? normalizedCoverImageUrl = NormalizeOptional(coverImageUrl);
 
         string businessDedupeKey = BuildArticleBusinessDedupeKey(
@@ -221,11 +247,16 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             ArticlePublicId: normalizedArticlePublicId,
             FromStatus: fromStatus.Trim(),
             ToStatus: toStatus.Trim(),
+            CategoryId: categoryId,
+            AuthorUserId: authorUserId,
             Slug: normalizedSlug,
             CanonicalUrl: normalizedCanonicalUrl,
             Title: normalizedTitle,
             Summary: normalizedSummary,
+            Body: normalizedBody,
+            CoverMediaId: coverMediaId,
             CoverImageUrl: normalizedCoverImageUrl,
+            TagIds: tagIds.ToArray(),
             ActorUserId: actorUserId,
             Version: version,
             PublishedAtUtc: publishedAtUtc,
@@ -544,5 +575,15 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         return string.IsNullOrWhiteSpace(value)
             ? null
             : value.Trim();
+    }
+
+    private static void ValidateOptionalPositiveId(
+        long? value,
+        string parameterName)
+    {
+        if (value.HasValue && value.Value <= 0)
+        {
+            throw new ArgumentOutOfRangeException(parameterName);
+        }
     }
 }

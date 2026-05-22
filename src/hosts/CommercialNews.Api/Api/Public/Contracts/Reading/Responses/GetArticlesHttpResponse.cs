@@ -1,10 +1,14 @@
-using CommercialNews.BuildingBlocks.SharedKernel.Paging;
-
 namespace CommercialNews.Api.Api.Public.Contracts.Reading.Responses;
 
 public sealed class GetArticlesHttpResponse
 {
-    public IReadOnlyList<ArticleListItemHttpResponse> Items { get; init; } = Array.Empty<ArticleListItemHttpResponse>();
+    public IReadOnlyList<ArticleListItemHttpResponse> Items { get; init; } = [];
 
-    public PageInfo PageInfo { get; init; } = new();
+    public int Page { get; init; }
+
+    public int PageSize { get; init; }
+
+    public long TotalItems { get; init; }
+
+    public int TotalPages { get; init; }
 }

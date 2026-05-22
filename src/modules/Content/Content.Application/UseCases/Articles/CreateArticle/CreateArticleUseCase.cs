@@ -158,6 +158,8 @@ public sealed class CreateArticleUseCase : ICreateArticleUseCase
                     canonicalUrl: null,
                     title: article.Title,
                     summary: article.Summary,
+                    body: article.Body,
+                    coverMediaId: article.CoverMediaId,
                     coverImageUrl: null,
                     tagIds: distinctTagIds,
                     version: version,

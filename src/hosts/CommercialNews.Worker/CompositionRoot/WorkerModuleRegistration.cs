@@ -31,6 +31,11 @@ using Seo.Application.DependencyInjection;
 using Seo.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Outbox.Handlers.Media;
 using CommercialNews.Worker.Audit.Handlers.Media;
+using Reading.Application.DependencyInjection;
+using Reading.Infrastructure.DependencyInjection;
+using CommercialNews.Worker.Reading.Consumers;
+using CommercialNews.Worker.Reading.Handlers;
+using CommercialNews.Worker.Reading.Handlers.Content;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -56,6 +61,9 @@ public static class WorkerModuleRegistration
 
         services.AddSeoConsumerApplication();
         services.AddSeoInfrastructure();
+
+        services.AddReadingApplication();
+        services.AddReadingInfrastructure();
 
         services.AddOptions<OutboxWorkerOptions>()
             .Bind(configuration.GetSection("Workers:Outbox"));
@@ -139,7 +147,8 @@ public static class WorkerModuleRegistration
         services.Configure<SeoRabbitMqConsumerOptions>(
             configuration.GetSection(SeoRabbitMqConsumerOptions.SectionName));
 
-        services.AddHostedService<SeoRabbitMqConsumerService>();
+        services.Configure<ReadingRabbitMqConsumerOptions>(
+            configuration.GetSection(ReadingRabbitMqConsumerOptions.SectionName));
 
         services.AddScoped<AuditIntegrationEventDispatcher>();
 
@@ -195,6 +204,14 @@ public static class WorkerModuleRegistration
         services.AddScoped<ISeoIntegrationEventHandler, ContentArticleArchivedSeoHandler>();
         services.AddScoped<ISeoIntegrationEventHandler, ContentArticleSoftDeletedSeoHandler>();
 
+        services.AddScoped<ReadingIntegrationEventDispatcher>();
+
+        services.AddScoped<IReadingIntegrationEventHandler, ContentArticlePublishedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, ContentArticleUpdatedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, ContentArticleUnpublishedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, ContentArticleArchivedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, ContentArticleSoftDeletedReadingHandler>();
+
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));
 
@@ -202,6 +219,8 @@ public static class WorkerModuleRegistration
         services.AddHostedService<AuthorizationRabbitMqConsumerService>();
         services.AddHostedService<NotificationsRabbitMqConsumerService>();
         services.AddHostedService<AuditRabbitMqConsumerService>();
+        services.AddHostedService<SeoRabbitMqConsumerService>();
+        services.AddHostedService<ReadingRabbitMqConsumerService>();
         services.AddHostedService<EmailDeliveryProcessingWorker>();
 
         return services;

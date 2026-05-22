@@ -12,7 +12,7 @@
       - cn_worker_rw
       - cn_migration_ddl
       - cn_readonly
-  - Reading may own stored procedures in V1 even if it does not own physical tables.
+  - Reading owns derived projection tables and stored procedures in V1.
   - Outbox is a shared producer-side publication schema used by API and Worker flows.
 */
 
@@ -157,6 +157,7 @@ GRANT SELECT ON SCHEMA::[seo] TO [cn_worker_rw];
 GRANT SELECT ON SCHEMA::[media] TO [cn_worker_rw];
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[interaction] TO [cn_worker_rw];
+GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[reading] TO [cn_worker_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[audit] TO [cn_worker_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[notifications] TO [cn_worker_rw];
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::[outbox] TO [cn_worker_rw];
@@ -167,6 +168,7 @@ GRANT EXECUTE ON SCHEMA::[content] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[seo] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[media] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[interaction] TO [cn_worker_rw];
+GRANT EXECUTE ON SCHEMA::[reading] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[audit] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[notifications] TO [cn_worker_rw];
 GRANT EXECUTE ON SCHEMA::[outbox] TO [cn_worker_rw];
@@ -181,6 +183,7 @@ GRANT SELECT ON SCHEMA::[content] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[seo] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[media] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[interaction] TO [cn_readonly];
+GRANT SELECT ON SCHEMA::[reading] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[audit] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[notifications] TO [cn_readonly];
 GRANT SELECT ON SCHEMA::[outbox] TO [cn_readonly];

@@ -1,0 +1,78 @@
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using Reading.Application.Errors;
+using Reading.Application.Models.Commands;
+using Reading.Application.Models.Results;
+using Reading.Application.Ports.Persistence;
+using Reading.Application.Validation.Projections;
+
+namespace Reading.Application.UseCases.Projections.MarkArticleProjectionNotPublic;
+
+public sealed class MarkArticleProjectionNotPublicUseCase
+    : IMarkArticleProjectionNotPublicUseCase
+{
+    private readonly IArticleReadModelRepository _articleReadModelRepository;
+    private readonly IReadingUnitOfWork _unitOfWork;
+
+    public MarkArticleProjectionNotPublicUseCase(
+        IArticleReadModelRepository articleReadModelRepository,
+        IReadingUnitOfWork unitOfWork)
+    {
+        _articleReadModelRepository = articleReadModelRepository;
+        _unitOfWork = unitOfWork;
+    }
+
+    public async Task<Result<ArticleProjectionApplyResult>> ExecuteAsync(
+        MarkArticleProjectionNotPublicCommand command,
+        CancellationToken cancellationToken = default)
+    {
+        Error? validationError =
+            MarkArticleProjectionNotPublicValidator.Validate(command);
+
+        if (validationError is not null)
+        {
+            return Result<ArticleProjectionApplyResult>.Failure(
+                validationError);
+        }
+
+        MarkArticleProjectionNotPublicCommand normalizedCommand =
+            MarkArticleProjectionNotPublicValidator.Normalize(command);
+
+        try
+        {
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+
+            ArticleProjectionApplyResult result =
+                await _articleReadModelRepository.MarkNotPublicAsync(
+                    normalizedCommand,
+                    cancellationToken);
+
+            await _unitOfWork.CommitAsync(cancellationToken);
+
+            return Result<ArticleProjectionApplyResult>.Success(result);
+        }
+        catch (PersistenceException exception)
+        {
+            if (_unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+
+            return Result<ArticleProjectionApplyResult>.Failure(
+                Error.Failure(
+                    code: exception.Code,
+                    message: exception.Message,
+                    exception.InnerException?.Message ?? string.Empty));
+        }
+        catch
+        {
+            if (_unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+
+            return Result<ArticleProjectionApplyResult>.Failure(
+                ReadingErrors.Projection.ProjectionApplyFailed);
+        }
+    }
+}
