@@ -1,14 +1,15 @@
 using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Seo.Application.Contracts.SeoMetadata.Requests;
 using Seo.Application.Contracts.SeoMetadata.Responses;
 using Seo.Application.Errors;
 using Seo.Application.Models.Commands;
 using Seo.Application.Models.Results;
 using Seo.Application.Ports.Persistence;
+using Seo.Application.Ports.Services;
 using Seo.Domain.Constants;
+using Seo.Domain.Entities;
 using Seo.Domain.Exceptions;
 
 namespace Seo.Application.UseCases.SeoSettings.UpsertArticleSeoSettings;
@@ -17,21 +18,21 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
 {
     private readonly ISeoMetadataRepository _seoMetadataRepository;
     private readonly ISlugRegistryRepository _slugRegistryRepository;
+    private readonly ISeoOutboxWriter _seoOutboxWriter;
     private readonly ISeoUnitOfWork _unitOfWork;
-    private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
 
     public UpsertArticleSeoSettingsUseCase(
         ISeoMetadataRepository seoMetadataRepository,
         ISlugRegistryRepository slugRegistryRepository,
+        ISeoOutboxWriter seoOutboxWriter,
         ISeoUnitOfWork unitOfWork,
-        IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext)
     {
         _seoMetadataRepository = seoMetadataRepository ?? throw new ArgumentNullException(nameof(seoMetadataRepository));
         _slugRegistryRepository = slugRegistryRepository ?? throw new ArgumentNullException(nameof(slugRegistryRepository));
+        _seoOutboxWriter = seoOutboxWriter ?? throw new ArgumentNullException(nameof(seoOutboxWriter));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
     }
 
@@ -63,33 +64,61 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
             string resourceType = SeoResourceTypes.Article;
             string resourcePublicId = articlePublicId.Trim();
 
-            long? actorUserId = request.ActorUserId ?? _requestContext.CurrentUserId;
+            long? actorUserId = _requestContext.CurrentUserId;
+
+            if (actorUserId is null or <= 0)
+            {
+                return Result<UpsertArticleSeoSettingsResponse>.Failure(
+                    SeoErrors.Actor.NotFound);
+            }
+
+            string? correlationId = _requestContext.CorrelationId;
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
+                SlugRegistry? existingRoute =
+                    await _slugRegistryRepository.GetByResourceAsync(
+                        scope: scope,
+                        resourceType: resourceType,
+                        resourcePublicId: resourcePublicId,
+                        onlyActive: null,
+                        cancellationToken: cancellationToken);
+
+                SlugRegistry? slugRoute = existingRoute;
+                SeoMetadata? metadata = null;
+                bool routeChanged = false;
+
                 if (!string.IsNullOrWhiteSpace(request.Slug))
                 {
+                    bool isRouteIndexable = request.IsActive && request.IsIndexable;
+
                     SlugRegistryUpsertCommand slugCommand = new(
                         Scope: scope,
                         Slug: request.Slug.Trim(),
                         ResourceType: resourceType,
                         ResourcePublicId: resourcePublicId,
                         CanonicalUrl: request.CanonicalUrl,
-                        IsIndexable: request.IsIndexable,
+                        IsIndexable: isRouteIndexable,
                         IsActive: request.IsActive,
                         ActorUserId: actorUserId,
                         ExpectedVersion: request.ExpectedSlugVersion);
 
-                    await _slugRegistryRepository.UpsertAsync(
+                    slugRoute = await _slugRegistryRepository.UpsertAsync(
                         slugCommand,
                         cancellationToken);
+
+                    if (slugRoute is null)
+                    {
+                        throw new InvalidOperationException(
+                            "SEO route upsert completed without returning the updated route.");
+                    }
+
+                    routeChanged = true;
                 }
 
                 bool hasMetadataPayload =
-                    !string.IsNullOrWhiteSpace(request.Slug) ||
-                    !string.IsNullOrWhiteSpace(request.CanonicalUrl) ||
                     !string.IsNullOrWhiteSpace(request.MetaTitle) ||
                     !string.IsNullOrWhiteSpace(request.MetaDescription) ||
                     !string.IsNullOrWhiteSpace(request.OgTitle) ||
@@ -106,8 +135,8 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
                         Scope: scope,
                         ResourceType: resourceType,
                         ResourcePublicId: resourcePublicId,
-                        Slug: request.Slug,
-                        CanonicalUrl: request.CanonicalUrl,
+                        Slug: slugRoute?.Slug,
+                        CanonicalUrl: slugRoute?.CanonicalUrl,
                         MetaTitle: request.MetaTitle,
                         MetaDescription: request.MetaDescription,
                         OgTitle: request.OgTitle,
@@ -121,8 +150,34 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
                         UpdatedByUserId: actorUserId,
                         ExpectedVersion: request.ExpectedSeoMetadataVersion);
 
-                    await _seoMetadataRepository.UpsertAsync(
+                    metadata = await _seoMetadataRepository.UpsertAsync(
                         metadataCommand,
+                        cancellationToken);
+
+                    if (metadata is null)
+                    {
+                        throw new InvalidOperationException(
+                            "SEO metadata upsert completed without returning the updated metadata.");
+                    }
+                }
+
+                if (routeChanged && slugRoute is not null)
+                {
+                    await EnqueueSlugRouteEventAsync(
+                        previousRoute: existingRoute,
+                        currentRoute: slugRoute,
+                        actorUserId,
+                        correlationId,
+                        cancellationToken);
+                }
+
+                if (metadata is not null)
+                {
+                    await _seoOutboxWriter.EnqueueMetadataUpdatedAsync(
+                        _unitOfWork,
+                        metadata,
+                        actorUserId,
+                        correlationId,
                         cancellationToken);
                 }
 
@@ -183,6 +238,37 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
             return Result<UpsertArticleSeoSettingsResponse>.Failure(
                 MapDomainException(exception));
         }
+    }
+
+    private async Task EnqueueSlugRouteEventAsync(
+        SlugRegistry? previousRoute,
+        SlugRegistry currentRoute,
+        long? actorUserId,
+        string? correlationId,
+        CancellationToken cancellationToken)
+    {
+        bool wasDeactivated =
+            previousRoute?.IsActive == true &&
+            currentRoute.IsActive == false;
+
+        if (wasDeactivated)
+        {
+            await _seoOutboxWriter.EnqueueSlugRouteDeactivatedAsync(
+                _unitOfWork,
+                currentRoute,
+                actorUserId,
+                correlationId,
+                cancellationToken);
+
+            return;
+        }
+
+        await _seoOutboxWriter.EnqueueSlugRouteChangedAsync(
+            _unitOfWork,
+            currentRoute,
+            actorUserId,
+            correlationId,
+            cancellationToken);
     }
 
     private static Error MapDomainException(SeoDomainException exception)
@@ -251,6 +337,9 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
 
             "SEO.INVALID_SOURCE_AGGREGATE_VERSION" => SeoErrors.Sync.InvalidSourceAggregateVersion,
             "SEO.INVALID_LAST_APPLIED_MESSAGE_ID" => SeoErrors.Sync.InvalidLastAppliedMessageId,
+
+            "SEO.ACTOR_NOT_FOUND" => SeoErrors.Actor.NotFound,
+            "SEO.STORE_UNAVAILABLE" => SeoErrors.Infrastructure.StoreUnavailable,
 
             _ => SeoErrors.ValidationFailed
         };
