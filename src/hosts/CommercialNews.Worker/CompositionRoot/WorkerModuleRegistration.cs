@@ -20,6 +20,7 @@ using CommercialNews.Worker.Outbox.Handlers.Authorization;
 using CommercialNews.Worker.Outbox.Handlers.Identity;
 using CommercialNews.Worker.Outbox.Handlers.Notifications;
 using CommercialNews.Worker.Outbox.Publishing;
+using CommercialNews.Worker.Outbox.Handlers.Seo;
 using Notifications.Application.DependencyInjection;
 using Notifications.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Outbox.Handlers.Content;
@@ -124,6 +125,10 @@ public static class WorkerModuleRegistration
         services.AddScoped<IOutboxMessageHandler, ArticleMediaDetachedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, ArticleMediaReorderedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, ArticlePrimaryMediaSetOutboxHandler>();
+
+        services.AddScoped<IOutboxMessageHandler, SlugRouteChangedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, SlugRouteDeactivatedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, SeoMetadataUpdatedOutboxHandler>();
 
         services.Configure<NotificationsRabbitMqConsumerOptions>(
             configuration.GetSection(NotificationsRabbitMqConsumerOptions.SectionName));

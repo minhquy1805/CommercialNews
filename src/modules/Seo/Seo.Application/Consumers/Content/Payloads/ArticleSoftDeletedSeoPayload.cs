@@ -10,10 +10,6 @@ public sealed class ArticleSoftDeletedSeoPayload
 
     public string? CanonicalUrl { get; init; }
 
-    public string FromStatus { get; init; } = string.Empty;
-
-    public string ToStatus { get; init; } = string.Empty;
-
     public long ActorUserId { get; init; }
 
     public long Version { get; init; }

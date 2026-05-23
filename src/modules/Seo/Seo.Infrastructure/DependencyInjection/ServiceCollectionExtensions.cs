@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using Seo.Application.Ports.Persistence;
+using Seo.Application.Ports.Services;
 using Seo.Infrastructure.Persistence.Exceptions;
 using Seo.Infrastructure.Persistence.Repositories;
 using Seo.Infrastructure.Persistence.Sql;
+using Seo.Infrastructure.Services;
 
 namespace Seo.Infrastructure.DependencyInjection;
 
@@ -19,6 +21,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<ISeoMetadataRepository, SeoMetadataRepository>();
         services.AddScoped<ISlugRegistryRepository, SlugRegistryRepository>();
+        services.AddScoped<ISeoOutboxWriter, SeoOutboxWriter>();
 
         return services;
     }
