@@ -30,8 +30,6 @@ public sealed class UpsertArticleSeoSettingsRequest
 
     public bool IsActive { get; init; } = true;
 
-    public long? ActorUserId { get; init; }
-
     public int? ExpectedSlugVersion { get; init; }
 
     public int? ExpectedSeoMetadataVersion { get; init; }

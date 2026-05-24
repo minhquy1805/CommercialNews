@@ -9,7 +9,7 @@ namespace Reading.Infrastructure.Seo;
 
 public sealed class SeoRouteResolver : ISeoRouteResolver
 {
-    private const string ResolveRouteProc = "[seo].[Seo_ResolveRoute]";
+    private const string ResolveRouteProc = "[seo].[Seo_ResolveByScopeAndSlug]";
     private const string PublicScope = "public";
     private const string ArticleResourceType = "Article";
 

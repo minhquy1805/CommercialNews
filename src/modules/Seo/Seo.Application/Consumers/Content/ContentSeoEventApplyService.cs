@@ -6,7 +6,9 @@ using Seo.Application.Errors;
 using Seo.Application.Models.Commands;
 using Seo.Application.Models.Results;
 using Seo.Application.Ports.Persistence;
+using Seo.Application.Ports.Services;
 using Seo.Domain.Constants;
+using Seo.Domain.Entities;
 using Seo.Domain.Exceptions;
 
 namespace Seo.Application.Consumers.Content;
@@ -18,11 +20,13 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
 
     private readonly ISlugRegistryRepository _slugRegistryRepository;
     private readonly ISeoMetadataRepository _seoMetadataRepository;
+    private readonly ISeoOutboxWriter _seoOutboxWriter;
     private readonly ISeoUnitOfWork _unitOfWork;
 
     public ContentSeoEventApplyService(
         ISlugRegistryRepository slugRegistryRepository,
         ISeoMetadataRepository seoMetadataRepository,
+        ISeoOutboxWriter seoOutboxWriter,
         ISeoUnitOfWork unitOfWork)
     {
         _slugRegistryRepository = slugRegistryRepository
@@ -30,6 +34,9 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
 
         _seoMetadataRepository = seoMetadataRepository
             ?? throw new ArgumentNullException(nameof(seoMetadataRepository));
+
+        _seoOutboxWriter = seoOutboxWriter
+            ?? throw new ArgumentNullException(nameof(seoOutboxWriter));
 
         _unitOfWork = unitOfWork
             ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -47,8 +54,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
             context,
             payload.ArticlePublicId,
             payload.Version,
-            payload.Slug,
-            payload.CanonicalUrl,
             payload.Title,
             payload.Summary,
             payload.CoverImageUrl,
@@ -67,8 +72,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
             context,
             payload.ArticlePublicId,
             payload.Version,
-            payload.Slug,
-            payload.CanonicalUrl,
             payload.Title,
             payload.Summary,
             payload.CoverImageUrl,
@@ -87,8 +90,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
             context,
             payload.ArticlePublicId,
             payload.Version,
-            payload.Slug,
-            payload.CanonicalUrl,
             payload.Title,
             payload.Summary,
             payload.CoverImageUrl,
@@ -109,8 +110,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
             context,
             payload.ArticlePublicId,
             payload.Version,
-            payload.Slug,
-            payload.CanonicalUrl,
             isActive: false,
             isIndexable: false,
             cancellationToken);
@@ -128,8 +127,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
             context,
             payload.ArticlePublicId,
             payload.Version,
-            payload.Slug,
-            payload.CanonicalUrl,
             isActive: false,
             isIndexable: false,
             cancellationToken);
@@ -147,8 +144,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
             context,
             payload.ArticlePublicId,
             payload.Version,
-            payload.Slug,
-            payload.CanonicalUrl,
             isActive: false,
             isIndexable: false,
             cancellationToken);
@@ -158,8 +153,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
         ContentSeoEnvelopeContext context,
         string payloadArticlePublicId,
         long payloadVersion,
-        string? slug,
-        string? canonicalUrl,
         string? title,
         string? summary,
         string? coverImageUrl,
@@ -185,11 +178,15 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
                     context,
                     articlePublicId,
                     sourceAggregateVersion,
-                    slug,
-                    canonicalUrl,
                     title,
                     summary,
                     coverImageUrl,
+                    cancellationToken);
+
+                await EnqueueMetadataUpdatedIfAppliedAsync(
+                    context,
+                    articlePublicId,
+                    metadataResult,
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
@@ -223,8 +220,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
         ContentSeoEnvelopeContext context,
         string payloadArticlePublicId,
         long payloadVersion,
-        string? slug,
-        string? canonicalUrl,
         bool isActive,
         bool isIndexable,
         CancellationToken cancellationToken)
@@ -249,10 +244,14 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
                     context,
                     articlePublicId,
                     sourceAggregateVersion,
-                    slug,
-                    canonicalUrl,
                     isActive,
                     isIndexable,
+                    cancellationToken);
+
+                await EnqueueSlugRouteEventIfAppliedAsync(
+                    context,
+                    articlePublicId,
+                    slugRouteResult,
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
@@ -286,8 +285,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
         ContentSeoEnvelopeContext context,
         string payloadArticlePublicId,
         long payloadVersion,
-        string? slug,
-        string? canonicalUrl,
         string? title,
         string? summary,
         string? coverImageUrl,
@@ -315,8 +312,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
                     context,
                     articlePublicId,
                     sourceAggregateVersion,
-                    slug,
-                    canonicalUrl,
                     isActive,
                     isIndexable,
                     cancellationToken);
@@ -325,11 +320,21 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
                     context,
                     articlePublicId,
                     sourceAggregateVersion,
-                    slug,
-                    canonicalUrl,
                     title,
                     summary,
                     coverImageUrl,
+                    cancellationToken);
+
+                await EnqueueSlugRouteEventIfAppliedAsync(
+                    context,
+                    articlePublicId,
+                    slugRouteResult,
+                    cancellationToken);
+
+                await EnqueueMetadataUpdatedIfAppliedAsync(
+                    context,
+                    articlePublicId,
+                    metadataResult,
                     cancellationToken);
 
                 await _unitOfWork.CommitAsync(cancellationToken);
@@ -363,31 +368,21 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
         ContentSeoEnvelopeContext context,
         string articlePublicId,
         long sourceAggregateVersion,
-        string? slug,
-        string? canonicalUrl,
         bool isActive,
         bool isIndexable,
         CancellationToken cancellationToken)
     {
-        string? slugToApply = NormalizeOptional(slug);
-        string? canonicalUrlToApply = NormalizeOptional(canonicalUrl);
-
-        if (string.IsNullOrWhiteSpace(slugToApply) ||
-            string.IsNullOrWhiteSpace(canonicalUrlToApply))
-        {
-            var existingRoute = await _slugRegistryRepository.GetByResourceAsync(
+        SlugRegistry? existingRoute =
+            await _slugRegistryRepository.GetByResourceAsync(
                 scope: SeoScopes.Public,
                 resourceType: SeoResourceTypes.Article,
                 resourcePublicId: articlePublicId,
                 onlyActive: null,
                 cancellationToken: cancellationToken);
 
-            if (existingRoute is not null)
-            {
-                slugToApply ??= existingRoute.Slug;
-                canonicalUrlToApply ??= existingRoute.CanonicalUrl;
-            }
-            else if (isActive)
+        if (existingRoute is null)
+        {
+            if (isActive)
             {
                 return new SeoApplyResultModel
                 {
@@ -397,14 +392,22 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
                     LastSyncedAtUtc = context.OccurredAtUtc
                 };
             }
+
+            return new SeoApplyResultModel
+            {
+                ApplyResult = SeoApplyResults.NoRouteToDeactivate,
+                SourceAggregateVersion = sourceAggregateVersion,
+                LastAppliedMessageId = context.MessageId,
+                LastSyncedAtUtc = context.OccurredAtUtc
+            };
         }
 
         ApplyContentVisibilityCommand command = new(
-            Scope: SeoScopes.Public,
-            Slug: slugToApply,
-            ResourceType: SeoResourceTypes.Article,
-            ResourcePublicId: articlePublicId,
-            CanonicalUrl: canonicalUrlToApply,
+            Scope: existingRoute.Scope,
+            Slug: existingRoute.Slug,
+            ResourceType: existingRoute.ResourceType,
+            ResourcePublicId: existingRoute.ResourcePublicId,
+            CanonicalUrl: existingRoute.CanonicalUrl,
             IsIndexable: isIndexable,
             IsActive: isActive,
             SourceAggregateVersion: sourceAggregateVersion,
@@ -420,13 +423,16 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
         ContentSeoEnvelopeContext context,
         string articlePublicId,
         long sourceAggregateVersion,
-        string? slug,
-        string? canonicalUrl,
         string? title,
         string? summary,
         string? coverImageUrl,
         CancellationToken cancellationToken)
     {
+        (string? slug, string? canonicalUrl) =
+            await ResolveCurrentRouteMetadataAsync(
+                articlePublicId,
+                cancellationToken);
+
         ApplyContentMetadataDefaultsCommand command = new(
             Scope: SeoScopes.Public,
             ResourceType: SeoResourceTypes.Article,
@@ -445,6 +451,106 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
         return await _seoMetadataRepository.ApplyContentDefaultsAsync(
             command,
             cancellationToken);
+    }
+
+    private async Task<(string? Slug, string? CanonicalUrl)> ResolveCurrentRouteMetadataAsync(
+        string articlePublicId,
+        CancellationToken cancellationToken)
+    {
+        SlugRegistry? route =
+            await _slugRegistryRepository.GetByResourceAsync(
+                scope: SeoScopes.Public,
+                resourceType: SeoResourceTypes.Article,
+                resourcePublicId: articlePublicId,
+                onlyActive: null,
+                cancellationToken: cancellationToken);
+
+        return route is null
+            ? (null, null)
+            : (route.Slug, route.CanonicalUrl);
+    }
+
+    private async Task EnqueueSlugRouteEventIfAppliedAsync(
+        ContentSeoEnvelopeContext context,
+        string articlePublicId,
+        SeoApplyResultModel slugRouteResult,
+        CancellationToken cancellationToken)
+    {
+        if (!IsApplied(slugRouteResult))
+        {
+            return;
+        }
+
+        SlugRegistry? route = await _slugRegistryRepository.GetByResourceAsync(
+            scope: SeoScopes.Public,
+            resourceType: SeoResourceTypes.Article,
+            resourcePublicId: articlePublicId,
+            onlyActive: null,
+            cancellationToken: cancellationToken);
+
+        if (route is null)
+        {
+            throw new InvalidOperationException(
+                "SEO slug route was applied but could not be loaded for outbound event publishing.");
+        }
+
+        if (route.IsActive)
+        {
+            await _seoOutboxWriter.EnqueueSlugRouteChangedAsync(
+                _unitOfWork,
+                route,
+                context.InitiatorUserId,
+                context.CorrelationId,
+                cancellationToken);
+
+            return;
+        }
+
+        await _seoOutboxWriter.EnqueueSlugRouteDeactivatedAsync(
+            _unitOfWork,
+            route,
+            context.InitiatorUserId,
+            context.CorrelationId,
+            cancellationToken);
+    }
+
+    private async Task EnqueueMetadataUpdatedIfAppliedAsync(
+        ContentSeoEnvelopeContext context,
+        string articlePublicId,
+        SeoApplyResultModel metadataResult,
+        CancellationToken cancellationToken)
+    {
+        if (!IsApplied(metadataResult))
+        {
+            return;
+        }
+
+        SeoMetadata? metadata = await _seoMetadataRepository.GetByResourceAsync(
+            scope: SeoScopes.Public,
+            resourceType: SeoResourceTypes.Article,
+            resourcePublicId: articlePublicId,
+            cancellationToken: cancellationToken);
+
+        if (metadata is null)
+        {
+            throw new InvalidOperationException(
+                "SEO metadata was applied but could not be loaded for outbound event publishing.");
+        }
+
+        await _seoOutboxWriter.EnqueueMetadataUpdatedAsync(
+            _unitOfWork,
+            metadata,
+            context.InitiatorUserId,
+            context.CorrelationId,
+            cancellationToken);
+    }
+
+    private static bool IsApplied(SeoApplyResultModel result)
+    {
+        return string.Equals(
+            result.ApplyResult,
+            SeoApplyResults.Applied,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static SeoEventApplyResult BuildResult(
@@ -493,13 +599,6 @@ public sealed class ContentSeoEventApplyService : IContentSeoEventApplyService
     private static bool IsValidPublicId(string value)
     {
         return !string.IsNullOrWhiteSpace(value) && value.Trim().Length == 26;
-    }
-
-    private static string? NormalizeOptional(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value)
-            ? null
-            : value.Trim();
     }
 
     private static Error MapDomainException(SeoDomainException exception)

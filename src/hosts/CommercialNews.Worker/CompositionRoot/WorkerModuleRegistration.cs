@@ -20,6 +20,7 @@ using CommercialNews.Worker.Outbox.Handlers.Authorization;
 using CommercialNews.Worker.Outbox.Handlers.Identity;
 using CommercialNews.Worker.Outbox.Handlers.Notifications;
 using CommercialNews.Worker.Outbox.Publishing;
+using CommercialNews.Worker.Outbox.Handlers.Seo;
 using Notifications.Application.DependencyInjection;
 using Notifications.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Outbox.Handlers.Content;
@@ -37,6 +38,7 @@ using CommercialNews.Worker.Reading.Consumers;
 using CommercialNews.Worker.Reading.Handlers;
 using CommercialNews.Worker.Reading.Handlers.Content;
 using CommercialNews.Worker.Reading.Handlers.Media;
+using CommercialNews.Worker.Reading.Handlers.Seo;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -124,6 +126,10 @@ public static class WorkerModuleRegistration
         services.AddScoped<IOutboxMessageHandler, ArticleMediaDetachedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, ArticleMediaReorderedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, ArticlePrimaryMediaSetOutboxHandler>();
+
+        services.AddScoped<IOutboxMessageHandler, SlugRouteChangedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, SlugRouteDeactivatedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, SeoMetadataUpdatedOutboxHandler>();
 
         services.Configure<NotificationsRabbitMqConsumerOptions>(
             configuration.GetSection(NotificationsRabbitMqConsumerOptions.SectionName));
@@ -216,6 +222,9 @@ public static class WorkerModuleRegistration
         services.AddScoped<IReadingIntegrationEventHandler, MediaArticlePrimaryMediaSetReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, MediaArticleMediaReorderedReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, MediaArticleMediaDetachedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, SlugRouteChangedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, SlugRouteDeactivatedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, SeoMetadataUpdatedReadingHandler>();
 
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));

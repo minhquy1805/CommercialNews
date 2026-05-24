@@ -1018,6 +1018,9 @@ BEGIN
         COALESCE([sm].[LastAppliedMessageId], [sr].[LastAppliedMessageId]) AS [LastAppliedMessageId],
         COALESCE([sm].[LastSyncedAtUtc], [sr].[LastSyncedAtUtc]) AS [LastSyncedAtUtc],
 
+        [sr].[Version] AS [SlugRouteVersion],
+        [sm].[Version] AS [SeoMetadataVersion],
+
         CASE
             WHEN [sm].[Version] IS NULL AND [sr].[Version] IS NULL THEN 0
             WHEN [sm].[Version] IS NULL THEN [sr].[Version]

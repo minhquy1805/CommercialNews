@@ -11,6 +11,9 @@ public abstract class ContentSeoIntegrationEventHandler<TPayload>
     : ISeoIntegrationEventHandler
     where TPayload : class
 {
+    private const string EventDuplicateIgnoredCode = "SEO.EVENT_DUPLICATE_IGNORED";
+    private const string EventStaleIgnoredCode = "SEO.EVENT_STALE_IGNORED";
+
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
@@ -88,6 +91,19 @@ public abstract class ContentSeoIntegrationEventHandler<TPayload>
         {
             var error = result.Error!;
 
+            if (IsIgnoredSyncError(error))
+            {
+                _logger.LogInformation(
+                    "Content {EventDisplayName} SEO event ignored successfully. MessageId={MessageId}, EventType={EventType}, ErrorCode={ErrorCode}, ErrorMessage={ErrorMessage}",
+                    EventDisplayName,
+                    envelope.MessageId,
+                    envelope.EventType,
+                    error.Code,
+                    error.Message);
+
+                return Result.Success();
+            }
+
             _logger.LogWarning(
                 "Failed to apply content {EventDisplayName} SEO event. MessageId={MessageId}, EventType={EventType}, ErrorCode={ErrorCode}, ErrorMessage={ErrorMessage}",
                 EventDisplayName,
@@ -134,5 +150,17 @@ public abstract class ContentSeoIntegrationEventHandler<TPayload>
             .ToUpperInvariant();
 
         return $"SEO.CONTENT.{eventKey}_{suffix}";
+    }
+
+    private static bool IsIgnoredSyncError(Error error)
+    {
+        return string.Equals(
+                   error.Code,
+                   EventStaleIgnoredCode,
+                   StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(
+                   error.Code,
+                   EventDuplicateIgnoredCode,
+                   StringComparison.OrdinalIgnoreCase);
     }
 }
