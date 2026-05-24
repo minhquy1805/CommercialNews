@@ -8,6 +8,9 @@
       * ArticleReadModel
       * ArticleReadModelTag
       * ArticleReadModelMedia
+      * ArticleMediaProjectionState
+      * ArticleSeoRouteProjection
+      * ArticleSeoMetadataProjection
   - Support:
       * public article list/detail/search/related reads
       * slug-based public serving
@@ -57,7 +60,7 @@ BEGIN
         [ArticleId]                 BIGINT               NOT NULL,
         [ArticlePublicId]           CHAR(26)             NOT NULL, -- ULID from Content
 
-        [Slug]                      NVARCHAR(300)        NULL,
+        [Slug]                      NVARCHAR(200)        NULL,
 
         [Title]                     NVARCHAR(300)        NOT NULL,
         [Summary]                   NVARCHAR(1000)       NOT NULL,
@@ -73,9 +76,22 @@ BEGIN
         [CoverMediaUrl]             NVARCHAR(1000)       NULL,
         [CoverAlt]                  NVARCHAR(300)        NULL,
 
-        [CanonicalUrl]              NVARCHAR(1000)       NULL,
+        [CanonicalUrl]              NVARCHAR(500)        NULL,
         [MetaTitle]                 NVARCHAR(300)        NULL,
         [MetaDescription]           NVARCHAR(500)        NULL,
+        [OgTitle]                   NVARCHAR(300)        NULL,
+        [OgDescription]             NVARCHAR(500)        NULL,
+        [OgImageUrl]                NVARCHAR(800)        NULL,
+        [TwitterTitle]              NVARCHAR(300)        NULL,
+        [TwitterDescription]        NVARCHAR(500)        NULL,
+        [TwitterImageUrl]           NVARCHAR(800)        NULL,
+        [Robots]                    NVARCHAR(100)        NULL,
+        [SeoIsManualOverride]       BIT                  NOT NULL
+            CONSTRAINT [DF_ArticleReadModel_SeoIsManualOverride] DEFAULT (0),
+        [SeoRouteIsActive]          BIT                  NOT NULL
+            CONSTRAINT [DF_ArticleReadModel_SeoRouteIsActive] DEFAULT (0),
+        [SeoIsIndexable]            BIT                  NOT NULL
+            CONSTRAINT [DF_ArticleReadModel_SeoIsIndexable] DEFAULT (0),
 
         [Status]                    NVARCHAR(30)         NOT NULL,
         [IsPublic]                  BIT                  NOT NULL
@@ -146,6 +162,12 @@ BEGIN
                 [ViewCount] >= 0
                 AND [LikeCount] >= 0
                 AND [CommentCount] >= 0
+            ),
+
+        CONSTRAINT [CK_ArticleReadModel_SeoIndexableRequiresActive]
+            CHECK (
+                [SeoIsIndexable] = 0
+                OR [SeoRouteIsActive] = 1
             )
     );
 
@@ -178,6 +200,115 @@ BEGIN
         DROP CONSTRAINT [CK_ArticleReadModel_PublishedAtUtc];
 
     PRINT N'Dropped obsolete constraint: [CK_ArticleReadModel_PublishedAtUtc]';
+END
+GO
+
+/* =========================================================
+   ArticleReadModel - SEO enrichment columns for existing DB
+   ========================================================= */
+IF COL_LENGTH(N'reading.ArticleReadModel', N'OgTitle') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [OgTitle] NVARCHAR(300) NULL;
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[OgTitle]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'OgDescription') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [OgDescription] NVARCHAR(500) NULL;
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[OgDescription]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'OgImageUrl') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [OgImageUrl] NVARCHAR(800) NULL;
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[OgImageUrl]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'TwitterTitle') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [TwitterTitle] NVARCHAR(300) NULL;
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[TwitterTitle]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'TwitterDescription') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [TwitterDescription] NVARCHAR(500) NULL;
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[TwitterDescription]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'TwitterImageUrl') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [TwitterImageUrl] NVARCHAR(800) NULL;
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[TwitterImageUrl]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'Robots') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [Robots] NVARCHAR(100) NULL;
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[Robots]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'SeoIsManualOverride') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [SeoIsManualOverride] BIT NOT NULL
+            CONSTRAINT [DF_ArticleReadModel_SeoIsManualOverride] DEFAULT (0);
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[SeoIsManualOverride]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'SeoRouteIsActive') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [SeoRouteIsActive] BIT NOT NULL
+            CONSTRAINT [DF_ArticleReadModel_SeoRouteIsActive] DEFAULT (0);
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[SeoRouteIsActive]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'SeoIsIndexable') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD [SeoIsIndexable] BIT NOT NULL
+            CONSTRAINT [DF_ArticleReadModel_SeoIsIndexable] DEFAULT (0);
+
+    PRINT N'Added column: [reading].[ArticleReadModel].[SeoIsIndexable]';
+END
+GO
+
+IF OBJECT_ID(N'[reading].[CK_ArticleReadModel_SeoIndexableRequiresActive]', N'C') IS NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        ADD CONSTRAINT [CK_ArticleReadModel_SeoIndexableRequiresActive]
+            CHECK (
+                [SeoIsIndexable] = 0
+                OR [SeoRouteIsActive] = 1
+            );
+
+    PRINT N'Created constraint: [CK_ArticleReadModel_SeoIndexableRequiresActive]';
 END
 GO
 
@@ -344,5 +475,162 @@ END
 ELSE
 BEGIN
     PRINT N'Table exists: [reading].[ArticleMediaProjectionState]';
+END
+GO
+
+/* =========================================================
+   5) [reading].[ArticleSeoRouteProjection]
+   ========================================================= */
+IF OBJECT_ID(N'[reading].[ArticleSeoRouteProjection]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [reading].[ArticleSeoRouteProjection]
+    (
+        [Scope]                     VARCHAR(30)          NOT NULL,
+        [ResourceType]              VARCHAR(50)          NOT NULL,
+        [ResourcePublicId]          CHAR(26)             NOT NULL,
+
+        [Slug]                      NVARCHAR(200)        NOT NULL,
+        [CanonicalUrl]              NVARCHAR(500)        NULL,
+
+        [IsActive]                  BIT                  NOT NULL
+            CONSTRAINT [DF_ArticleSeoRouteProjection_IsActive] DEFAULT (0),
+
+        [IsIndexable]               BIT                  NOT NULL
+            CONSTRAINT [DF_ArticleSeoRouteProjection_IsIndexable] DEFAULT (0),
+
+        /*
+          SourceVersion means Seo.SlugRegistry.Version.
+          It must not be compared with Content article version,
+          Media attachment-set version, or SeoMetadata.Version.
+        */
+        [SourceVersion]             BIGINT               NOT NULL
+            CONSTRAINT [DF_ArticleSeoRouteProjection_SourceVersion] DEFAULT (0),
+
+        [LastEventMessageId]        CHAR(26)             NULL,
+        [LastSourceOccurredAtUtc]   DATETIME2(3)         NULL,
+
+        [LastSyncedAtUtc]           DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_ArticleSeoRouteProjection_LastSyncedAtUtc]
+            DEFAULT (SYSUTCDATETIME()),
+
+        CONSTRAINT [PK_ArticleSeoRouteProjection]
+            PRIMARY KEY CLUSTERED
+            (
+                [Scope] ASC,
+                [ResourceType] ASC,
+                [ResourcePublicId] ASC
+            ),
+
+        CONSTRAINT [CK_ArticleSeoRouteProjection_Scope_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([Scope]))) > 0),
+
+        CONSTRAINT [CK_ArticleSeoRouteProjection_ResourceType_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([ResourceType]))) > 0),
+
+        CONSTRAINT [CK_ArticleSeoRouteProjection_ResourcePublicId_Length]
+            CHECK (LEN([ResourcePublicId]) = 26),
+
+        CONSTRAINT [CK_ArticleSeoRouteProjection_Slug_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([Slug]))) > 0),
+
+        CONSTRAINT [CK_ArticleSeoRouteProjection_SourceVersion_NonNegative]
+            CHECK ([SourceVersion] >= 0),
+
+        CONSTRAINT [CK_ArticleSeoRouteProjection_LastEventMessageId_Length]
+            CHECK (
+                [LastEventMessageId] IS NULL
+                OR LEN([LastEventMessageId]) = 26
+            ),
+
+        CONSTRAINT [CK_ArticleSeoRouteProjection_IndexableRequiresActive]
+            CHECK (
+                [IsIndexable] = 0
+                OR [IsActive] = 1
+            )
+    );
+
+    PRINT N'Created table: [reading].[ArticleSeoRouteProjection]';
+END
+ELSE
+BEGIN
+    PRINT N'Table exists: [reading].[ArticleSeoRouteProjection]';
+END
+GO
+
+/* =========================================================
+   6) [reading].[ArticleSeoMetadataProjection]
+   ========================================================= */
+IF OBJECT_ID(N'[reading].[ArticleSeoMetadataProjection]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [reading].[ArticleSeoMetadataProjection]
+    (
+        [Scope]                     VARCHAR(30)          NOT NULL,
+        [ResourceType]              VARCHAR(50)          NOT NULL,
+        [ResourcePublicId]          CHAR(26)             NOT NULL,
+
+        [MetaTitle]                 NVARCHAR(300)        NULL,
+        [MetaDescription]           NVARCHAR(500)        NULL,
+
+        [OgTitle]                   NVARCHAR(300)        NULL,
+        [OgDescription]             NVARCHAR(500)        NULL,
+        [OgImageUrl]                NVARCHAR(800)        NULL,
+
+        [TwitterTitle]              NVARCHAR(300)        NULL,
+        [TwitterDescription]        NVARCHAR(500)        NULL,
+        [TwitterImageUrl]           NVARCHAR(800)        NULL,
+
+        [Robots]                    NVARCHAR(100)        NULL,
+
+        [IsManualOverride]          BIT                  NOT NULL
+            CONSTRAINT [DF_ArticleSeoMetadataProjection_IsManualOverride]
+            DEFAULT (0),
+
+        /*
+          SourceVersion means Seo.SeoMetadata.Version.
+          It must not be compared with Content article version,
+          Media attachment-set version, or SlugRegistry.Version.
+        */
+        [SourceVersion]             BIGINT               NOT NULL
+            CONSTRAINT [DF_ArticleSeoMetadataProjection_SourceVersion] DEFAULT (0),
+
+        [LastEventMessageId]        CHAR(26)             NULL,
+        [LastSourceOccurredAtUtc]   DATETIME2(3)         NULL,
+
+        [LastSyncedAtUtc]           DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_ArticleSeoMetadataProjection_LastSyncedAtUtc]
+            DEFAULT (SYSUTCDATETIME()),
+
+        CONSTRAINT [PK_ArticleSeoMetadataProjection]
+            PRIMARY KEY CLUSTERED
+            (
+                [Scope] ASC,
+                [ResourceType] ASC,
+                [ResourcePublicId] ASC
+            ),
+
+        CONSTRAINT [CK_ArticleSeoMetadataProjection_Scope_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([Scope]))) > 0),
+
+        CONSTRAINT [CK_ArticleSeoMetadataProjection_ResourceType_NotBlank]
+            CHECK (LEN(LTRIM(RTRIM([ResourceType]))) > 0),
+
+        CONSTRAINT [CK_ArticleSeoMetadataProjection_ResourcePublicId_Length]
+            CHECK (LEN([ResourcePublicId]) = 26),
+
+        CONSTRAINT [CK_ArticleSeoMetadataProjection_SourceVersion_NonNegative]
+            CHECK ([SourceVersion] >= 0),
+
+        CONSTRAINT [CK_ArticleSeoMetadataProjection_LastEventMessageId_Length]
+            CHECK (
+                [LastEventMessageId] IS NULL
+                OR LEN([LastEventMessageId]) = 26
+            )
+    );
+
+    PRINT N'Created table: [reading].[ArticleSeoMetadataProjection]';
+END
+ELSE
+BEGIN
+    PRINT N'Table exists: [reading].[ArticleSeoMetadataProjection]';
 END
 GO

@@ -10,7 +10,13 @@ public static class ApplyContentArticleProjectionValidator
     private const int PublicIdLength = 26;
     private const int MessageIdLength = 26;
 
-    public static Error? Validate(ApplyContentArticleProjectionCommand? command)
+    private const int TitleMaxLength = 300;
+    private const int SummaryMaxLength = 1000;
+    private const int CategoryNameMaxLength = 200;
+    private const int AuthorDisplayNameMaxLength = 200;
+
+    public static Error? Validate(
+        ApplyContentArticleProjectionCommand? command)
     {
         if (command is null)
         {
@@ -22,44 +28,58 @@ public static class ApplyContentArticleProjectionValidator
             return ReadingErrors.Article.InvalidArticleId;
         }
 
-        if (string.IsNullOrWhiteSpace(command.ArticlePublicId)
-            || command.ArticlePublicId.Trim().Length != PublicIdLength)
+        if (!HasValidPublicId(command.ArticlePublicId))
         {
             return ReadingErrors.Article.InvalidArticlePublicId;
         }
 
-        if (string.IsNullOrWhiteSpace(command.Title))
+        if (!HasValidRequiredText(command.Title, TitleMaxLength))
         {
             return ReadingErrors.ValidationFailed;
         }
 
-        if (string.IsNullOrWhiteSpace(command.Summary))
+        if (!HasValidRequiredText(command.Summary, SummaryMaxLength))
         {
             return ReadingErrors.ValidationFailed;
         }
 
-        // Reading projection is tolerant:
-        // Body may be missing from lightweight Content events.
-        // Normalize(...) will fallback Body to Summary when Body is blank.
+        /*
+          ArticleReadModel serves public article detail.
+          A missing body must not be replaced with Summary because that would
+          corrupt the projected article content.
+        */
+        if (string.IsNullOrWhiteSpace(command.Body))
+        {
+            return ReadingErrors.ValidationFailed;
+        }
 
-        if (command.CategoryId.HasValue && command.CategoryId.Value <= 0)
+        if (command.CategoryId is <= 0)
         {
             return ReadingErrors.Query.InvalidCategoryId;
         }
 
-        if (command.AuthorUserId.HasValue && command.AuthorUserId.Value <= 0)
+        if (!HasValidOptionalText(
+                command.CategoryName,
+                CategoryNameMaxLength))
         {
             return ReadingErrors.ValidationFailed;
         }
 
-        if (command.CoverMediaId.HasValue && command.CoverMediaId.Value <= 0)
+        if (command.AuthorUserId is <= 0)
         {
             return ReadingErrors.ValidationFailed;
         }
 
-        if (string.IsNullOrWhiteSpace(command.Status))
+        if (!HasValidOptionalText(
+                command.AuthorDisplayName,
+                AuthorDisplayNameMaxLength))
         {
-            return ReadingErrors.Projection.InvalidSourceStatus;
+            return ReadingErrors.ValidationFailed;
+        }
+
+        if (command.CoverMediaId is <= 0)
+        {
+            return ReadingErrors.ValidationFailed;
         }
 
         if (!SourceArticleStatuses.IsValid(command.Status))
@@ -67,13 +87,22 @@ public static class ApplyContentArticleProjectionValidator
             return ReadingErrors.Projection.InvalidSourceStatus;
         }
 
+        if (!HasValidPublicVisibility(command))
+        {
+            return ReadingErrors.ValidationFailed;
+        }
+
+        if (command.UpdatedAtUtc == default)
+        {
+            return ReadingErrors.ValidationFailed;
+        }
+
         if (command.SourceVersion <= 0)
         {
             return ReadingErrors.Projection.InvalidSourceVersion;
         }
 
-        if (!string.IsNullOrWhiteSpace(command.MessageId)
-            && command.MessageId.Trim().Length != MessageIdLength)
+        if (!HasValidMessageId(command.MessageId))
         {
             return ReadingErrors.Projection.InvalidMessageId;
         }
@@ -84,35 +113,76 @@ public static class ApplyContentArticleProjectionValidator
     public static ApplyContentArticleProjectionCommand Normalize(
         ApplyContentArticleProjectionCommand command)
     {
-        string? normalizedStatus = SourceArticleStatuses.NormalizeOrNull(
-            command.Status);
+        ArgumentNullException.ThrowIfNull(command);
 
-        string normalizedSummary = command.Summary.Trim();
-
-        string normalizedBody = string.IsNullOrWhiteSpace(command.Body)
-            ? normalizedSummary
-            : command.Body.Trim();
+        string normalizedStatus =
+            SourceArticleStatuses.NormalizeOrNull(command.Status)
+            ?? command.Status.Trim();
 
         return command with
         {
             ArticlePublicId = command.ArticlePublicId.Trim(),
             Title = command.Title.Trim(),
-            Summary = normalizedSummary,
-            Body = normalizedBody,
+            Summary = command.Summary.Trim(),
+
+            /*
+              Preserve article body content exactly as emitted by Content.
+              Do not replace it with Summary and do not trim meaningful
+              formatting from Markdown/HTML content.
+            */
+            Body = command.Body,
+
             CategoryName = NormalizeNullable(command.CategoryName),
             AuthorDisplayName = NormalizeNullable(command.AuthorDisplayName),
-            Status = normalizedStatus ?? command.Status.Trim(),
+            Status = normalizedStatus,
             MessageId = NormalizeNullable(command.MessageId)
         };
     }
 
-    private static string? NormalizeNullable(string? value)
+    private static bool HasValidPublicId(string? publicId)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        return !string.IsNullOrWhiteSpace(publicId)
+            && publicId.Trim().Length == PublicIdLength;
+    }
+
+    private static bool HasValidRequiredText(
+        string? value,
+        int maxLength)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && value.Trim().Length <= maxLength;
+    }
+
+    private static bool HasValidOptionalText(
+        string? value,
+        int maxLength)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            || value.Trim().Length <= maxLength;
+    }
+
+    private static bool HasValidMessageId(string? messageId)
+    {
+        return string.IsNullOrWhiteSpace(messageId)
+            || messageId.Trim().Length == MessageIdLength;
+    }
+
+    private static bool HasValidPublicVisibility(
+        ApplyContentArticleProjectionCommand command)
+    {
+        if (!command.IsPublic)
         {
-            return null;
+            return true;
         }
 
-        return value.Trim();
+        return SourceArticleStatuses.IsPublished(command.Status)
+            && command.PublishedAtUtc.HasValue;
+    }
+
+    private static string? NormalizeNullable(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }

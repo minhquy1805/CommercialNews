@@ -30,7 +30,8 @@ public sealed class ApplyArticleMediaProjectionUseCase
         UpsertArticleMediaProjectionCommand command,
         CancellationToken cancellationToken = default)
     {
-        Error? validationError = ArticleMediaProjectionValidator.Validate(command);
+        Error? validationError =
+            ArticleMediaProjectionValidator.Validate(command);
 
         if (validationError is not null)
         {
@@ -52,7 +53,8 @@ public sealed class ApplyArticleMediaProjectionUseCase
         SetPrimaryArticleMediaProjectionCommand command,
         CancellationToken cancellationToken = default)
     {
-        Error? validationError = ArticleMediaProjectionValidator.Validate(command);
+        Error? validationError =
+            ArticleMediaProjectionValidator.Validate(command);
 
         if (validationError is not null)
         {
@@ -74,7 +76,8 @@ public sealed class ApplyArticleMediaProjectionUseCase
         ReorderArticleMediaProjectionCommand command,
         CancellationToken cancellationToken = default)
     {
-        Error? validationError = ArticleMediaProjectionValidator.Validate(command);
+        Error? validationError =
+            ArticleMediaProjectionValidator.Validate(command);
 
         if (validationError is not null)
         {
@@ -96,7 +99,8 @@ public sealed class ApplyArticleMediaProjectionUseCase
         DetachArticleMediaProjectionCommand command,
         CancellationToken cancellationToken = default)
     {
-        Error? validationError = ArticleMediaProjectionValidator.Validate(command);
+        Error? validationError =
+            ArticleMediaProjectionValidator.Validate(command);
 
         if (validationError is not null)
         {
@@ -122,33 +126,36 @@ public sealed class ApplyArticleMediaProjectionUseCase
         {
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            try
-            {
-                ArticleProjectionApplyResult result = await apply();
+            ArticleProjectionApplyResult result = await apply();
 
-                await _unitOfWork.CommitAsync(cancellationToken);
+            await _unitOfWork.CommitAsync(cancellationToken);
 
-                return Result<ArticleProjectionApplyResult>.Success(result);
-            }
-            catch
-            {
-                await RollbackIfNeededAsync(cancellationToken);
-                throw;
-            }
+            return Result<ArticleProjectionApplyResult>.Success(result);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            await RollbackIfNeededAsync(CancellationToken.None);
+            throw;
         }
         catch (PersistenceException)
         {
-            await RollbackIfNeededAsync(cancellationToken);
+            await RollbackIfNeededAsync(CancellationToken.None);
 
             return Result<ArticleProjectionApplyResult>.Failure(
                 ReadingErrors.Projection.ProjectionApplyFailed);
         }
         catch (ReadingDomainException)
         {
-            await RollbackIfNeededAsync(cancellationToken);
+            await RollbackIfNeededAsync(CancellationToken.None);
 
             return Result<ArticleProjectionApplyResult>.Failure(
                 ReadingErrors.ValidationFailed);
+        }
+        catch
+        {
+            await RollbackIfNeededAsync(CancellationToken.None);
+            throw;
         }
     }
 

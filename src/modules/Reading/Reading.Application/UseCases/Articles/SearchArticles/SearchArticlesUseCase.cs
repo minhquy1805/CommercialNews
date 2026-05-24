@@ -1,3 +1,4 @@
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Reading.Application.Contracts.Articles.Requests;
 using Reading.Application.Contracts.Articles.Responses;
@@ -15,13 +16,16 @@ public sealed class SearchArticlesUseCase : ISearchArticlesUseCase
     public SearchArticlesUseCase(
         IArticleReadModelRepository articleReadModelRepository)
     {
-        _articleReadModelRepository = articleReadModelRepository;
+        _articleReadModelRepository = articleReadModelRepository
+            ?? throw new ArgumentNullException(nameof(articleReadModelRepository));
     }
 
     public async Task<Result<GetArticlesResponse>> ExecuteAsync(
         SearchArticlesRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         Error? validationError =
             SearchArticlesValidator.Validate(request);
 
@@ -31,12 +35,12 @@ public sealed class SearchArticlesUseCase : ISearchArticlesUseCase
         }
 
         var query = new SearchArticlesQuery(
-            Query: SearchArticlesValidator.NormalizeQuery(request.Query),
+            Keyword: SearchArticlesValidator.NormalizeQuery(request.Query),
             Page: request.Page,
             PageSize: request.PageSize,
             Sort: SearchArticlesValidator.NormalizeSort(request.Sort));
 
-        PagedReadingResult<ArticleListItemResult> result =
+        PagedQueryResult<ArticleListItemResult> result =
             await _articleReadModelRepository.SearchAsync(
                 query,
                 cancellationToken);
@@ -46,17 +50,20 @@ public sealed class SearchArticlesUseCase : ISearchArticlesUseCase
     }
 
     private static GetArticlesResponse MapToResponse(
-        PagedReadingResult<ArticleListItemResult> result)
+        PagedQueryResult<ArticleListItemResult> result)
     {
         return new GetArticlesResponse
         {
+            Items = result.Items
+                .Select(MapToResponse)
+                .ToList(),
+
             Page = result.Page,
             PageSize = result.PageSize,
             TotalItems = result.TotalItems,
-            TotalPages = result.TotalPages,
-            Items = result.Items
-                .Select(MapToResponse)
-                .ToList()
+            TotalPages = CalculateTotalPages(
+                result.TotalItems,
+                result.PageSize)
         };
     }
 
@@ -89,5 +96,17 @@ public sealed class SearchArticlesUseCase : ISearchArticlesUseCase
             CommentCount = item.CommentCount,
             PopularityScore = item.PopularityScore
         };
+    }
+
+    private static int CalculateTotalPages(
+        int totalItems,
+        int pageSize)
+    {
+        if (totalItems <= 0 || pageSize <= 0)
+        {
+            return 0;
+        }
+
+        return (int)Math.Ceiling(totalItems / (double)pageSize);
     }
 }

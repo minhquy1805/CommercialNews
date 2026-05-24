@@ -10,6 +10,7 @@
       * category/tag filtering
       * popularity sorting
       * related article lookup
+      * SEO route lookup and SEO projection freshness diagnostics
       * projection freshness diagnostics
       * async projection apply diagnostics
   - Idempotent: safe to re-run.
@@ -69,12 +70,25 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'[reading].[ArticleSeoRouteProjection]', N'U') IS NULL
+BEGIN
+    THROW 56107, 'Table [reading].[ArticleSeoRouteProjection] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[reading].[ArticleSeoMetadataProjection]', N'U') IS NULL
+BEGIN
+    THROW 56108, 'Table [reading].[ArticleSeoMetadataProjection] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
    1) [reading].[ArticleReadModel]
    ========================================================= */
 
-/* Public detail lookup by slug */
-IF NOT EXISTS
+/* ArticleReadModel no longer owns public slug routing.
+   SEO route lookup is projected through ArticleSeoRouteProjection. */
+IF EXISTS
 (
     SELECT 1
     FROM sys.indexes
@@ -82,29 +96,10 @@ IF NOT EXISTS
       AND object_id = OBJECT_ID(N'[reading].[ArticleReadModel]')
 )
 BEGIN
-    CREATE UNIQUE NONCLUSTERED INDEX [IX_ArticleReadModel_Public_Slug]
-    ON [reading].[ArticleReadModel]
-    (
-        [Slug] ASC
-    )
-    INCLUDE
-    (
-        [ArticleId],
-        [ArticlePublicId],
-        [Title],
-        [Summary],
-        [PublishedAtUtc],
-        [SourceVersion],
-        [LastSyncedAtUtc]
-    )
-    WHERE [Slug] IS NOT NULL
-      AND [IsPublic] = 1;
+    DROP INDEX [IX_ArticleReadModel_Public_Slug]
+        ON [reading].[ArticleReadModel];
 
-    PRINT N'Created index: [IX_ArticleReadModel_Public_Slug]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_ArticleReadModel_Public_Slug]';
+    PRINT N'Dropped obsolete index: [IX_ArticleReadModel_Public_Slug]';
 END
 GO
 
@@ -498,5 +493,132 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [IX_ArticleMediaProjectionState_LastSyncedAtUtc]';
+END
+GO
+
+/* =========================================================
+   5) [reading].[ArticleSeoRouteProjection]
+   ========================================================= */
+
+/* Remove an earlier over-strict unique projection index, if present. */
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'UX_ArticleSeoRouteProjection_Active_Slug'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleSeoRouteProjection]')
+)
+BEGIN
+    DROP INDEX [UX_ArticleSeoRouteProjection_Active_Slug]
+        ON [reading].[ArticleSeoRouteProjection];
+
+    PRINT N'Dropped obsolete unique index: [UX_ArticleSeoRouteProjection_Active_Slug]';
+END
+GO
+
+/* Active public route lookup by slug.
+   SEO owns uniqueness; Reading only serves projected state. */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleSeoRouteProjection_Active_Slug'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleSeoRouteProjection]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_ArticleSeoRouteProjection_Active_Slug]
+    ON [reading].[ArticleSeoRouteProjection]
+    (
+        [Scope] ASC,
+        [Slug] ASC
+    )
+    INCLUDE
+    (
+        [ResourceType],
+        [ResourcePublicId],
+        [CanonicalUrl],
+        [IsIndexable],
+        [SourceVersion],
+        [LastSyncedAtUtc]
+    )
+    WHERE [IsActive] = 1;
+
+    PRINT N'Created index: [IX_ArticleSeoRouteProjection_Active_Slug]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_ArticleSeoRouteProjection_Active_Slug]';
+END
+GO
+
+/* SEO route projection freshness scan / reconciliation */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleSeoRouteProjection_LastSyncedAtUtc'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleSeoRouteProjection]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_ArticleSeoRouteProjection_LastSyncedAtUtc]
+    ON [reading].[ArticleSeoRouteProjection]
+    (
+        [LastSyncedAtUtc] ASC,
+        [Scope] ASC,
+        [ResourceType] ASC,
+        [ResourcePublicId] ASC
+    )
+    INCLUDE
+    (
+        [Slug],
+        [IsActive],
+        [IsIndexable],
+        [SourceVersion],
+        [LastEventMessageId],
+        [LastSourceOccurredAtUtc]
+    );
+
+    PRINT N'Created index: [IX_ArticleSeoRouteProjection_LastSyncedAtUtc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_ArticleSeoRouteProjection_LastSyncedAtUtc]';
+END
+GO
+
+/* =========================================================
+   6) [reading].[ArticleSeoMetadataProjection]
+   ========================================================= */
+
+/* SEO metadata projection freshness scan / reconciliation */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleSeoMetadataProjection_LastSyncedAtUtc'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleSeoMetadataProjection]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_ArticleSeoMetadataProjection_LastSyncedAtUtc]
+    ON [reading].[ArticleSeoMetadataProjection]
+    (
+        [LastSyncedAtUtc] ASC,
+        [Scope] ASC,
+        [ResourceType] ASC,
+        [ResourcePublicId] ASC
+    )
+    INCLUDE
+    (
+        [IsManualOverride],
+        [SourceVersion],
+        [LastEventMessageId],
+        [LastSourceOccurredAtUtc]
+    );
+
+    PRINT N'Created index: [IX_ArticleSeoMetadataProjection_LastSyncedAtUtc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_ArticleSeoMetadataProjection_LastSyncedAtUtc]';
 END
 GO

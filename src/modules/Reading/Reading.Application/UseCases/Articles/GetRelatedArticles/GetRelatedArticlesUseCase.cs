@@ -15,13 +15,16 @@ public sealed class GetRelatedArticlesUseCase : IGetRelatedArticlesUseCase
     public GetRelatedArticlesUseCase(
         IArticleReadModelRepository articleReadModelRepository)
     {
-        _articleReadModelRepository = articleReadModelRepository;
+        _articleReadModelRepository = articleReadModelRepository
+            ?? throw new ArgumentNullException(nameof(articleReadModelRepository));
     }
 
     public async Task<Result<IReadOnlyList<ArticleListItemResponse>>> ExecuteAsync(
         GetRelatedArticlesRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         Error? validationError =
             GetRelatedArticlesValidator.Validate(request);
 

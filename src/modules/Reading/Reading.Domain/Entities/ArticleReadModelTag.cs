@@ -4,6 +4,10 @@ namespace Reading.Domain.Entities;
 
 public sealed class ArticleReadModelTag
 {
+    private const int PublicIdLength = 26;
+    private const int MaxNameLength = 150;
+    private const int MaxSlugLength = 200;
+
     private ArticleReadModelTag()
     {
     }
@@ -18,6 +22,9 @@ public sealed class ArticleReadModelTag
 
     public string? Slug { get; private set; }
 
+    /// <summary>
+    /// Content article snapshot version used to project the article's tags.
+    /// </summary>
     public long SourceVersion { get; private set; }
 
     public DateTime LastSyncedAtUtc { get; private set; }
@@ -35,7 +42,9 @@ public sealed class ArticleReadModelTag
         ValidateTagId(tagId);
         ValidateTagPublicId(tagPublicId);
         ValidateName(name);
-        ValidateSourceVersion(sourceVersion);
+        ValidateSlug(slug);
+        ValidateIncomingSourceVersion(sourceVersion);
+        ValidateLastSyncedAtUtc(lastSyncedAtUtc);
 
         return new ArticleReadModelTag
         {
@@ -51,6 +60,8 @@ public sealed class ArticleReadModelTag
 
     public bool CanApply(long incomingSourceVersion)
     {
+        ValidateIncomingSourceVersion(incomingSourceVersion);
+
         return incomingSourceVersion > SourceVersion;
     }
 
@@ -63,7 +74,9 @@ public sealed class ArticleReadModelTag
     {
         ValidateTagPublicId(tagPublicId);
         ValidateName(name);
-        ValidateSourceVersion(sourceVersion);
+        ValidateSlug(slug);
+        ValidateIncomingSourceVersion(sourceVersion);
+        ValidateLastSyncedAtUtc(lastSyncedAtUtc);
 
         if (!CanApply(sourceVersion))
         {
@@ -101,8 +114,12 @@ public sealed class ArticleReadModelTag
 
     private static void ValidateTagPublicId(string? tagPublicId)
     {
-        if (!string.IsNullOrWhiteSpace(tagPublicId)
-            && tagPublicId.Trim().Length != 26)
+        if (string.IsNullOrWhiteSpace(tagPublicId))
+        {
+            return;
+        }
+
+        if (tagPublicId.Trim().Length != PublicIdLength)
         {
             throw new ReadingDomainException(
                 "READING.INVALID_TAG_PUBLIC_ID",
@@ -118,25 +135,54 @@ public sealed class ArticleReadModelTag
                 "READING.INVALID_TAG_NAME",
                 "Tag name is required.");
         }
+
+        if (name.Trim().Length > MaxNameLength)
+        {
+            throw new ReadingDomainException(
+                "READING.TAG_NAME_TOO_LONG",
+                $"Tag name must not exceed {MaxNameLength} characters.");
+        }
     }
 
-    private static void ValidateSourceVersion(long sourceVersion)
+    private static void ValidateSlug(string? slug)
     {
-        if (sourceVersion < 0)
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            return;
+        }
+
+        if (slug.Trim().Length > MaxSlugLength)
+        {
+            throw new ReadingDomainException(
+                "READING.TAG_SLUG_TOO_LONG",
+                $"Tag slug must not exceed {MaxSlugLength} characters.");
+        }
+    }
+
+    private static void ValidateIncomingSourceVersion(long sourceVersion)
+    {
+        if (sourceVersion <= 0)
         {
             throw new ReadingDomainException(
                 "READING.INVALID_SOURCE_VERSION",
-                "Source version must be non-negative.");
+                "Source version must be greater than zero.");
+        }
+    }
+
+    private static void ValidateLastSyncedAtUtc(DateTime lastSyncedAtUtc)
+    {
+        if (lastSyncedAtUtc == default)
+        {
+            throw new ReadingDomainException(
+                "READING.INVALID_LAST_SYNCED_AT_UTC",
+                "Last synced timestamp is required.");
         }
     }
 
     private static string? NormalizeNullable(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return value.Trim();
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }

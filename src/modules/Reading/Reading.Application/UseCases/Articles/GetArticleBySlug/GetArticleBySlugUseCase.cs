@@ -5,77 +5,56 @@ using Reading.Application.Errors;
 using Reading.Application.Models.Queries;
 using Reading.Application.Models.Results;
 using Reading.Application.Ports.Persistence;
-using Reading.Application.Ports.Seo;
 using Reading.Application.Validation.Articles;
 
 namespace Reading.Application.UseCases.Articles.GetArticleBySlug;
 
 public sealed class GetArticleBySlugUseCase : IGetArticleBySlugUseCase
 {
-    private const string ArticleResourceType = "Article";
-    private const string ActiveRouteStatus = "Active";
-
-    private readonly ISeoRouteResolver _seoRouteResolver;
     private readonly IArticleReadModelRepository _articleReadModelRepository;
 
     public GetArticleBySlugUseCase(
-        ISeoRouteResolver seoRouteResolver,
         IArticleReadModelRepository articleReadModelRepository)
     {
-        _seoRouteResolver = seoRouteResolver;
-        _articleReadModelRepository = articleReadModelRepository;
+        _articleReadModelRepository = articleReadModelRepository
+            ?? throw new ArgumentNullException(nameof(articleReadModelRepository));
     }
 
     public async Task<Result<ArticleDetailResponse>> ExecuteAsync(
         GetArticleBySlugRequest request,
         CancellationToken cancellationToken = default)
     {
-        Error? validationError = GetArticleBySlugValidator.Validate(request);
+        ArgumentNullException.ThrowIfNull(request);
+
+        Error? validationError =
+            GetArticleBySlugValidator.Validate(request);
 
         if (validationError is not null)
         {
             return Result<ArticleDetailResponse>.Failure(validationError);
         }
 
-        string slug = GetArticleBySlugValidator.NormalizeSlug(request.Slug);
+        string slug = GetArticleBySlugValidator.NormalizeSlug(
+            request.Slug);
 
-        ResolvedSeoRouteResult? route =
-            await _seoRouteResolver.ResolveArticleSlugAsync(
-                slug,
-                cancellationToken);
-
-        if (route is null)
-        {
-            return Result<ArticleDetailResponse>.Failure(
-                ReadingErrors.Route.RouteNotResolved);
-        }
-
-        if (!IsArticleRoute(route))
-        {
-            return Result<ArticleDetailResponse>.Failure(
-                ReadingErrors.Route.RouteResourceTypeInvalid);
-        }
-
-        if (!IsActiveRoute(route))
-        {
-            return Result<ArticleDetailResponse>.Failure(
-                ReadingErrors.Route.RouteInactive);
-        }
-
-        if (string.IsNullOrWhiteSpace(route.ResourcePublicId))
-        {
-            return Result<ArticleDetailResponse>.Failure(
-                ReadingErrors.Route.RouteNotResolved);
-        }
-
-        var query = new GetArticleByPublicIdQuery(
-            route.ResourcePublicId.Trim());
+        var query = new GetArticleBySlugQuery(slug);
 
         ArticleDetailResult? article =
-            await _articleReadModelRepository.SelectByPublicIdAsync(
+            await _articleReadModelRepository.SelectBySlugAsync(
                 query,
                 cancellationToken);
 
+        /*
+          Reading serves from its asynchronous local route projection.
+
+          Null means one of:
+          - projected route does not exist yet;
+          - projected route is inactive;
+          - projected route is temporarily ambiguous;
+          - projected article is not currently public/published.
+
+          Public API deliberately fails closed and returns not found.
+        */
         if (article is null)
         {
             return Result<ArticleDetailResponse>.Failure(
@@ -83,41 +62,16 @@ public sealed class GetArticleBySlugUseCase : IGetArticleBySlugUseCase
         }
 
         return Result<ArticleDetailResponse>.Success(
-            MapToResponse(article, route));
-    }
-
-    private static bool IsArticleRoute(ResolvedSeoRouteResult route)
-    {
-        return string.Equals(
-            route.ResourceType,
-            ArticleResourceType,
-            StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsActiveRoute(ResolvedSeoRouteResult route)
-    {
-        if (string.IsNullOrWhiteSpace(route.Status))
-        {
-            return false;
-        }
-
-        return string.Equals(
-            route.Status,
-            ActiveRouteStatus,
-            StringComparison.OrdinalIgnoreCase);
+            MapToResponse(article));
     }
 
     private static ArticleDetailResponse MapToResponse(
-        ArticleDetailResult article,
-        ResolvedSeoRouteResult route)
+        ArticleDetailResult article)
     {
         return new ArticleDetailResponse
         {
             ArticlePublicId = article.ArticlePublicId,
-
-            // Prefer route slug/canonical from SEO resolve because SEO owns route truth.
-            Slug = route.Slug,
-            CanonicalUrl = route.CanonicalUrl ?? article.CanonicalUrl,
+            Slug = article.Slug,
 
             Title = article.Title,
             Summary = article.Summary,
@@ -133,8 +87,19 @@ public sealed class GetArticleBySlugUseCase : IGetArticleBySlugUseCase
             CoverMediaUrl = article.CoverMediaUrl,
             CoverAlt = article.CoverAlt,
 
+            CanonicalUrl = article.CanonicalUrl,
             MetaTitle = article.MetaTitle,
             MetaDescription = article.MetaDescription,
+
+            OgTitle = article.OgTitle,
+            OgDescription = article.OgDescription,
+            OgImageUrl = article.OgImageUrl,
+
+            TwitterTitle = article.TwitterTitle,
+            TwitterDescription = article.TwitterDescription,
+            TwitterImageUrl = article.TwitterImageUrl,
+
+            Robots = article.Robots,
 
             PublishedAtUtc = article.PublishedAtUtc,
             UpdatedAtUtc = article.UpdatedAtUtc,

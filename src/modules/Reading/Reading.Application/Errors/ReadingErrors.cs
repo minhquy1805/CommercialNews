@@ -57,7 +57,7 @@ public static class ReadingErrors
         public static readonly Error SlugTooLong =
             Error.Validation(
                 code: "READING.SLUG_TOO_LONG",
-                message: "Slug must not exceed 300 characters.");
+                message: "Slug must not exceed 200 characters.");
 
         public static readonly Error RouteNotResolved =
             Error.NotFound(

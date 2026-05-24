@@ -29,7 +29,7 @@ public static class ArticleMediaProjectionValidator
             || !HasValidOptionalText(command.Alt, AltMaxLength)
             || !HasValidOptionalText(command.Caption, CaptionMaxLength)
             || !HasValidRequiredText(command.MediaType, MediaTypeMaxLength)
-            || command.SortOrder < 0
+            || !HasValidSortOrder(command.SortOrder)
             || !HasValidSourceVersion(command.SourceVersion)
             || !HasValidMessageId(command.MessageId))
         {
@@ -54,7 +54,7 @@ public static class ArticleMediaProjectionValidator
             || !HasValidOptionalText(command.Alt, AltMaxLength)
             || !HasValidOptionalText(command.Caption, CaptionMaxLength)
             || !HasValidRequiredText(command.MediaType, MediaTypeMaxLength)
-            || command.SortOrder < 0
+            || !HasValidSortOrder(command.SortOrder)
             || !HasValidSourceVersion(command.SourceVersion)
             || !HasValidMessageId(command.MessageId))
         {
@@ -73,15 +73,7 @@ public static class ArticleMediaProjectionValidator
         }
 
         if (!HasValidArticleId(command.ArticleId)
-            || command.Items is null
-            || command.Items.Count == 0
-            || command.Items.Any(item =>
-                !HasValidMediaId(item.MediaId)
-                || item.SortOrder < 0)
-            || command.Items
-                .Select(item => item.MediaId)
-                .Distinct()
-                .Count() != command.Items.Count
+            || !HasValidReorderItems(command.Items)
             || !HasValidSourceVersion(command.SourceVersion)
             || !HasValidMessageId(command.MessageId))
         {
@@ -154,6 +146,7 @@ public static class ArticleMediaProjectionValidator
                     MediaId: item.MediaId,
                     SortOrder: item.SortOrder))
                 .ToArray(),
+
             MessageId = NormalizeNullable(command.MessageId)
         };
     }
@@ -167,6 +160,35 @@ public static class ArticleMediaProjectionValidator
         {
             MessageId = NormalizeNullable(command.MessageId)
         };
+    }
+
+    private static bool HasValidReorderItems(
+        IReadOnlyCollection<ArticleMediaProjectionOrderItem>? items)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return false;
+        }
+
+        if (items.Any(item =>
+                !HasValidMediaId(item.MediaId)
+                || !HasValidSortOrder(item.SortOrder)))
+        {
+            return false;
+        }
+
+        /*
+          Reading rejects duplicate MediaId entries because one incoming
+          attachment-set snapshot must not contain contradictory order updates
+          for the same projected media item.
+
+          SortOrder uniqueness is intentionally not enforced here. Media owns
+          attachment ordering truth; Reading projects the source state.
+        */
+        return items
+            .Select(item => item.MediaId)
+            .Distinct()
+            .Count() == items.Count;
     }
 
     private static bool HasValidArticleId(long articleId)
@@ -188,6 +210,11 @@ public static class ArticleMediaProjectionValidator
     private static bool HasValidSourceVersion(long sourceVersion)
     {
         return sourceVersion > 0;
+    }
+
+    private static bool HasValidSortOrder(int sortOrder)
+    {
+        return sortOrder >= 0;
     }
 
     private static bool HasValidMessageId(string? messageId)

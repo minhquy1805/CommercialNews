@@ -7,12 +7,15 @@ using Reading.Application.Models.Results;
 using Reading.Application.Ports.Persistence;
 using Reading.Infrastructure.Persistence.Exceptions;
 using Reading.Infrastructure.Persistence.Sql;
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
+using Reading.Domain.Constants;
 
 namespace Reading.Infrastructure.Persistence.Repositories;
 
 public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 {
     private const string SelectByPublicIdProc = "[reading].[Reading_ArticleReadModel_SelectByPublicId]";
+    private const string SelectBySlugProc = "[reading].[Reading_ArticleReadModel_SelectBySlug]";
     private const string SelectSkipAndTakeProc = "[reading].[Reading_ArticleReadModel_SelectSkipAndTake]";
     private const string SearchProc = "[reading].[Reading_ArticleReadModel_Search]";
     private const string SelectRelatedProc = "[reading].[Reading_ArticleReadModel_SelectRelated]";
@@ -22,6 +25,8 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
     private const string SetPrimaryMediaProc = "[reading].[Reading_ArticleReadModelMedia_SetPrimaryFromMedia]";
     private const string ReorderMediaProc = "[reading].[Reading_ArticleReadModelMedia_ReorderFromMedia]";
     private const string DetachMediaProc = "[reading].[Reading_ArticleReadModelMedia_DetachFromMedia]";
+    private const string ApplySeoRouteProc = "[reading].[Reading_ArticleSeoRouteProjection_ApplyFromSeo]";
+    private const string ApplySeoMetadataProc = "[reading].[Reading_ArticleSeoMetadataProjection_ApplyFromSeo]";
 
     private readonly ReadingUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
@@ -108,7 +113,51 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         }
     }
 
-    public async Task<PagedReadingResult<ArticleListItemResult>> SelectSkipAndTakeAsync(
+    public async Task<ArticleDetailResult?> SelectBySlugAsync(
+        GetArticleBySlugQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateReadCommandAsync(SelectBySlugProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@Slug", SqlDbType.NVarChar, 200)
+                    {
+                        Value = query.Slug
+                    });
+
+                using SqlDataReader reader =
+                    await command.ExecuteReaderAsync(cancellationToken);
+
+                return await ReadArticleDetailAsync(
+                    reader,
+                    cancellationToken);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<PagedQueryResult<ArticleListItemResult>> SelectSkipAndTakeAsync(
         GetArticlesQuery query,
         CancellationToken cancellationToken = default)
     {
@@ -134,19 +183,19 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                     await command.ExecuteReaderAsync(cancellationToken);
 
                 List<ArticleListItemResult> items = [];
-                long totalItems = 0;
+                int totalItems = 0;
 
                 while (await reader.ReadAsync(cancellationToken))
                 {
                     if (totalItems == 0)
                     {
-                        totalItems = GetInt64OrInt32(reader, "TotalCount");
+                        totalItems = GetInt32OrInt64Checked(reader, "TotalCount");
                     }
 
                     items.Add(MapArticleListItem(reader));
                 }
 
-                return new PagedReadingResult<ArticleListItemResult>
+                return new PagedQueryResult<ArticleListItemResult>
                 {
                     Items = items,
                     Page = page,
@@ -168,7 +217,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         }
     }
 
-    public async Task<PagedReadingResult<ArticleListItemResult>> SearchAsync(
+    public async Task<PagedQueryResult<ArticleListItemResult>> SearchAsync(
         SearchArticlesQuery query,
         CancellationToken cancellationToken = default)
     {
@@ -178,6 +227,10 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
         try
         {
+            int page = query.Page < 1 ? 1 : query.Page;
+            int pageSize = NormalizePageSize(query.PageSize);
+            int skip = (page - 1) * pageSize;
+
             (SqlCommand command, SqlConnection? connection) =
                 await CreateReadCommandAsync(SearchProc, cancellationToken);
 
@@ -185,15 +238,11 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
             using (command)
             {
-                int page = query.Page < 1 ? 1 : query.Page;
-                int pageSize = NormalizePageSize(query.PageSize);
-                int skip = (page - 1) * pageSize;
-
                 command.Parameters.AddRange(
                 [
                     new SqlParameter("@Keyword", SqlDbType.NVarChar, 300)
                     {
-                        Value = query.Query
+                        Value = query.Keyword
                     },
                     new SqlParameter("@Skip", SqlDbType.Int)
                     {
@@ -205,11 +254,11 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                     },
                     new SqlParameter("@SortBy", SqlDbType.NVarChar, 30)
                     {
-                        Value = GetSortBy(query.Sort)
+                        Value = ReadingSortValues.ToSortBy(query.Sort)
                     },
                     new SqlParameter("@SortDirection", SqlDbType.NVarChar, 4)
                     {
-                        Value = GetSortDirection(query.Sort)
+                        Value = ReadingSortValues.ToSortDirection(query.Sort)
                     }
                 ]);
 
@@ -217,19 +266,19 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                     await command.ExecuteReaderAsync(cancellationToken);
 
                 List<ArticleListItemResult> items = [];
-                long totalItems = 0;
+                int totalItems = 0;
 
                 while (await reader.ReadAsync(cancellationToken))
                 {
                     if (totalItems == 0)
                     {
-                        totalItems = GetInt64OrInt32(reader, "TotalCount");
+                        totalItems = GetInt32OrInt64Checked(reader, "TotalCount");
                     }
 
                     items.Add(MapArticleListItem(reader));
                 }
 
-                return new PagedReadingResult<ArticleListItemResult>
+                return new PagedQueryResult<ArticleListItemResult>
                 {
                     Items = items,
                     Page = page,
@@ -414,6 +463,164 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 new SqlParameter("@Status", SqlDbType.NVarChar, 30)
                 {
                     Value = commandModel.Status
+                },
+                new SqlParameter("@SourceVersion", SqlDbType.BigInt)
+                {
+                    Value = commandModel.SourceVersion
+                },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26)
+                {
+                    Value = ToDbValue(commandModel.MessageId)
+                },
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
+            ]);
+
+            using SqlDataReader reader =
+                await command.ExecuteReaderAsync(cancellationToken);
+
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
+    public async Task<ArticleProjectionApplyResult> ApplySeoRouteAsync(
+        ApplyArticleSeoRouteProjectionCommand commandModel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandModel);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(ApplySeoRouteProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@Scope", SqlDbType.VarChar, 30)
+                {
+                    Value = commandModel.Scope
+                },
+                new SqlParameter("@ResourceType", SqlDbType.VarChar, 50)
+                {
+                    Value = commandModel.ResourceType
+                },
+                new SqlParameter("@ResourcePublicId", SqlDbType.Char, 26)
+                {
+                    Value = commandModel.ResourcePublicId
+                },
+                new SqlParameter("@Slug", SqlDbType.NVarChar, 200)
+                {
+                    Value = commandModel.Slug
+                },
+                new SqlParameter("@CanonicalUrl", SqlDbType.NVarChar, 500)
+                {
+                    Value = ToDbValue(commandModel.CanonicalUrl)
+                },
+                new SqlParameter("@IsActive", SqlDbType.Bit)
+                {
+                    Value = commandModel.IsActive
+                },
+                new SqlParameter("@IsIndexable", SqlDbType.Bit)
+                {
+                    Value = commandModel.IsIndexable
+                },
+                new SqlParameter("@SourceVersion", SqlDbType.BigInt)
+                {
+                    Value = commandModel.SourceVersion
+                },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26)
+                {
+                    Value = ToDbValue(commandModel.MessageId)
+                },
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
+            ]);
+
+            using SqlDataReader reader =
+                await command.ExecuteReaderAsync(cancellationToken);
+
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
+    public async Task<ArticleProjectionApplyResult> ApplySeoMetadataAsync(
+        ApplyArticleSeoMetadataProjectionCommand commandModel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandModel);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(ApplySeoMetadataProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@Scope", SqlDbType.VarChar, 30)
+                {
+                    Value = commandModel.Scope
+                },
+                new SqlParameter("@ResourceType", SqlDbType.VarChar, 50)
+                {
+                    Value = commandModel.ResourceType
+                },
+                new SqlParameter("@ResourcePublicId", SqlDbType.Char, 26)
+                {
+                    Value = commandModel.ResourcePublicId
+                },
+                new SqlParameter("@MetaTitle", SqlDbType.NVarChar, 300)
+                {
+                    Value = ToDbValue(commandModel.MetaTitle)
+                },
+                new SqlParameter("@MetaDescription", SqlDbType.NVarChar, 500)
+                {
+                    Value = ToDbValue(commandModel.MetaDescription)
+                },
+                new SqlParameter("@OgTitle", SqlDbType.NVarChar, 300)
+                {
+                    Value = ToDbValue(commandModel.OgTitle)
+                },
+                new SqlParameter("@OgDescription", SqlDbType.NVarChar, 500)
+                {
+                    Value = ToDbValue(commandModel.OgDescription)
+                },
+                new SqlParameter("@OgImageUrl", SqlDbType.NVarChar, 800)
+                {
+                    Value = ToDbValue(commandModel.OgImageUrl)
+                },
+                new SqlParameter("@TwitterTitle", SqlDbType.NVarChar, 300)
+                {
+                    Value = ToDbValue(commandModel.TwitterTitle)
+                },
+                new SqlParameter("@TwitterDescription", SqlDbType.NVarChar, 500)
+                {
+                    Value = ToDbValue(commandModel.TwitterDescription)
+                },
+                new SqlParameter("@TwitterImageUrl", SqlDbType.NVarChar, 800)
+                {
+                    Value = ToDbValue(commandModel.TwitterImageUrl)
+                },
+                new SqlParameter("@Robots", SqlDbType.NVarChar, 100)
+                {
+                    Value = ToDbValue(commandModel.Robots)
+                },
+                new SqlParameter("@IsManualOverride", SqlDbType.Bit)
+                {
+                    Value = commandModel.IsManualOverride
                 },
                 new SqlParameter("@SourceVersion", SqlDbType.BigInt)
                 {
@@ -628,11 +835,11 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
             },
             new SqlParameter("@SortBy", SqlDbType.NVarChar, 30)
             {
-                Value = GetSortBy(query.Sort)
+                Value = ReadingSortValues.ToSortBy(query.Sort)
             },
             new SqlParameter("@SortDirection", SqlDbType.NVarChar, 4)
             {
-                Value = GetSortDirection(query.Sort)
+                Value = ReadingSortValues.ToSortDirection(query.Sort)
             }
         ]);
     }
@@ -685,6 +892,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
             ArticleId = reader.GetInt64(reader.GetOrdinal("ArticleId")),
             ArticlePublicId = reader.GetString(reader.GetOrdinal("ArticlePublicId")),
             Slug = GetNullableString(reader, "Slug"),
+
             Title = reader.GetString(reader.GetOrdinal("Title")),
             Summary = reader.GetString(reader.GetOrdinal("Summary")),
             Body = reader.GetString(reader.GetOrdinal("Body")),
@@ -702,6 +910,19 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
             CanonicalUrl = GetNullableString(reader, "CanonicalUrl"),
             MetaTitle = GetNullableString(reader, "MetaTitle"),
             MetaDescription = GetNullableString(reader, "MetaDescription"),
+
+            OgTitle = GetNullableString(reader, "OgTitle"),
+            OgDescription = GetNullableString(reader, "OgDescription"),
+            OgImageUrl = GetNullableString(reader, "OgImageUrl"),
+
+            TwitterTitle = GetNullableString(reader, "TwitterTitle"),
+            TwitterDescription = GetNullableString(reader, "TwitterDescription"),
+            TwitterImageUrl = GetNullableString(reader, "TwitterImageUrl"),
+
+            Robots = GetNullableString(reader, "Robots"),
+            SeoIsManualOverride = GetBooleanOrDefault(reader, "SeoIsManualOverride"),
+            SeoRouteIsActive = GetBooleanOrDefault(reader, "SeoRouteIsActive"),
+            SeoIsIndexable = GetBooleanOrDefault(reader, "SeoIsIndexable"),
 
             PublishedAtUtc = GetNullableDateTime(reader, "PublishedAtUtc"),
             UpdatedAtUtc = reader.GetDateTime(reader.GetOrdinal("UpdatedAtUtc")),
@@ -777,33 +998,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
             return 20;
         }
 
-        return pageSize > 100 ? 100 : pageSize;
-    }
-
-    private static string GetSortBy(string? sort)
-    {
-        if (string.IsNullOrWhiteSpace(sort))
-        {
-            return "PublishedAt";
-        }
-
-        string normalized = sort.Trim().TrimStart('-');
-
-        return normalized.Equals("popularity", StringComparison.OrdinalIgnoreCase)
-            ? "Popularity"
-            : "PublishedAt";
-    }
-
-    private static string GetSortDirection(string? sort)
-    {
-        if (string.IsNullOrWhiteSpace(sort))
-        {
-            return "DESC";
-        }
-
-        return sort.Trim().StartsWith("-", StringComparison.Ordinal)
-            ? "DESC"
-            : "ASC";
+        return pageSize > 200 ? 200 : pageSize;
     }
 
     private static object ToDbValue(object? value) => value ?? DBNull.Value;
@@ -841,12 +1036,8 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
     {
         if (!await reader.ReadAsync(cancellationToken))
         {
-            return new ArticleProjectionApplyResult
-            {
-                Applied = false,
-                Decision = "NoResult",
-                IncomingSourceVersion = incomingSourceVersion
-            };
+            throw new InvalidOperationException(
+                "Reading projection apply procedure did not return an apply result row.");
         }
 
         int appliedOrdinal = TryGetOrdinal(reader, "Applied");
@@ -854,18 +1045,29 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         int previousSourceVersionOrdinal = TryGetOrdinal(reader, "PreviousSourceVersion");
         int incomingSourceVersionOrdinal = TryGetOrdinal(reader, "IncomingSourceVersion");
 
+        string decision = decisionOrdinal >= 0 && !reader.IsDBNull(decisionOrdinal)
+            ? reader.GetString(decisionOrdinal)
+            : ProjectionApplyDecisions.Ignored;
+
+        if (!ProjectionApplyDecisions.IsValid(decision))
+        {
+            throw new InvalidOperationException(
+                $"Reading projection apply procedure returned an unknown decision '{decision}'.");
+        }
+
         return new ArticleProjectionApplyResult
         {
             Applied = appliedOrdinal >= 0
-                      && !reader.IsDBNull(appliedOrdinal)
-                      && reader.GetBoolean(appliedOrdinal),
-            Decision = decisionOrdinal >= 0 && !reader.IsDBNull(decisionOrdinal)
-                ? reader.GetString(decisionOrdinal)
-                : string.Empty,
+                    && !reader.IsDBNull(appliedOrdinal)
+                    && reader.GetBoolean(appliedOrdinal),
+
+            Decision = decision,
+
             PreviousSourceVersion = previousSourceVersionOrdinal >= 0
                                     && !reader.IsDBNull(previousSourceVersionOrdinal)
                 ? reader.GetInt64(previousSourceVersionOrdinal)
                 : null,
+
             IncomingSourceVersion = incomingSourceVersionOrdinal >= 0
                                     && !reader.IsDBNull(incomingSourceVersionOrdinal)
                 ? reader.GetInt64(incomingSourceVersionOrdinal)
@@ -906,7 +1108,9 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         return reader.GetInt64(ordinal);
     }
 
-    private static long GetInt64OrInt32(SqlDataReader reader, string columnName)
+    private static int GetInt32OrInt64Checked(
+        SqlDataReader reader,
+        string columnName)
     {
         int ordinal = TryGetOrdinal(reader, columnName);
 
@@ -922,7 +1126,43 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
             return reader.GetInt32(ordinal);
         }
 
-        return reader.GetInt64(ordinal);
+        return checked((int)reader.GetInt64(ordinal));
+    }
+
+    private static async Task<ArticleDetailResult?> ReadArticleDetailAsync(
+        SqlDataReader reader,
+        CancellationToken cancellationToken)
+    {
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        ArticleDetailCore detailCore = MapArticleDetailCore(reader);
+
+        List<ArticleTagResult> tags = [];
+        List<ArticleMediaResult> media = [];
+
+        if (await reader.NextResultAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                tags.Add(MapArticleTag(reader));
+            }
+        }
+
+        if (await reader.NextResultAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                media.Add(MapArticleMedia(reader));
+            }
+        }
+
+        return ToArticleDetailResult(
+            detailCore,
+            tags,
+            media);
     }
 
     private static DateTime? GetNullableDateTime(SqlDataReader reader, string columnName)
@@ -952,6 +1192,20 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         object value = reader.GetValue(ordinal);
 
         return Convert.ToDouble(value);
+    }
+
+    private static bool GetBooleanOrDefault(
+        SqlDataReader reader,
+        string columnName)
+    {
+        int ordinal = TryGetOrdinal(reader, columnName);
+
+        if (ordinal < 0 || reader.IsDBNull(ordinal))
+        {
+            return false;
+        }
+
+        return reader.GetBoolean(ordinal);
     }
 
     private static int TryGetOrdinal(SqlDataReader reader, string columnName)
@@ -999,6 +1253,19 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
             MetaTitle = core.MetaTitle,
             MetaDescription = core.MetaDescription,
 
+            OgTitle = core.OgTitle,
+            OgDescription = core.OgDescription,
+            OgImageUrl = core.OgImageUrl,
+
+            TwitterTitle = core.TwitterTitle,
+            TwitterDescription = core.TwitterDescription,
+            TwitterImageUrl = core.TwitterImageUrl,
+
+            Robots = core.Robots,
+            SeoIsManualOverride = core.SeoIsManualOverride,
+            SeoRouteIsActive = core.SeoRouteIsActive,
+            SeoIsIndexable = core.SeoIsIndexable,
+
             PublishedAtUtc = core.PublishedAtUtc,
             UpdatedAtUtc = core.UpdatedAtUtc,
 
@@ -1045,6 +1312,26 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         public string? MetaTitle { get; init; }
 
         public string? MetaDescription { get; init; }
+
+        public string? OgTitle { get; init; }
+
+        public string? OgDescription { get; init; }
+
+        public string? OgImageUrl { get; init; }
+
+        public string? TwitterTitle { get; init; }
+
+        public string? TwitterDescription { get; init; }
+
+        public string? TwitterImageUrl { get; init; }
+
+        public string? Robots { get; init; }
+
+        public bool SeoIsManualOverride { get; init; }
+
+        public bool SeoRouteIsActive { get; init; }
+
+        public bool SeoIsIndexable { get; init; }
 
         public DateTime? PublishedAtUtc { get; init; }
 

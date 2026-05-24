@@ -2,49 +2,63 @@ namespace Reading.Application.Contracts.Articles.Responses;
 
 public sealed class ArticleDetailResponse
 {
-    public string ArticlePublicId { get; set; } = string.Empty;
+    public string ArticlePublicId { get; init; } = string.Empty;
 
-    public string? Slug { get; set; }
+    public string? Slug { get; init; }
 
-    public string Title { get; set; } = string.Empty;
+    public string Title { get; init; } = string.Empty;
 
-    public string Summary { get; set; } = string.Empty;
+    public string Summary { get; init; } = string.Empty;
 
-    public string Body { get; set; } = string.Empty;
+    public string Body { get; init; } = string.Empty;
 
-    public long? CategoryId { get; set; }
+    public long? CategoryId { get; init; }
 
-    public string? CategoryName { get; set; }
+    public string? CategoryName { get; init; }
 
-    public long? AuthorUserId { get; set; }
+    public long? AuthorUserId { get; init; }
 
-    public string? AuthorDisplayName { get; set; }
+    public string? AuthorDisplayName { get; init; }
 
-    public long? CoverMediaId { get; set; }
+    public long? CoverMediaId { get; init; }
 
-    public string? CoverMediaUrl { get; set; }
+    public string? CoverMediaUrl { get; init; }
 
-    public string? CoverAlt { get; set; }
+    public string? CoverAlt { get; init; }
 
-    public string? CanonicalUrl { get; set; }
+    public string? CanonicalUrl { get; init; }
 
-    public string? MetaTitle { get; set; }
+    public string? MetaTitle { get; init; }
 
-    public string? MetaDescription { get; set; }
+    public string? MetaDescription { get; init; }
 
-    public DateTime? PublishedAtUtc { get; set; }
+    public string? OgTitle { get; init; }
 
-    public DateTime UpdatedAtUtc { get; set; }
+    public string? OgDescription { get; init; }
 
-    public long ViewCount { get; set; }
+    public string? OgImageUrl { get; init; }
 
-    public long LikeCount { get; set; }
+    public string? TwitterTitle { get; init; }
 
-    public long CommentCount { get; set; }
+    public string? TwitterDescription { get; init; }
 
-    public double? PopularityScore { get; set; }
+    public string? TwitterImageUrl { get; init; }
 
-    public IReadOnlyList<ArticleTagResponse> Tags { get; set; } = [];
+    public string? Robots { get; init; }
 
-    public IReadOnlyList<ArticleMediaResponse> Media { get; set; } = [];
+    public DateTime? PublishedAtUtc { get; init; }
+
+    public DateTime UpdatedAtUtc { get; init; }
+
+    public long ViewCount { get; init; }
+
+    public long LikeCount { get; init; }
+
+    public long CommentCount { get; init; }
+
+    public double? PopularityScore { get; init; }
+
+    public IReadOnlyList<ArticleTagResponse> Tags { get; init; } = [];
+
+    public IReadOnlyList<ArticleMediaResponse> Media { get; init; } = [];
 }
