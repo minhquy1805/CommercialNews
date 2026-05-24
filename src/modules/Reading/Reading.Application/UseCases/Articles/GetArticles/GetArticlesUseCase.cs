@@ -1,3 +1,4 @@
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Reading.Application.Contracts.Articles.Requests;
 using Reading.Application.Contracts.Articles.Responses;
@@ -16,9 +17,11 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
 
     private readonly IArticleReadModelRepository _articleReadModelRepository;
 
-    public GetArticlesUseCase(IArticleReadModelRepository articleReadModelRepository)
+    public GetArticlesUseCase(
+        IArticleReadModelRepository articleReadModelRepository)
     {
-        _articleReadModelRepository = articleReadModelRepository;
+        _articleReadModelRepository = articleReadModelRepository
+            ?? throw new ArgumentNullException(nameof(articleReadModelRepository));
     }
 
     public async Task<Result<GetArticlesResponse>> ExecuteAsync(
@@ -45,20 +48,21 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
                 ReadingErrors.Query.PageSizeTooLarge);
         }
 
-        if (request.CategoryId.HasValue && request.CategoryId.Value <= 0)
+        if (request.CategoryId is <= 0)
         {
             return Result<GetArticlesResponse>.Failure(
                 ReadingErrors.Query.InvalidCategoryId);
         }
 
-        if (request.TagId.HasValue && request.TagId.Value <= 0)
+        if (request.TagId is <= 0)
         {
             return Result<GetArticlesResponse>.Failure(
                 ReadingErrors.Query.InvalidTagId);
         }
 
-        if (!string.IsNullOrWhiteSpace(request.Keyword)
-            && request.Keyword.Trim().Length > MaxKeywordLength)
+        string? keyword = NormalizeNullable(request.Keyword);
+
+        if (keyword is not null && keyword.Length > MaxKeywordLength)
         {
             return Result<GetArticlesResponse>.Failure(
                 ReadingErrors.Query.SearchQueryTooLong);
@@ -79,10 +83,10 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
             PageSize: request.PageSize,
             CategoryId: request.CategoryId,
             TagId: request.TagId,
-            Keyword: NormalizeNullable(request.Keyword),
+            Keyword: keyword,
             Sort: sort);
 
-        PagedReadingResult<ArticleListItemResult> result =
+        PagedQueryResult<ArticleListItemResult> result =
             await _articleReadModelRepository.SelectSkipAndTakeAsync(
                 query,
                 cancellationToken);
@@ -92,17 +96,20 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
     }
 
     private static GetArticlesResponse MapToResponse(
-        PagedReadingResult<ArticleListItemResult> result)
+        PagedQueryResult<ArticleListItemResult> result)
     {
         return new GetArticlesResponse
         {
+            Items = result.Items
+                .Select(MapToResponse)
+                .ToList(),
+
             Page = result.Page,
             PageSize = result.PageSize,
             TotalItems = result.TotalItems,
-            TotalPages = result.TotalPages,
-            Items = result.Items
-                .Select(MapToResponse)
-                .ToList()
+            TotalPages = CalculateTotalPages(
+                result.TotalItems,
+                result.PageSize)
         };
     }
 
@@ -113,6 +120,7 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
         {
             ArticlePublicId = item.ArticlePublicId,
             Slug = item.Slug,
+
             Title = item.Title,
             Summary = item.Summary,
 
@@ -136,13 +144,22 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
         };
     }
 
-    private static string? NormalizeNullable(string? value)
+    private static int CalculateTotalPages(
+        int totalItems,
+        int pageSize)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        if (totalItems <= 0 || pageSize <= 0)
         {
-            return null;
+            return 0;
         }
 
-        return value.Trim();
+        return (int)Math.Ceiling(totalItems / (double)pageSize);
+    }
+
+    private static string? NormalizeNullable(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }

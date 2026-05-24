@@ -34,6 +34,26 @@ public sealed class ArticleDetailResult
 
     public string? MetaDescription { get; init; }
 
+    public string? OgTitle { get; init; }
+
+    public string? OgDescription { get; init; }
+
+    public string? OgImageUrl { get; init; }
+
+    public string? TwitterTitle { get; init; }
+
+    public string? TwitterDescription { get; init; }
+
+    public string? TwitterImageUrl { get; init; }
+
+    public string? Robots { get; init; }
+
+    public bool SeoIsManualOverride { get; init; }
+
+    public bool SeoRouteIsActive { get; init; }
+
+    public bool SeoIsIndexable { get; init; }
+
     public DateTime? PublishedAtUtc { get; init; }
 
     public DateTime UpdatedAtUtc { get; init; }

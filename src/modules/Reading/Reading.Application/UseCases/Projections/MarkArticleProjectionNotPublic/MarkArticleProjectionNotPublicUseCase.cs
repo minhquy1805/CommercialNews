@@ -5,6 +5,7 @@ using Reading.Application.Models.Commands;
 using Reading.Application.Models.Results;
 using Reading.Application.Ports.Persistence;
 using Reading.Application.Validation.Projections;
+using Reading.Domain.Exceptions;
 
 namespace Reading.Application.UseCases.Projections.MarkArticleProjectionNotPublic;
 
@@ -18,8 +19,11 @@ public sealed class MarkArticleProjectionNotPublicUseCase
         IArticleReadModelRepository articleReadModelRepository,
         IReadingUnitOfWork unitOfWork)
     {
-        _articleReadModelRepository = articleReadModelRepository;
-        _unitOfWork = unitOfWork;
+        _articleReadModelRepository = articleReadModelRepository
+            ?? throw new ArgumentNullException(nameof(articleReadModelRepository));
+
+        _unitOfWork = unitOfWork
+            ?? throw new ArgumentNullException(nameof(unitOfWork));
     }
 
     public async Task<Result<ArticleProjectionApplyResult>> ExecuteAsync(
@@ -51,28 +55,39 @@ public sealed class MarkArticleProjectionNotPublicUseCase
 
             return Result<ArticleProjectionApplyResult>.Success(result);
         }
-        catch (PersistenceException exception)
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
         {
-            if (_unitOfWork.HasActiveTransaction)
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-            }
-
-            return Result<ArticleProjectionApplyResult>.Failure(
-                Error.Failure(
-                    code: exception.Code,
-                    message: exception.Message,
-                    exception.InnerException?.Message ?? string.Empty));
+            await RollbackIfNeededAsync(CancellationToken.None);
+            throw;
         }
-        catch
+        catch (PersistenceException)
         {
-            if (_unitOfWork.HasActiveTransaction)
-            {
-                await _unitOfWork.RollbackAsync(cancellationToken);
-            }
+            await RollbackIfNeededAsync(CancellationToken.None);
 
             return Result<ArticleProjectionApplyResult>.Failure(
                 ReadingErrors.Projection.ProjectionApplyFailed);
+        }
+        catch (ReadingDomainException)
+        {
+            await RollbackIfNeededAsync(CancellationToken.None);
+
+            return Result<ArticleProjectionApplyResult>.Failure(
+                ReadingErrors.ValidationFailed);
+        }
+        catch
+        {
+            await RollbackIfNeededAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task RollbackIfNeededAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_unitOfWork.HasActiveTransaction)
+        {
+            await _unitOfWork.RollbackAsync(cancellationToken);
         }
     }
 }
