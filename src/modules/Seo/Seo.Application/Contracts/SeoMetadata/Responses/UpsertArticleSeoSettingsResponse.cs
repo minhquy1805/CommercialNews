@@ -46,5 +46,9 @@ public sealed class UpsertArticleSeoSettingsResponse
 
     public DateTime? LastSyncedAtUtc { get; init; }
 
+    public int? SlugRouteVersion { get; init; }
+
+    public int? SeoMetadataVersion { get; init; }
+
     public int Version { get; init; }
 }

@@ -55,6 +55,14 @@ public static class SeoErrors
                 message: "Article public id is required or invalid.");
     }
 
+    public static class Actor
+    {
+        public static readonly Error NotFound =
+            Error.NotFound(
+                code: "SEO.ACTOR_NOT_FOUND",
+                message: "Actor user was not found.");
+    }
+
     public static class SlugRegistry
     {
         public static readonly Error NotFound =

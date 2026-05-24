@@ -78,6 +78,8 @@ public sealed class GetArticleSeoSettingsUseCase : IGetArticleSeoSettingsUseCase
                     SourceAggregateVersion = result.SourceAggregateVersion,
                     LastAppliedMessageId = result.LastAppliedMessageId,
                     LastSyncedAtUtc = result.LastSyncedAtUtc,
+                    SlugRouteVersion = result.SlugRouteVersion,
+                    SeoMetadataVersion = result.SeoMetadataVersion,
                     Version = result.Version
                 });
         }

@@ -9,6 +9,8 @@ using Media.Application.Models.Commands;
 using Media.Application.Models.Results;
 using Media.Application.Ports.Persistence;
 using Media.Application.Ports.Services;
+using Media.Domain.Constants;
+using Media.Domain.Entities;
 using Media.Domain.Exceptions;
 
 namespace Media.Application.UseCases.ArticleMedia.AttachMediaToArticle;
@@ -16,6 +18,7 @@ namespace Media.Application.UseCases.ArticleMedia.AttachMediaToArticle;
 public sealed class AttachMediaToArticleUseCase : IAttachMediaToArticleUseCase
 {
     private readonly IArticleMediaRepository _articleMediaRepository;
+    private readonly IMediaAssetRepository _mediaAssetRepository;
     private readonly IMediaUnitOfWork _unitOfWork;
     private readonly IMediaOutboxWriter _mediaOutboxWriter;
     private readonly IDateTimeProvider _dateTimeProvider;
@@ -23,6 +26,7 @@ public sealed class AttachMediaToArticleUseCase : IAttachMediaToArticleUseCase
 
     public AttachMediaToArticleUseCase(
         IArticleMediaRepository articleMediaRepository,
+        IMediaAssetRepository mediaAssetRepository,
         IMediaUnitOfWork unitOfWork,
         IMediaOutboxWriter mediaOutboxWriter,
         IDateTimeProvider dateTimeProvider,
@@ -30,6 +34,9 @@ public sealed class AttachMediaToArticleUseCase : IAttachMediaToArticleUseCase
     {
         _articleMediaRepository = articleMediaRepository
             ?? throw new ArgumentNullException(nameof(articleMediaRepository));
+
+        _mediaAssetRepository = mediaAssetRepository
+            ?? throw new ArgumentNullException(nameof(mediaAssetRepository));
 
         _unitOfWork = unitOfWork
             ?? throw new ArgumentNullException(nameof(unitOfWork));
@@ -71,6 +78,19 @@ public sealed class AttachMediaToArticleUseCase : IAttachMediaToArticleUseCase
             {
                 return Result<AttachMediaToArticleResponse>.Failure(
                     MediaErrors.Actor.NotFound);
+            }
+
+            if (request.IsPrimary)
+            {
+                Error? primaryMediaError = await ValidatePrimaryMediaAsync(
+                    request.MediaId,
+                    cancellationToken);
+
+                if (primaryMediaError is not null)
+                {
+                    return Result<AttachMediaToArticleResponse>.Failure(
+                        primaryMediaError);
+                }
             }
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
@@ -186,8 +206,38 @@ public sealed class AttachMediaToArticleUseCase : IAttachMediaToArticleUseCase
             1 => MediaErrors.MediaAsset.NotFound,
             2 => MediaErrors.MediaAsset.Deleted,
             5 => MediaErrors.ArticleMedia.AlreadyExists,
+            7 => MediaErrors.ArticleMedia.PrimaryMustBeImage,
             _ => MediaErrors.PersistenceError
         };
+    }
+
+    private async Task<Error?> ValidatePrimaryMediaAsync(
+        long mediaId,
+        CancellationToken cancellationToken)
+    {
+        MediaAsset? mediaAsset = await _mediaAssetRepository.GetByIdAsync(
+            mediaId,
+            cancellationToken);
+
+        if (mediaAsset is null)
+        {
+            return MediaErrors.MediaAsset.NotFound;
+        }
+
+        if (mediaAsset.IsDeleted)
+        {
+            return MediaErrors.MediaAsset.Deleted;
+        }
+
+        if (!string.Equals(
+                mediaAsset.MediaType,
+                MediaTypes.Image,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return MediaErrors.ArticleMedia.PrimaryMustBeImage;
+        }
+
+        return null;
     }
 
     private static Error MapDomainException(MediaDomainException exception)

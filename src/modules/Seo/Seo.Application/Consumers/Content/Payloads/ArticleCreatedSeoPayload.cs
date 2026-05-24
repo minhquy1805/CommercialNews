@@ -16,7 +16,7 @@ public sealed class ArticleCreatedSeoPayload
 
     public string? CoverImageUrl { get; init; }
 
-    public long ActorUserId { get; init; }
+    public long CreatedByUserId { get; init; }
 
     public long Version { get; init; }
 

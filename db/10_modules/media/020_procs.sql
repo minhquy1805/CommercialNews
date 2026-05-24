@@ -38,6 +38,7 @@
   - 4 = InvalidReorderList
   - 5 = Duplicate / ConstraintConflict
   - 6 = ExpectedVersionRequired
+  - 7 = PrimaryMediaMustBeImage
 */
 
 SET ANSI_NULLS ON;
@@ -647,6 +648,20 @@ BEGIN
         RETURN;
     END
 
+    IF @IsPrimary = 1
+       AND NOT EXISTS
+       (
+           SELECT 1
+           FROM [media].[MediaAsset]
+           WHERE [MediaId] = @MediaId
+             AND [MediaType] = 'Image'
+       )
+    BEGIN
+        SET @ResultCode = 7;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
     IF NOT EXISTS
     (
         SELECT 1
@@ -968,6 +983,7 @@ BEGIN
     DECLARE @CurrentVersion INT;
     DECLARE @CurrentIsPrimary BIT;
     DECLARE @MediaIsDeleted BIT;
+    DECLARE @MediaType VARCHAR(20);
     DECLARE @UnsetRows INT = 0;
     DECLARE @SetRows INT = 0;
 
@@ -1002,7 +1018,8 @@ BEGIN
 
     SELECT TOP (1)
         @CurrentIsPrimary = AM.[IsPrimary],
-        @MediaIsDeleted = MA.[IsDeleted]
+        @MediaIsDeleted = MA.[IsDeleted],
+        @MediaType = MA.[MediaType]
     FROM [media].[ArticleMedia] AM WITH (UPDLOCK, HOLDLOCK)
     INNER JOIN [media].[MediaAsset] MA WITH (UPDLOCK, HOLDLOCK)
         ON MA.[MediaId] = AM.[MediaId]
@@ -1021,6 +1038,14 @@ BEGIN
     IF @MediaIsDeleted = 1
     BEGIN
         SET @ResultCode = 2;
+        SET @NewVersion = @CurrentVersion;
+        COMMIT TRANSACTION;
+        RETURN;
+    END
+
+    IF @MediaType <> 'Image'
+    BEGIN
+        SET @ResultCode = 7;
         SET @NewVersion = @CurrentVersion;
         COMMIT TRANSACTION;
         RETURN;
