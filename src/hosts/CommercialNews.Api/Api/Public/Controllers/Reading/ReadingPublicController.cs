@@ -250,6 +250,13 @@ public sealed class ReadingPublicController : ControllerBase
             CanonicalUrl = source.CanonicalUrl,
             MetaTitle = source.MetaTitle,
             MetaDescription = source.MetaDescription,
+            OgTitle = source.OgTitle,
+            OgDescription = source.OgDescription,
+            OgImageUrl = source.OgImageUrl,
+            TwitterTitle = source.TwitterTitle,
+            TwitterDescription = source.TwitterDescription,
+            TwitterImageUrl = source.TwitterImageUrl,
+            Robots = source.Robots,
 
             PublishedAtUtc = source.PublishedAtUtc,
             UpdatedAtUtc = source.UpdatedAtUtc,
