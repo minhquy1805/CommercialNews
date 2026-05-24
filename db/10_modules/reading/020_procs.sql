@@ -69,6 +69,18 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'[reading].[ArticleSeoRouteProjection]', N'U') IS NULL
+BEGIN
+    THROW 58207, 'Table [reading].[ArticleSeoRouteProjection] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[reading].[ArticleSeoMetadataProjection]', N'U') IS NULL
+BEGIN
+    THROW 58208, 'Table [reading].[ArticleSeoMetadataProjection] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
    1) PUBLIC ARTICLE DETAIL BY PUBLIC ID
    ========================================================= */
@@ -110,6 +122,16 @@ BEGIN
         [a].[CanonicalUrl],
         [a].[MetaTitle],
         [a].[MetaDescription],
+        [a].[OgTitle],
+        [a].[OgDescription],
+        [a].[OgImageUrl],
+        [a].[TwitterTitle],
+        [a].[TwitterDescription],
+        [a].[TwitterImageUrl],
+        [a].[Robots],
+        [a].[SeoIsManualOverride],
+        [a].[SeoRouteIsActive],
+        [a].[SeoIsIndexable],
 
         [a].[PublishedAtUtc],
         [a].[UpdatedAtUtc],
@@ -167,7 +189,7 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModel_SelectBySlug]
-    @Slug NVARCHAR(300)
+    @Slug NVARCHAR(200)
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -176,45 +198,70 @@ BEGIN
     IF LEN(LTRIM(RTRIM(ISNULL(@Slug, N'')))) = 0
         THROW 58220, 'Slug is required.', 1;
 
+    SET @Slug = LTRIM(RTRIM(@Slug));
+
     DECLARE @ArticlePublicId CHAR(26);
+    DECLARE @ActiveMatchCount INT;
 
-    SELECT TOP (1)
-        @ArticlePublicId = [ArticlePublicId]
-    FROM [reading].[ArticleReadModel]
+    SELECT
+        @ActiveMatchCount = COUNT(1),
+        @ArticlePublicId = MAX([ResourcePublicId])
+    FROM [reading].[ArticleSeoRouteProjection]
     WHERE [Slug] = @Slug
-      AND [IsPublic] = 1
-      AND [Status] = N'Published'
-    ORDER BY [PublishedAtUtc] DESC, [ArticleId] DESC;
+      AND [Scope] = 'public'
+      AND [ResourceType] = 'Article'
+      AND [IsActive] = 1;
 
-    IF @ArticlePublicId IS NULL
+    /*
+      Reading is a derived projection.
+      Zero matches or multiple active matches are treated as unsafe.
+      SEO truth remains the canonical route authority.
+    */
+    IF @ActiveMatchCount <> 1
     BEGIN
-        /* Empty result set 1 */
+        /* Empty result set 1: detail core */
         SELECT
             CAST(NULL AS BIGINT) AS [ArticleId],
             CAST(NULL AS CHAR(26)) AS [ArticlePublicId],
-            CAST(NULL AS NVARCHAR(300)) AS [Slug],
+            CAST(NULL AS NVARCHAR(200)) AS [Slug],
             CAST(NULL AS NVARCHAR(300)) AS [Title],
             CAST(NULL AS NVARCHAR(1000)) AS [Summary],
             CAST(NULL AS NVARCHAR(MAX)) AS [Body],
+
             CAST(NULL AS BIGINT) AS [CategoryId],
             CAST(NULL AS NVARCHAR(200)) AS [CategoryName],
+
             CAST(NULL AS BIGINT) AS [AuthorUserId],
             CAST(NULL AS NVARCHAR(200)) AS [AuthorDisplayName],
+
             CAST(NULL AS BIGINT) AS [CoverMediaId],
             CAST(NULL AS NVARCHAR(1000)) AS [CoverMediaUrl],
             CAST(NULL AS NVARCHAR(300)) AS [CoverAlt],
-            CAST(NULL AS NVARCHAR(1000)) AS [CanonicalUrl],
+
+            CAST(NULL AS NVARCHAR(500)) AS [CanonicalUrl],
             CAST(NULL AS NVARCHAR(300)) AS [MetaTitle],
             CAST(NULL AS NVARCHAR(500)) AS [MetaDescription],
+            CAST(NULL AS NVARCHAR(300)) AS [OgTitle],
+            CAST(NULL AS NVARCHAR(500)) AS [OgDescription],
+            CAST(NULL AS NVARCHAR(800)) AS [OgImageUrl],
+            CAST(NULL AS NVARCHAR(300)) AS [TwitterTitle],
+            CAST(NULL AS NVARCHAR(500)) AS [TwitterDescription],
+            CAST(NULL AS NVARCHAR(800)) AS [TwitterImageUrl],
+            CAST(NULL AS NVARCHAR(100)) AS [Robots],
+            CAST(NULL AS BIT) AS [SeoIsManualOverride],
+            CAST(NULL AS BIT) AS [SeoRouteIsActive],
+            CAST(NULL AS BIT) AS [SeoIsIndexable],
+
             CAST(NULL AS DATETIME2(3)) AS [PublishedAtUtc],
             CAST(NULL AS DATETIME2(3)) AS [UpdatedAtUtc],
+
             CAST(NULL AS BIGINT) AS [ViewCount],
             CAST(NULL AS BIGINT) AS [LikeCount],
             CAST(NULL AS BIGINT) AS [CommentCount],
             CAST(NULL AS FLOAT) AS [PopularityScore]
         WHERE 1 = 0;
 
-        /* Empty result set 2 */
+        /* Empty result set 2: tags */
         SELECT
             CAST(NULL AS BIGINT) AS [TagId],
             CAST(NULL AS CHAR(26)) AS [TagPublicId],
@@ -222,7 +269,7 @@ BEGIN
             CAST(NULL AS NVARCHAR(200)) AS [Slug]
         WHERE 1 = 0;
 
-        /* Empty result set 3 */
+        /* Empty result set 3: media */
         SELECT
             CAST(NULL AS BIGINT) AS [MediaId],
             CAST(NULL AS CHAR(26)) AS [MediaPublicId],
@@ -437,7 +484,7 @@ BEGIN
         SELECT
             CAST(NULL AS BIGINT) AS [ArticleId],
             CAST(NULL AS CHAR(26)) AS [ArticlePublicId],
-            CAST(NULL AS NVARCHAR(300)) AS [Slug],
+            CAST(NULL AS NVARCHAR(200)) AS [Slug],
             CAST(NULL AS NVARCHAR(300)) AS [Title],
             CAST(NULL AS NVARCHAR(1000)) AS [Summary],
 
@@ -628,6 +675,24 @@ BEGIN
     DECLARE @ResolvedCoverMediaUrl NVARCHAR(1000) = NULL;
     DECLARE @ResolvedCoverAlt NVARCHAR(300) = NULL;
 
+    DECLARE @HasSeoRouteProjection BIT = 0;
+    DECLARE @ProjectedSlug NVARCHAR(200) = NULL;
+    DECLARE @ProjectedCanonicalUrl NVARCHAR(500) = NULL;
+    DECLARE @ProjectedSeoRouteIsActive BIT = 0;
+    DECLARE @ProjectedSeoIsIndexable BIT = 0;
+
+    DECLARE @HasSeoMetadataProjection BIT = 0;
+    DECLARE @ProjectedMetaTitle NVARCHAR(300) = NULL;
+    DECLARE @ProjectedMetaDescription NVARCHAR(500) = NULL;
+    DECLARE @ProjectedOgTitle NVARCHAR(300) = NULL;
+    DECLARE @ProjectedOgDescription NVARCHAR(500) = NULL;
+    DECLARE @ProjectedOgImageUrl NVARCHAR(800) = NULL;
+    DECLARE @ProjectedTwitterTitle NVARCHAR(300) = NULL;
+    DECLARE @ProjectedTwitterDescription NVARCHAR(500) = NULL;
+    DECLARE @ProjectedTwitterImageUrl NVARCHAR(800) = NULL;
+    DECLARE @ProjectedRobots NVARCHAR(100) = NULL;
+    DECLARE @ProjectedSeoIsManualOverride BIT = 0;
+
     BEGIN TRANSACTION;
 
     SELECT
@@ -638,6 +703,36 @@ BEGIN
         @CurrentCoverAlt = [CoverAlt]
     FROM [reading].[ArticleReadModel] WITH (UPDLOCK, HOLDLOCK)
     WHERE [ArticleId] = @ArticleId;
+
+    SELECT TOP (1)
+        @HasSeoRouteProjection = 1,
+        @ProjectedSlug = [Slug],
+        @ProjectedCanonicalUrl = [CanonicalUrl],
+        @ProjectedSeoRouteIsActive = [IsActive],
+        @ProjectedSeoIsIndexable = [IsIndexable]
+    FROM [reading].[ArticleSeoRouteProjection] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [Scope] = 'public'
+      AND [ResourceType] = 'Article'
+      AND [ResourcePublicId] = @ArticlePublicId
+    ORDER BY [SourceVersion] DESC, [LastSyncedAtUtc] DESC;
+
+    SELECT TOP (1)
+        @HasSeoMetadataProjection = 1,
+        @ProjectedMetaTitle = [MetaTitle],
+        @ProjectedMetaDescription = [MetaDescription],
+        @ProjectedOgTitle = [OgTitle],
+        @ProjectedOgDescription = [OgDescription],
+        @ProjectedOgImageUrl = [OgImageUrl],
+        @ProjectedTwitterTitle = [TwitterTitle],
+        @ProjectedTwitterDescription = [TwitterDescription],
+        @ProjectedTwitterImageUrl = [TwitterImageUrl],
+        @ProjectedRobots = [Robots],
+        @ProjectedSeoIsManualOverride = [IsManualOverride]
+    FROM [reading].[ArticleSeoMetadataProjection] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [Scope] = 'public'
+      AND [ResourceType] = 'Article'
+      AND [ResourcePublicId] = @ArticlePublicId
+    ORDER BY [SourceVersion] DESC, [LastSyncedAtUtc] DESC;
 
     SET @EffectivePublishedAtUtc =
         CASE
@@ -716,6 +811,16 @@ BEGIN
             [CanonicalUrl],
             [MetaTitle],
             [MetaDescription],
+            [OgTitle],
+            [OgDescription],
+            [OgImageUrl],
+            [TwitterTitle],
+            [TwitterDescription],
+            [TwitterImageUrl],
+            [Robots],
+            [SeoIsManualOverride],
+            [SeoRouteIsActive],
+            [SeoIsIndexable],
             [Status],
             [IsPublic],
             [PublishedAtUtc],
@@ -735,7 +840,7 @@ BEGIN
         (
             @ArticleId,
             @ArticlePublicId,
-            NULL,
+            @ProjectedSlug,
             @Title,
             @Summary,
             @Body,
@@ -746,9 +851,19 @@ BEGIN
             @ResolvedCoverMediaId,
             @ResolvedCoverMediaUrl,
             @ResolvedCoverAlt,
-            NULL,
-            NULL,
-            NULL,
+            @ProjectedCanonicalUrl,
+            @ProjectedMetaTitle,
+            @ProjectedMetaDescription,
+            @ProjectedOgTitle,
+            @ProjectedOgDescription,
+            @ProjectedOgImageUrl,
+            @ProjectedTwitterTitle,
+            @ProjectedTwitterDescription,
+            @ProjectedTwitterImageUrl,
+            @ProjectedRobots,
+            @ProjectedSeoIsManualOverride,
+            @ProjectedSeoRouteIsActive,
+            @ProjectedSeoIsIndexable,
             @Status,
             @EffectiveIsPublic,
             @EffectivePublishedAtUtc,
@@ -783,6 +898,22 @@ BEGIN
             [CoverMediaId] = @ResolvedCoverMediaId,
             [CoverMediaUrl] = @ResolvedCoverMediaUrl,
             [CoverAlt] = @ResolvedCoverAlt,
+
+            [Slug] = CASE WHEN @HasSeoRouteProjection = 1 THEN @ProjectedSlug ELSE [Slug] END,
+            [CanonicalUrl] = CASE WHEN @HasSeoRouteProjection = 1 THEN @ProjectedCanonicalUrl ELSE [CanonicalUrl] END,
+            [SeoRouteIsActive] = CASE WHEN @HasSeoRouteProjection = 1 THEN @ProjectedSeoRouteIsActive ELSE [SeoRouteIsActive] END,
+            [SeoIsIndexable] = CASE WHEN @HasSeoRouteProjection = 1 THEN @ProjectedSeoIsIndexable ELSE [SeoIsIndexable] END,
+
+            [MetaTitle] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedMetaTitle ELSE [MetaTitle] END,
+            [MetaDescription] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedMetaDescription ELSE [MetaDescription] END,
+            [OgTitle] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedOgTitle ELSE [OgTitle] END,
+            [OgDescription] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedOgDescription ELSE [OgDescription] END,
+            [OgImageUrl] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedOgImageUrl ELSE [OgImageUrl] END,
+            [TwitterTitle] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedTwitterTitle ELSE [TwitterTitle] END,
+            [TwitterDescription] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedTwitterDescription ELSE [TwitterDescription] END,
+            [TwitterImageUrl] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedTwitterImageUrl ELSE [TwitterImageUrl] END,
+            [Robots] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedRobots ELSE [Robots] END,
+            [SeoIsManualOverride] = CASE WHEN @HasSeoMetadataProjection = 1 THEN @ProjectedSeoIsManualOverride ELSE [SeoIsManualOverride] END,
 
             [Status] = @Status,
             [IsPublic] = @EffectiveIsPublic,
@@ -868,7 +999,7 @@ END
 GO
 
 /* =========================================================
-   8) UPDATE SEO PROJECTION
+   8) SEO PROJECTION STATE + ARTICLE SEO FIELDS
    ========================================================= */
 
 SET ANSI_NULLS ON;
@@ -876,12 +1007,21 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModel_UpdateSeo]
-    @ArticleId                 BIGINT,
-    @Slug                      NVARCHAR(300) = NULL,
-    @CanonicalUrl              NVARCHAR(1000) = NULL,
-    @MetaTitle                 NVARCHAR(300) = NULL,
-    @MetaDescription           NVARCHAR(500) = NULL,
+IF OBJECT_ID(N'[reading].[Reading_ArticleReadModel_UpdateSeo]', N'P') IS NOT NULL
+BEGIN
+    DROP PROCEDURE [reading].[Reading_ArticleReadModel_UpdateSeo];
+END
+GO
+
+CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleSeoRouteProjection_ApplyFromSeo]
+    @Scope                     VARCHAR(30) = 'public',
+    @ResourceType              VARCHAR(50),
+    @ResourcePublicId          CHAR(26),
+    @Slug                      NVARCHAR(200),
+    @CanonicalUrl              NVARCHAR(500) = NULL,
+    @IsActive                  BIT,
+    @IsIndexable               BIT,
+    @SourceVersion             BIGINT,
     @MessageId                 CHAR(26) = NULL,
     @SourceOccurredAtUtc       DATETIME2(3) = NULL
 AS
@@ -889,23 +1029,290 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF @ArticleId IS NULL OR @ArticleId <= 0
-        THROW 58270, 'ArticleId must be > 0.', 1;
+    IF LEN(LTRIM(RTRIM(ISNULL(@Scope, '')))) = 0
+        THROW 58270, 'Scope is required.', 1;
 
-    UPDATE [reading].[ArticleReadModel]
-    SET
-        [Slug] = NULLIF(LTRIM(RTRIM(@Slug)), N''),
-        [CanonicalUrl] = @CanonicalUrl,
-        [MetaTitle] = @MetaTitle,
-        [MetaDescription] = @MetaDescription,
-        [LastEventMessageId] = @MessageId,
-        [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
-        [LastSyncedAtUtc] = SYSUTCDATETIME()
-    WHERE [ArticleId] = @ArticleId;
+    IF LEN(LTRIM(RTRIM(ISNULL(@ResourceType, '')))) = 0
+        THROW 58271, 'ResourceType is required.', 1;
+
+    IF @Scope <> 'public'
+        THROW 58275, 'Only public SEO scope is supported by Reading article route projection.', 1;
+
+    IF @ResourceType <> 'Article'
+        THROW 58276, 'Only Article SEO resource type is supported by Reading article route projection.', 1;
+
+    IF @ResourcePublicId IS NULL OR LEN(@ResourcePublicId) <> 26
+        THROW 58272, 'ResourcePublicId must be a valid 26-character public id.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@Slug, N'')))) = 0
+        THROW 58273, 'Slug is required.', 1;
+
+    IF @SourceVersion IS NULL OR @SourceVersion <= 0
+        THROW 58274, 'SourceVersion must be > 0.', 1;
+
+    IF @IsActive IS NULL
+        SET @IsActive = 0;
+
+    IF @IsIndexable IS NULL
+        SET @IsIndexable = 0;
+
+    IF @IsActive = 0
+        SET @IsIndexable = 0;
+
+    DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @Applied BIT = 0;
+    DECLARE @CurrentSourceVersion BIGINT = NULL;
+
+    BEGIN TRANSACTION;
 
     SELECT
-        CAST(CASE WHEN @@ROWCOUNT = 1 THEN 1 ELSE 0 END AS BIT) AS [Applied],
-        CASE WHEN @@ROWCOUNT = 1 THEN N'Applied' ELSE N'IgnoredMissingArticle' END AS [Decision];
+        @CurrentSourceVersion = [SourceVersion]
+    FROM [reading].[ArticleSeoRouteProjection] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId;
+
+    IF @CurrentSourceVersion IS NULL
+    BEGIN
+        INSERT INTO [reading].[ArticleSeoRouteProjection]
+        (
+            [Scope],
+            [ResourceType],
+            [ResourcePublicId],
+            [Slug],
+            [CanonicalUrl],
+            [IsActive],
+            [IsIndexable],
+            [SourceVersion],
+            [LastEventMessageId],
+            [LastSourceOccurredAtUtc],
+            [LastSyncedAtUtc]
+        )
+        VALUES
+        (
+            @Scope,
+            @ResourceType,
+            @ResourcePublicId,
+            LTRIM(RTRIM(@Slug)),
+            @CanonicalUrl,
+            @IsActive,
+            @IsIndexable,
+            @SourceVersion,
+            @MessageId,
+            @SourceOccurredAtUtc,
+            @Now
+        );
+
+        SET @Applied = 1;
+    END
+    ELSE IF @SourceVersion > @CurrentSourceVersion
+    BEGIN
+        UPDATE [reading].[ArticleSeoRouteProjection]
+        SET
+            [Slug] = LTRIM(RTRIM(@Slug)),
+            [CanonicalUrl] = @CanonicalUrl,
+            [IsActive] = @IsActive,
+            [IsIndexable] = @IsIndexable,
+            [SourceVersion] = @SourceVersion,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
+          AND [SourceVersion] < @SourceVersion;
+
+        SET @Applied = CASE WHEN @@ROWCOUNT = 1 THEN 1 ELSE 0 END;
+    END
+
+    IF @Applied = 1
+    BEGIN
+        /*
+        ArticleReadModel checkpoint fields belong to the Content projection stream.
+        SEO route checkpoint is stored in ArticleSeoRouteProjection.
+        */
+        UPDATE [reading].[ArticleReadModel]
+        SET
+            [Slug] = LTRIM(RTRIM(@Slug)),
+            [CanonicalUrl] = @CanonicalUrl,
+            [SeoRouteIsActive] = @IsActive,
+            [SeoIsIndexable] = @IsIndexable
+        WHERE [ArticlePublicId] = @ResourcePublicId;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @Applied AS [Applied],
+        CASE
+            WHEN @Applied = 1 THEN N'Applied'
+            WHEN @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
+            ELSE N'Ignored'
+        END AS [Decision],
+        @CurrentSourceVersion AS [PreviousSourceVersion],
+        @SourceVersion AS [IncomingSourceVersion];
+END
+GO
+
+CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleSeoMetadataProjection_ApplyFromSeo]
+    @Scope                     VARCHAR(30) = 'public',
+    @ResourceType              VARCHAR(50),
+    @ResourcePublicId          CHAR(26),
+    @MetaTitle                 NVARCHAR(300) = NULL,
+    @MetaDescription           NVARCHAR(500) = NULL,
+    @OgTitle                   NVARCHAR(300) = NULL,
+    @OgDescription             NVARCHAR(500) = NULL,
+    @OgImageUrl                NVARCHAR(800) = NULL,
+    @TwitterTitle              NVARCHAR(300) = NULL,
+    @TwitterDescription        NVARCHAR(500) = NULL,
+    @TwitterImageUrl           NVARCHAR(800) = NULL,
+    @Robots                    NVARCHAR(100) = NULL,
+    @IsManualOverride          BIT,
+    @SourceVersion             BIGINT,
+    @MessageId                 CHAR(26) = NULL,
+    @SourceOccurredAtUtc       DATETIME2(3) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@Scope, '')))) = 0
+        THROW 58290, 'Scope is required.', 1;
+
+    IF LEN(LTRIM(RTRIM(ISNULL(@ResourceType, '')))) = 0
+        THROW 58291, 'ResourceType is required.', 1;
+
+    IF @Scope <> 'public'
+        THROW 58292, 'Only public SEO scope is supported by Reading article metadata projection.', 1;
+
+    IF @ResourceType <> 'Article'
+        THROW 58293, 'Only Article SEO resource type is supported by Reading article metadata projection.', 1;
+
+    IF @ResourcePublicId IS NULL OR LEN(@ResourcePublicId) <> 26
+        THROW 58294, 'ResourcePublicId must be a valid 26-character public id.', 1;
+
+    IF @SourceVersion IS NULL OR @SourceVersion <= 0
+        THROW 58295, 'SourceVersion must be > 0.', 1;
+
+    IF @IsManualOverride IS NULL
+        SET @IsManualOverride = 0;
+
+    DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @Applied BIT = 0;
+    DECLARE @CurrentSourceVersion BIGINT = NULL;
+
+    BEGIN TRANSACTION;
+
+    SELECT
+        @CurrentSourceVersion = [SourceVersion]
+    FROM [reading].[ArticleSeoMetadataProjection] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [Scope] = @Scope
+      AND [ResourceType] = @ResourceType
+      AND [ResourcePublicId] = @ResourcePublicId;
+
+    IF @CurrentSourceVersion IS NULL
+    BEGIN
+        INSERT INTO [reading].[ArticleSeoMetadataProjection]
+        (
+            [Scope],
+            [ResourceType],
+            [ResourcePublicId],
+            [MetaTitle],
+            [MetaDescription],
+            [OgTitle],
+            [OgDescription],
+            [OgImageUrl],
+            [TwitterTitle],
+            [TwitterDescription],
+            [TwitterImageUrl],
+            [Robots],
+            [IsManualOverride],
+            [SourceVersion],
+            [LastEventMessageId],
+            [LastSourceOccurredAtUtc],
+            [LastSyncedAtUtc]
+        )
+        VALUES
+        (
+            @Scope,
+            @ResourceType,
+            @ResourcePublicId,
+            @MetaTitle,
+            @MetaDescription,
+            @OgTitle,
+            @OgDescription,
+            @OgImageUrl,
+            @TwitterTitle,
+            @TwitterDescription,
+            @TwitterImageUrl,
+            @Robots,
+            @IsManualOverride,
+            @SourceVersion,
+            @MessageId,
+            @SourceOccurredAtUtc,
+            @Now
+        );
+
+        SET @Applied = 1;
+    END
+    ELSE IF @SourceVersion > @CurrentSourceVersion
+    BEGIN
+        UPDATE [reading].[ArticleSeoMetadataProjection]
+        SET
+            [MetaTitle] = @MetaTitle,
+            [MetaDescription] = @MetaDescription,
+            [OgTitle] = @OgTitle,
+            [OgDescription] = @OgDescription,
+            [OgImageUrl] = @OgImageUrl,
+            [TwitterTitle] = @TwitterTitle,
+            [TwitterDescription] = @TwitterDescription,
+            [TwitterImageUrl] = @TwitterImageUrl,
+            [Robots] = @Robots,
+            [IsManualOverride] = @IsManualOverride,
+            [SourceVersion] = @SourceVersion,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now
+        WHERE [Scope] = @Scope
+          AND [ResourceType] = @ResourceType
+          AND [ResourcePublicId] = @ResourcePublicId
+          AND [SourceVersion] < @SourceVersion;
+
+        SET @Applied = CASE WHEN @@ROWCOUNT = 1 THEN 1 ELSE 0 END;
+    END
+
+    IF @Applied = 1
+    BEGIN
+        /*
+        ArticleReadModel checkpoint fields belong to the Content projection stream.
+        SEO metadata checkpoint is stored in ArticleSeoMetadataProjection.
+        */
+        UPDATE [reading].[ArticleReadModel]
+        SET
+            [MetaTitle] = @MetaTitle,
+            [MetaDescription] = @MetaDescription,
+            [OgTitle] = @OgTitle,
+            [OgDescription] = @OgDescription,
+            [OgImageUrl] = @OgImageUrl,
+            [TwitterTitle] = @TwitterTitle,
+            [TwitterDescription] = @TwitterDescription,
+            [TwitterImageUrl] = @TwitterImageUrl,
+            [Robots] = @Robots,
+            [SeoIsManualOverride] = @IsManualOverride
+        WHERE [ArticlePublicId] = @ResourcePublicId;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @Applied AS [Applied],
+        CASE
+            WHEN @Applied = 1 THEN N'Applied'
+            WHEN @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
+            ELSE N'Ignored'
+        END AS [Decision],
+        @CurrentSourceVersion AS [PreviousSourceVersion],
+        @SourceVersion AS [IncomingSourceVersion];
 END
 GO
 
@@ -937,15 +1344,18 @@ BEGIN
     IF @ViewCount < 0 OR @LikeCount < 0 OR @CommentCount < 0
         THROW 58281, 'Counters must be non-negative.', 1;
 
+    /*
+        Interaction projection is not version-aware in Reading V1 yet.
+        Do not overwrite Content checkpoint fields on ArticleReadModel.
+        This procedure is suitable for authoritative refresh/reconciliation only
+        until ArticleInteractionProjectionState is introduced.
+    */
     UPDATE [reading].[ArticleReadModel]
     SET
         [ViewCount] = @ViewCount,
         [LikeCount] = @LikeCount,
         [CommentCount] = @CommentCount,
-        [PopularityScore] = @PopularityScore,
-        [LastEventMessageId] = @MessageId,
-        [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
-        [LastSyncedAtUtc] = SYSUTCDATETIME()
+        [PopularityScore] = @PopularityScore
     WHERE [ArticleId] = @ArticleId;
 
     SELECT
@@ -1009,13 +1419,17 @@ BEGIN
     IF @SourceVersion IS NULL OR @SourceVersion <= 0
         THROW 58306, 'SourceVersion must be > 0.', 1;
 
+    IF @IsPrimary IS NULL
+        THROW 58307, 'IsPrimary is required.', 1;
+
     DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
     DECLARE @Applied BIT = 0;
     DECLARE @CurrentSourceVersion BIGINT = NULL;
 
     BEGIN TRANSACTION;
 
-    SELECT @CurrentSourceVersion = [SourceVersion]
+    SELECT
+        @CurrentSourceVersion = [SourceVersion]
     FROM [reading].[ArticleMediaProjectionState] WITH (UPDLOCK, HOLDLOCK)
     WHERE [ArticleId] = @ArticleId;
 
@@ -1043,6 +1457,11 @@ BEGIN
 
     IF @SourceVersion > @CurrentSourceVersion
     BEGIN
+        /*
+          If the incoming media becomes primary, demote any existing
+          primary media first. This preserves the unique primary-media
+          invariant enforced by UX_ArticleReadModelMedia_Article_Primary.
+        */
         IF @IsPrimary = 1
         BEGIN
             UPDATE [reading].[ArticleReadModelMedia]
@@ -1103,14 +1522,15 @@ BEGIN
 
         IF @IsPrimary = 1
         BEGIN
+            /*
+              ArticleReadModel checkpoint fields belong to the Content stream.
+              Media checkpoint is stored in ArticleMediaProjectionState.
+            */
             UPDATE [reading].[ArticleReadModel]
             SET
                 [CoverMediaId] = @MediaId,
                 [CoverMediaUrl] = @Url,
-                [CoverAlt] = @Alt,
-                [LastEventMessageId] = @MessageId,
-                [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
-                [LastSyncedAtUtc] = @Now
+                [CoverAlt] = @Alt
             WHERE [ArticleId] = @ArticleId;
         END
 
@@ -1266,14 +1686,15 @@ BEGIN
             );
         END
 
+        /*
+        ArticleReadModel checkpoint fields belong to Content.
+        Media checkpoint is stored in ArticleMediaProjectionState.
+        */
         UPDATE [reading].[ArticleReadModel]
         SET
             [CoverMediaId] = @MediaId,
             [CoverMediaUrl] = @Url,
-            [CoverAlt] = @Alt,
-            [LastEventMessageId] = @MessageId,
-            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
-            [LastSyncedAtUtc] = @Now
+            [CoverAlt] = @Alt
         WHERE [ArticleId] = @ArticleId;
 
         UPDATE [reading].[ArticleMediaProjectionState]
@@ -1464,16 +1885,17 @@ BEGIN
 
         IF @PrimaryCleared = 1
         BEGIN
+            /*
+            ArticleReadModel checkpoint fields belong to Content.
+            Media checkpoint is stored in ArticleMediaProjectionState.
+            */
             UPDATE [reading].[ArticleReadModel]
             SET
                 [CoverMediaId] = NULL,
                 [CoverMediaUrl] = NULL,
-                [CoverAlt] = NULL,
-                [LastEventMessageId] = @MessageId,
-                [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
-                [LastSyncedAtUtc] = @Now
+                [CoverAlt] = NULL
             WHERE [ArticleId] = @ArticleId
-              AND [CoverMediaId] = @MediaId;
+            AND [CoverMediaId] = @MediaId;
         END
 
         UPDATE [reading].[ArticleMediaProjectionState]

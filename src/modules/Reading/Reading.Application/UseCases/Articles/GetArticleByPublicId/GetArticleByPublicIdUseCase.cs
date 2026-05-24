@@ -16,13 +16,16 @@ public sealed class GetArticleByPublicIdUseCase : IGetArticleByPublicIdUseCase
     public GetArticleByPublicIdUseCase(
         IArticleReadModelRepository articleReadModelRepository)
     {
-        _articleReadModelRepository = articleReadModelRepository;
+        _articleReadModelRepository = articleReadModelRepository
+            ?? throw new ArgumentNullException(nameof(articleReadModelRepository));
     }
 
     public async Task<Result<ArticleDetailResponse>> ExecuteAsync(
         GetArticleByPublicIdRequest request,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         Error? validationError =
             GetArticleByPublicIdValidator.Validate(request);
 
@@ -77,6 +80,16 @@ public sealed class GetArticleByPublicIdUseCase : IGetArticleByPublicIdUseCase
             CanonicalUrl = article.CanonicalUrl,
             MetaTitle = article.MetaTitle,
             MetaDescription = article.MetaDescription,
+
+            OgTitle = article.OgTitle,
+            OgDescription = article.OgDescription,
+            OgImageUrl = article.OgImageUrl,
+
+            TwitterTitle = article.TwitterTitle,
+            TwitterDescription = article.TwitterDescription,
+            TwitterImageUrl = article.TwitterImageUrl,
+
+            Robots = article.Robots,
 
             PublishedAtUtc = article.PublishedAtUtc,
             UpdatedAtUtc = article.UpdatedAtUtc,

@@ -7,31 +7,32 @@ using Reading.Application.Ports.Persistence;
 using Reading.Application.Validation.Projections;
 using Reading.Domain.Exceptions;
 
-namespace Reading.Application.UseCases.Projections.ApplyContentArticleProjection;
+namespace Reading.Application.UseCases.Projections.ApplyArticleSeoMetadataProjection;
 
-public sealed class ApplyContentArticleProjectionUseCase
-    : IApplyContentArticleProjectionUseCase
+public sealed class ApplyArticleSeoMetadataProjectionUseCase
+    : IApplyArticleSeoMetadataProjectionUseCase
 {
     private readonly IArticleReadModelRepository _articleReadModelRepository;
     private readonly IReadingUnitOfWork _unitOfWork;
 
-    public ApplyContentArticleProjectionUseCase(
+    public ApplyArticleSeoMetadataProjectionUseCase(
         IArticleReadModelRepository articleReadModelRepository,
         IReadingUnitOfWork unitOfWork)
     {
         _articleReadModelRepository = articleReadModelRepository
-            ?? throw new ArgumentNullException(nameof(articleReadModelRepository));
+            ?? throw new ArgumentNullException(
+                nameof(articleReadModelRepository));
 
         _unitOfWork = unitOfWork
             ?? throw new ArgumentNullException(nameof(unitOfWork));
     }
 
     public async Task<Result<ArticleProjectionApplyResult>> ExecuteAsync(
-        ApplyContentArticleProjectionCommand command,
+        ApplyArticleSeoMetadataProjectionCommand command,
         CancellationToken cancellationToken = default)
     {
         Error? validationError =
-            ApplyContentArticleProjectionValidator.Validate(command);
+            ApplyArticleSeoMetadataProjectionValidator.Validate(command);
 
         if (validationError is not null)
         {
@@ -39,15 +40,15 @@ public sealed class ApplyContentArticleProjectionUseCase
                 validationError);
         }
 
-        ApplyContentArticleProjectionCommand normalizedCommand =
-            ApplyContentArticleProjectionValidator.Normalize(command);
+        ApplyArticleSeoMetadataProjectionCommand normalizedCommand =
+            ApplyArticleSeoMetadataProjectionValidator.Normalize(command);
 
         try
         {
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             ArticleProjectionApplyResult result =
-                await _articleReadModelRepository.UpsertFromContentAsync(
+                await _articleReadModelRepository.ApplySeoMetadataAsync(
                     normalizedCommand,
                     cancellationToken);
 

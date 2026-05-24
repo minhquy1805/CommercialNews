@@ -1,3 +1,4 @@
+using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Reading.Application.Models.Commands;
 using Reading.Application.Models.Queries;
 using Reading.Application.Models.Results;
@@ -6,21 +7,37 @@ namespace Reading.Application.Ports.Persistence;
 
 public interface IArticleReadModelRepository
 {
+    /*
+      =========================================================
+      Public read queries
+      =========================================================
+    */
+
     Task<ArticleDetailResult?> SelectByPublicIdAsync(
         GetArticleByPublicIdQuery query,
         CancellationToken cancellationToken = default);
 
-    Task<PagedReadingResult<ArticleListItemResult>> SelectSkipAndTakeAsync(
+    Task<ArticleDetailResult?> SelectBySlugAsync(
+        GetArticleBySlugQuery query,
+        CancellationToken cancellationToken = default);
+
+    Task<PagedQueryResult<ArticleListItemResult>> SelectSkipAndTakeAsync(
         GetArticlesQuery query,
         CancellationToken cancellationToken = default);
 
-    Task<PagedReadingResult<ArticleListItemResult>> SearchAsync(
+    Task<PagedQueryResult<ArticleListItemResult>> SearchAsync(
         SearchArticlesQuery query,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<ArticleListItemResult>> SelectRelatedAsync(
         GetRelatedArticlesQuery query,
         CancellationToken cancellationToken = default);
+
+    /*
+      =========================================================
+      Content projection writes
+      =========================================================
+    */
 
     Task<ArticleProjectionApplyResult> UpsertFromContentAsync(
         ApplyContentArticleProjectionCommand command,
@@ -29,6 +46,26 @@ public interface IArticleReadModelRepository
     Task<ArticleProjectionApplyResult> MarkNotPublicAsync(
         MarkArticleProjectionNotPublicCommand command,
         CancellationToken cancellationToken = default);
+
+    /*
+      =========================================================
+      SEO projection writes
+      =========================================================
+    */
+
+    Task<ArticleProjectionApplyResult> ApplySeoRouteAsync(
+        ApplyArticleSeoRouteProjectionCommand command,
+        CancellationToken cancellationToken = default);
+
+    Task<ArticleProjectionApplyResult> ApplySeoMetadataAsync(
+        ApplyArticleSeoMetadataProjectionCommand command,
+        CancellationToken cancellationToken = default);
+
+    /*
+      =========================================================
+      Media projection writes
+      =========================================================
+    */
 
     Task<ArticleProjectionApplyResult> UpsertMediaAttachmentAsync(
         UpsertArticleMediaProjectionCommand command,

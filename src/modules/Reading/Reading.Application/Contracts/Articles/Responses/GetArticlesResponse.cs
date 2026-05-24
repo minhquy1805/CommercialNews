@@ -2,13 +2,13 @@ namespace Reading.Application.Contracts.Articles.Responses;
 
 public sealed class GetArticlesResponse
 {
-    public IReadOnlyList<ArticleListItemResponse> Items { get; set; } = [];
+    public IReadOnlyList<ArticleListItemResponse> Items { get; init; } = [];
 
-    public int Page { get; set; }
+    public int Page { get; init; }
 
-    public int PageSize { get; set; }
+    public int PageSize { get; init; }
 
-    public long TotalItems { get; set; }
+    public int TotalItems { get; init; }
 
-    public int TotalPages { get; set; }
+    public int TotalPages { get; init; }
 }
