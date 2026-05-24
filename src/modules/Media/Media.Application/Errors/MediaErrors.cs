@@ -287,6 +287,11 @@ public static class MediaErrors
                 code: "MEDIA.PRIMARY_CONSTRAINT_VIOLATION",
                 message: "Only one active primary media is allowed per article.");
 
+        public static readonly Error PrimaryMustBeImage =
+            Error.Validation(
+                code: "MEDIA.ARTICLE_PRIMARY_MEDIA_MUST_BE_IMAGE",
+                message: "Article primary media must be an image.");
+
         public static readonly Error AltTextOverrideTooLong =
             Error.Validation(
                 code: "MEDIA.ATTACHMENT_ALT_TEXT_OVERRIDE_TOO_LONG",
