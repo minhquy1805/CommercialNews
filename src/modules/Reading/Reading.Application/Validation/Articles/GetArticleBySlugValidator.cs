@@ -6,7 +6,7 @@ namespace Reading.Application.Validation.Articles;
 
 public static class GetArticleBySlugValidator
 {
-    private const int MaxSlugLength = 300;
+    private const int MaxSlugLength = 200;
 
     public static Error? Validate(GetArticleBySlugRequest? request)
     {

@@ -9,7 +9,8 @@ public static class MarkArticleProjectionNotPublicValidator
 {
     private const int MessageIdLength = 26;
 
-    public static Error? Validate(MarkArticleProjectionNotPublicCommand? command)
+    public static Error? Validate(
+        MarkArticleProjectionNotPublicCommand? command)
     {
         if (command is null)
         {
@@ -19,11 +20,6 @@ public static class MarkArticleProjectionNotPublicValidator
         if (command.ArticleId <= 0)
         {
             return ReadingErrors.Article.InvalidArticleId;
-        }
-
-        if (string.IsNullOrWhiteSpace(command.Status))
-        {
-            return ReadingErrors.Projection.InvalidSourceStatus;
         }
 
         if (!SourceArticleStatuses.IsValid(command.Status))
@@ -36,8 +32,7 @@ public static class MarkArticleProjectionNotPublicValidator
             return ReadingErrors.Projection.InvalidSourceVersion;
         }
 
-        if (!string.IsNullOrWhiteSpace(command.MessageId)
-            && command.MessageId.Trim().Length != MessageIdLength)
+        if (!HasValidMessageId(command.MessageId))
         {
             return ReadingErrors.Projection.InvalidMessageId;
         }
@@ -48,23 +43,29 @@ public static class MarkArticleProjectionNotPublicValidator
     public static MarkArticleProjectionNotPublicCommand Normalize(
         MarkArticleProjectionNotPublicCommand command)
     {
-        string? normalizedStatus = SourceArticleStatuses.NormalizeOrNull(
-            command.Status);
+        ArgumentNullException.ThrowIfNull(command);
+
+        string normalizedStatus =
+            SourceArticleStatuses.NormalizeOrNull(command.Status)
+            ?? command.Status.Trim();
 
         return command with
         {
-            Status = normalizedStatus ?? command.Status.Trim(),
+            Status = normalizedStatus,
             MessageId = NormalizeNullable(command.MessageId)
         };
     }
 
+    private static bool HasValidMessageId(string? messageId)
+    {
+        return string.IsNullOrWhiteSpace(messageId)
+            || messageId.Trim().Length == MessageIdLength;
+    }
+
     private static string? NormalizeNullable(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        return value.Trim();
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }
