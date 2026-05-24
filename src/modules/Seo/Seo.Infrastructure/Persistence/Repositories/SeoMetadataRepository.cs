@@ -337,6 +337,8 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
                     SourceAggregateVersion = GetNullableInt64(reader, "SourceAggregateVersion"),
                     LastAppliedMessageId = GetNullableString(reader, "LastAppliedMessageId"),
                     LastSyncedAtUtc = GetNullableDateTime(reader, "LastSyncedAtUtc"),
+                    SlugRouteVersion = GetNullableInt32(reader, "SlugRouteVersion"),
+                    SeoMetadataVersion = GetNullableInt32(reader, "SeoMetadataVersion"),
                     Version = reader.GetInt32(reader.GetOrdinal("Version"))
                 };
             }
@@ -565,6 +567,17 @@ public sealed class SeoMetadataRepository : ISeoMetadataRepository
         }
 
         return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
+    }
+
+    private static int? GetNullableInt32(SqlDataReader reader, string columnName)
+    {
+        int ordinal = TryGetOrdinal(reader, columnName);
+        if (ordinal < 0)
+        {
+            return null;
+        }
+
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
     }
 
     private static bool? GetNullableBoolean(SqlDataReader reader, string columnName)

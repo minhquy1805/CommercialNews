@@ -111,8 +111,10 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
 
                     if (slugRoute is null)
                     {
-                        throw new InvalidOperationException(
-                            "SEO route upsert completed without returning the updated route.");
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<UpsertArticleSeoSettingsResponse>.Failure(
+                            SeoErrors.SlugRegistry.VersionMismatch);
                     }
 
                     routeChanged = true;
@@ -156,8 +158,10 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
 
                     if (metadata is null)
                     {
-                        throw new InvalidOperationException(
-                            "SEO metadata upsert completed without returning the updated metadata.");
+                        await _unitOfWork.RollbackAsync(cancellationToken);
+
+                        return Result<UpsertArticleSeoSettingsResponse>.Failure(
+                            SeoErrors.SeoMetadata.VersionMismatch);
                     }
                 }
 
@@ -225,6 +229,8 @@ public sealed class UpsertArticleSeoSettingsUseCase : IUpsertArticleSeoSettingsU
                     SourceAggregateVersion = aggregate.SourceAggregateVersion,
                     LastAppliedMessageId = aggregate.LastAppliedMessageId,
                     LastSyncedAtUtc = aggregate.LastSyncedAtUtc,
+                    SlugRouteVersion = aggregate.SlugRouteVersion,
+                    SeoMetadataVersion = aggregate.SeoMetadataVersion,
                     Version = aggregate.Version
                 });
         }
