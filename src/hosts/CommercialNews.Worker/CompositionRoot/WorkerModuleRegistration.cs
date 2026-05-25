@@ -37,6 +37,7 @@ using Reading.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Reading.Consumers;
 using CommercialNews.Worker.Reading.Handlers;
 using CommercialNews.Worker.Reading.Handlers.Content;
+using CommercialNews.Worker.Reading.Handlers.Identity;
 using CommercialNews.Worker.Reading.Handlers.Media;
 using CommercialNews.Worker.Reading.Handlers.Seo;
 
@@ -80,6 +81,7 @@ public static class WorkerModuleRegistration
         services.AddScoped<IOutboxEventPublisher, RabbitMqOutboxEventPublisher>();
 
         services.AddScoped<IOutboxMessageHandler, IdentityUserRegisteredOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, IdentityUserPublicProfileUpdatedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, IdentityVerificationEmailRequestedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, IdentityPasswordResetRequestedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, IdentityPasswordChangedOutboxHandler>();
@@ -225,6 +227,8 @@ public static class WorkerModuleRegistration
         services.AddScoped<IReadingIntegrationEventHandler, SlugRouteChangedReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, SlugRouteDeactivatedReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, SeoMetadataUpdatedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, IdentityUserRegisteredReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, IdentityUserPublicProfileUpdatedReadingHandler>();
 
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));
