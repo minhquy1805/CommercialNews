@@ -1,11 +1,10 @@
 namespace Identity.Application.Outbox.Payloads;
 
-public sealed record UserRegisteredIntegrationEventPayload(
+public sealed record UserPublicProfileUpdatedIntegrationEventPayload(
     long UserId,
     string UserPublicId,
-    string Email,
     string? FullName,
-    string Status,
+    string? AvatarUrl,
     int Version,
-    DateTime RegisteredAtUtc,
+    DateTime UpdatedAtUtc,
     string BusinessDedupeKey);

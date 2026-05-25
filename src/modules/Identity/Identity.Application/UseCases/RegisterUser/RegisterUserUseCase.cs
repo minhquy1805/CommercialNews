@@ -114,6 +114,7 @@ public sealed class RegisterUserUseCase : IRegisterUserUseCase
                     email: user.Email,
                     fullName: user.FullName,
                     status: user.Status,
+                    version: user.Version,
                     registeredAtUtc: nowUtc,
                     correlationId: _requestContext.CorrelationId,
                     cancellationToken: cancellationToken);
