@@ -1,480 +1,673 @@
 # System Data Model — Interaction (V1)
 
-> **Recommended file:** `explanation/architecture/arc42/system-data/system-data-interaction-v1.md`  
-> **Module:** Interaction  
-> **Purpose:** Track views/likes/comments **without blocking** the public read path, and expose stable counters for popularity sorting.
+> **Recommended file:** `explanation/architecture/arc42/system-data/system-data-interaction-v1.md`
+> **Module:** Interaction
+> **Purpose:** Store engagement and moderation workflow data for public articles, while publishing derived public counters asynchronously to Reading.
 
 ---
 
-## 0) Data System fit (V1)
+## 1) Ownership and Boundaries
 
-Interaction is the **read-path risk module**: it can produce high write volume and must never degrade public list/detail.
+Interaction owns:
 
-- **Truth store:** SQL Server (likes/comments as OLTP entities; stats projection as stable read support)
-- **High-write log:** `ArticleViewEvent` is append-only and retention-driven (keep indexes minimal)
-- **Redis:** counters (views/likes/comments deltas), short-lived dedup/throttle keys, and optional “already viewed recently” keys
-- **Async:** aggregation updates `ArticleInteractionStats` (eventual consistency)
+```text
+ArticleLike
+Comment
+CommentReport
+CommentModerationCase
+CommentModerationActionHistory
 
-**Non-negotiables (from Quality Requirements)**
-- Read path remains fast under burst traffic.
-- Interaction failures must not break reading (graceful degradation).
-- Background processing must be retry-safe and idempotent.
+ArticleInteractionTargetProjection
+ArticleViewCount
+ArticleInteractionStats
+InteractionConsumedMessage
+```
 
----
+Interaction does not own:
 
-## 1) Scope & boundaries (V1)
+| Concern | Owner |
+|---|---|
+| Article content and publication lifecycle | Content |
+| Public article read model | Reading |
+| User/account truth | Identity |
+| Permissions | Authorization |
+| Email delivery | Notifications |
+| Canonical audit evidence | Audit |
 
-### In scope (V1)
-- View tracking (non-blocking)
-- Like/unlike (idempotent per user)
-- Comments (basic lifecycle; moderation hooks later)
-- A stable projection for totals + popularity sorting
+Cross-module references use stable logical identifiers:
 
-### Cross-module references
-- Interaction references `Content.Article` by `ArticleId`.
-- Interaction references `Identity.User` by `UserId` (for likes/comments; views can be anonymous).
+```text
+ArticlePublicId
+UserId
+```
 
----
-
-## 2) Capability → Entity mapping
-
-### 2.1 View tracking
-**Entities**
-- `ArticleViewEvent` — append-only, high-write log
-- `ArticleInteractionStats` — materialized counters updated async
-
-**V2 hook**
-- Unique view policy: `ViewUniqueKey` / `ViewMeasurementPolicy`
+Interaction must not directly modify Content, Reading, Notifications or Audit tables.
 
 ---
 
-### 2.2 Likes (like/unlike + totals)
-**Entities**
-- `ArticleLike` — unique per `(ArticleId, UserId)`; idempotent
-- `ArticleInteractionStats` — totals (likes)
+## 2) Data Classification
 
-**V2 hook**
-- `Reaction` (like/dislike/emoji)
+### 2.1 Truth / Workflow State
 
----
+| Entity | Purpose |
+|---|---|
+| `ArticleLike` | Current user-like relationship for an article |
+| `Comment` | Comment content and current moderation status |
+| `CommentReport` | Valid report submitted against a visible comment |
+| `CommentModerationCase` | One report-review cycle for a comment |
+| `CommentModerationActionHistory` | Local moderation history for admin flow |
 
-### 2.3 Comments (CRUD + moderation V2)
-**Entities**
-- `Comment` — lifecycle + visibility
-- V2 hooks: `CommentModerationAction`, `CommentReport/SpamSignal`
+### 2.2 Derived / Processing State
 
----
+| Entity | Purpose |
+|---|---|
+| `ArticleInteractionTargetProjection` | Local article interaction eligibility derived from Content |
+| `ArticleViewCount` | Durable accepted-view materialized counter |
+| `ArticleInteractionStats` | Public counter snapshot published to Reading |
+| `InteractionConsumedMessage` | Durable async consumer dedupe/apply tracking |
 
-## 3) Workload & hot paths (V1) (DDIA Ch3)
-
-### 3.1 Public read dependency policy
-- Public read path should depend only on:
-  - `Article` (Content truth)  
-  - optional: `ArticleInteractionStats` (safe fallback to 0 when missing)
-- Public read must **not** depend on `ArticleViewEvent`.
-
-### 3.2 Hot writes
-- Views can spike heavily (hot articles).
-- Likes/comments are lower than views but still potentially bursty.
-
-### 3.3 Admin/moderation (V2+)
-- In V1, moderation is minimal; keep lifecycle fields for future governance.
+Derived state may lag, but it must never replace Interaction truth.
 
 ---
 
-## 4) Dataflows (V1) — REST / DB / Broker (DDIA Ch4)
+## 3) Main Dataflows
 
-### 4.1 View tracking (non-blocking)
-**Goal:** record a view without slowing article detail.
+### 3.1 Content → Interaction Eligibility
 
-**Recommended V1 tactic**
-- API emits a view signal asynchronously (queue/event) OR writes a lightweight record and returns immediately.
-- If Interaction is down, article read still succeeds.
+```text
+Content public-state event
+    -> Interaction consumer
+    -> ArticleInteractionTargetProjection
+```
 
-**Pipeline options (pick one; both are compatible)**
-- **Option A (simplest):** insert `ArticleViewEvent` async in Worker (recommended)
-- **Option B (direct write):** API inserts `ArticleViewEvent` synchronously but with strict time budget and minimal indexes
+Interaction accepts new view/like/comment/report operations only when:
 
-### 4.2 Like/unlike (idempotent)
-- API upserts like state:
-  - Like: ensure row exists and `IsActive=1`, set `LikedAt`
-  - Unlike: set `IsActive=0`, set `UnlikedAt` (no delete)
-- Stats update happens asynchronously (eventual).
+```text
+IsInteractionEnabled = true
+AND RequiresResync = false
+```
 
-### 4.3 Comment create/edit/delete (soft)
-- Create comment → visible/pending based on policy
-- Edit increments `EditCount`, sets `UpdatedAt`
-- Delete is soft (`Status='Deleted'`, `DeletedAt`, `DeletedBy`)
-- Public reads only `Status='Visible'`.
-
-### 4.4 Stats projection update (async aggregation)
-- Worker aggregates deltas from:
-  - view events or redis counters
-  - active likes
-  - visible comments
-- Updates `ArticleInteractionStats` periodically (e.g., every 1–5 minutes) or event-driven.
-
-**Failure behavior**
-- If aggregation is delayed: counters are stale; reads still succeed.
-- If stats row missing: treat totals as 0.
+If eligibility is missing or unsafe, Interaction fails closed for new public interactions.
 
 ---
 
-## 5) Redis plan (Interaction V1) — protect OLTP and enable burst handling
+### 3.2 View Tracking
 
-> Redis is derived; it reduces write pressure and supports safe retries.
+```text
+Public article rendered by Reading
+    -> Client sends separate view request
+    -> Interaction validates eligibility and anti-abuse policy
+    -> Atomic increment ArticleViewCount
+```
 
-### 5.1 Counters (recommended for views)
-- `cn:article:{articleId}:views` INCR (hot path)
-- (optional) `cn:article:{articleId}:likes_delta` INCR/DECR
-- (optional) `cn:article:{articleId}:comments_delta` INCR
+Rules:
 
-**Flush policy**
-- Worker flushes counters to `ArticleInteractionStats` in batches (1–5 minutes)
-- After flush: reset counters (atomic get+del pattern)
-
-### 5.2 View throttling / “recent view” keys (optional V1)
-To reduce spam/bots inflating views:
-- `cn:viewed:{articleId}:{fingerprint}` TTL 30–300s  
-Where fingerprint can be:
-- userId (if logged in), else
-- sessionId/cookie id, else
-- ip hash + user-agent hash (privacy-aware)
-
-If key exists → skip counting view (policy).
-
-### 5.3 Dedup for async processing (required)
-- `cn:msg:processed:{messageId}` TTL 7–30 days  
-Used if views/likes/comments events are processed via broker/worker.
+- view tracking must not block public reading;
+- V1 does not store raw `ArticleViewEvent` rows;
+- V1 does not publish one Reading event per view.
 
 ---
 
-## 6) Identify entities (V1)
+### 3.3 Likes
 
-### V1 must-have
-1. `ArticleViewEvent`
-2. `ArticleLike`
-3. `Comment`
+```text
+Like / Unlike
+    -> ArticleLike truth mutation
+    -> Outbox event where required
+    -> ArticleInteractionStats updated asynchronously
+```
 
-### V1 highly recommended
-1. `ArticleInteractionStats` *(projection)*
+Invariant:
 
-### V2 hooks
-- `ViewUniqueKey`, `CommentModerationAction`, `CommentReport`, `Reaction`
-
----
-
-## 7) Relationships (V1)
-
-- `Article (1) → ArticleViewEvent (0..N)` (UserId nullable)
-- `Article (1) → ArticleLike (0..N)` unique per `(ArticleId, UserId)`
-- `Article (1) → Comment (0..N)` with optional `ParentCommentId`
-- `Article (1) → ArticleInteractionStats (0..1)` optional projection (missing = zeros)
+```text
+At most one active ArticleLike per (ArticlePublicId, UserId).
+```
 
 ---
 
-## 8) Invariants (V1 rules)
+### 3.4 Comments and Moderation
 
-### 8.1 Non-blocking read path
-- Tracking failures must not break list/detail.
-- Public pages must not depend on view log availability.
+```text
+Create comment
+    -> Comment(Status = Pending, ParentCommentId = NULL)
 
-### 8.2 View semantics
-- V1 view: one count per “detail load” (optionally throttled).
-- View events are append-only (except retention policy).
+Admin approve
+    -> Pending -> Visible
 
-### 8.3 Like semantics (idempotent)
-- Double-like does not create duplicates.
-- Unlike when not liked is a no-op.
-- Uniqueness: `(ArticleId, UserId)` at most one row.
+Admin reject
+    -> Pending -> Rejected
 
-### 8.4 Comment lifecycle
-- Status ∈ `Visible | Hidden | Deleted | Pending`
-- Public reads only `Visible`
-- Hard delete discouraged; keep governance hooks.
+Admin hide
+    -> Visible -> Hidden
 
-### 8.5 Counter consistency
-- Stats are eventually consistent
-- Counters must be non-negative
-- Views should be monotonic in projection (policy)
+Admin restore
+    -> Hidden -> Visible
 
----
+Author delete own comment
+    -> Pending / Visible / Rejected / Hidden -> Deleted
+```
 
-## 9) Fields (Logical schema) — SQL Server (V1)
+Required moderation operations also append:
 
-### 9.1 `ArticleViewEvent`
-*(unchanged — keep your table as-is)*
-
-### 9.2 `ArticleLike`
-*(unchanged — toggle IsActive is a good V1 tactic)*
-
-### 9.3 `Comment`
-*(unchanged)*
-
-### 9.4 `ArticleInteractionStats` (projection)
-*(unchanged)*
+```text
+CommentModerationActionHistory
+```
 
 ---
 
-## 10) Constraints & indexes — Interaction (V1)
+### 3.5 Reports and Cases
 
-### 10.1 PK / FK / UNIQUE / CHECK
-*(keep your current list; it is solid)*
+```text
+User reports Visible comment
+    -> CommentReport
+    -> Create or join CommentModerationCase(Open)
+```
 
-### 10.2 Index guidance (DDIA Ch3)
-- Keep `ArticleViewEvent` indexes minimal (high-write).
-- Ensure `ArticleLike` unique constraint for idempotency.
-- Ensure `Comment` index supports paging by article and status.
-- Stats index supports popularity sort.
+Rules:
 
----
+```text
+One report per (CommentId, ReporterUserId).
+At most one Open CommentModerationCase per Comment.
+Report never automatically hides a comment.
+```
 
-## 11) Aggregation strategy (V1) — from signals to stats
+Case resolution:
 
-### 11.1 Minimal viable pipeline (recommended)
-- Views:
-  - `Redis INCR` on read
-  - Worker flushes into `ArticleInteractionStats.ViewsTotal`
-- Likes:
-  - compute delta based on `ArticleLike.IsActive` changes (event-driven) or periodic recount
-- Comments:
-  - increment on create; decrement if hidden/deleted (policy)
-
-### 11.2 Correctness trade-offs
-- Exact real-time stats are not required in V1.
-- Prefer predictable read performance over perfect immediacy.
+| Operation | Comment | Case | Pending Reports |
+|---|---|---|---|
+| Dismiss reports | Remains `Visible` | `Dismissed` | `Dismissed` |
+| Hide reported comment | `Hidden` | `Actioned` | `Actioned` |
+| Author deletes comment | `Deleted` | `ClosedByAuthorDeletion` | `ClosedByAuthorDeletion` |
 
 ---
 
-## 12) Evolution rules (V1) — safe change over time (DDIA Ch4)
+### 3.6 Counters → Reading
 
-- Add-only fields + defaults
-- If introducing unique-view policies, add `UniqueKeyHash` without breaking existing counters
-- Never change meanings of existing counters; add new metrics instead (e.g., `ViewsUniqueTotal`)
+```text
+ArticleViewCount + ArticleLike + Comment
+    -> ArticleInteractionStats
+    -> interaction.article_counters_projection_published
+    -> Reading
+```
 
----
+Published counters:
 
-## 13) Retention & operational jobs (V1 policy)
+```text
+ViewCount
+LikeCount
+VisibleCommentCount
+StatsVersion
+```
 
-### 13.1 View log retention
-`ArticleViewEvent` will grow quickly. Define:
-- retention window (e.g., 7–30 days raw)
-- purge job by `ViewedAt` (uses `IX_ViewEvent_ViewedAt`)
-
-### 13.2 Login/audit alignment
-If audit requires interaction governance later (moderation actions), store moderation logs append-only (V2).
-
----
-
-## 14) V2 hooks (interaction evolution)
-- Unique views: `UniqueKeyHash` from (UserId/session/window) + policy version
-- Moderation: `CommentModerationAction` append-only
-- Anti-spam: reports/signals + throttling + shadow-ban
-- Reactions: generalize to `Reaction(Type)`
+Reading applies newer snapshots by `StatsVersion`.
 
 ---
 
-## 15) Partitioning Readiness (V1/V2)
+## 4) Entity Summary
 
-> This section captures **partitioning and hotspot-readiness** for Interaction.
-> V1 remains **non-sharded by default**; the goal is to protect the read path and define safe scale options.
+### 4.1 `ArticleInteractionTargetProjection`
 
-### 15.1 Why Interaction is a partitioning-risk module
+| Field | Purpose |
+|---|---|
+| `ArticleInteractionTargetProjectionId` | Internal PK |
+| `ArticlePublicId` | Article logical identity |
+| `SourceStatus` | Latest Content-derived state |
+| `IsInteractionEnabled` | Accept new interactions or not |
+| `LastSourceVersion` | Latest applied source version |
+| `LastSourceMessageId` | Latest applied message |
+| `LastSourceOccurredAtUtc` | Source diagnostic timestamp |
+| `LastSyncedAtUtc` | Local apply timestamp |
+| `RequiresResync` | Unsafe projection marker |
+| `CreatedAtUtc`, `UpdatedAtUtc` | Tracking fields |
 
-Interaction is the highest-risk module for **write bursts** and **hot keys**:
+Invariant:
 
-* hot articles can generate large view spikes in minutes
-* likes/comments may burst during trending events
-* counters are user-visible and frequently requested by read paths
-
-**V1 principle:** optimize for **read-path protection** first, not perfect real-time counters.
-
----
-
-### 15.2 Primary access patterns (V1)
-
-**Hot paths**
-
-* `TrackView(articleId, ...)` (non-blocking)
-* `Like/Unlike(articleId, userId)` (idempotent)
-* `CreateComment/EditComment/DeleteComment` (OLTP)
-
-**Read dependencies**
-
-* Public read path may read `ArticleInteractionStats` (optional)
-* Public read path must **not** read `ArticleViewEvent`
-
-**Admin/moderation (V2+)**
-
-* comment lifecycle review / moderation history / abuse signals (secondary-index-heavy later)
+```text
+One row per ArticlePublicId.
+```
 
 ---
 
-### 15.3 Secondary-index-heavy queries (present and future)
+### 4.2 `ArticleViewCount`
 
-**V1**
+| Field | Purpose |
+|---|---|
+| `ArticleViewCountId` | Internal PK |
+| `ArticlePublicId` | Article logical identity |
+| `ViewCount` | Accepted materialized view total |
+| `ViewVersion` | Monotonic counter version |
+| `LastAcceptedViewAtUtc` | Latest accepted view timestamp |
+| `CreatedAtUtc`, `UpdatedAtUtc` | Tracking fields |
 
-* comment paging by `(ArticleId, Status, CreatedAt)`
-* like existence lookup by `(ArticleId, UserId)` (idempotency path)
+Rules:
 
-**V2+**
-
-* moderation queues (by `Status`, `Flag`, `CreatedAt`)
-* abuse investigation/search (user/article/time-window)
-* reaction analytics/trending projections
-
-**Implication**
-
-* V1 stays OLTP + projection-based
-* V2+ may require dedicated moderation/search projections before any truth-store sharding
-
----
-
-### 15.4 Candidate partitioning strategy (future)
-
-Partitioning choices depend on **sub-workload**, not one rule for all Interaction data.
-
-#### A) `ArticleViewEvent` (append-only, high-write)
-
-**Likely fit:** **range/hybrid**
-
-* range by time (retention/purge/replay friendly), with hotspot caution
-* hybrid option (bucket + time) if current-range hotspot appears
-
-**Risk**
-
-* pure time-range partitioning can create a hot “current” partition during spikes
-
-#### B) `ArticleInteractionStats` (projection)
-
-**Likely fit:** workload-driven / projection partitioning
-
-* often better solved by Redis + async aggregation lanes before DB sharding
-* if scaled later, partition by article/bucket depending query patterns
-
-#### C) `ArticleLike` and `Comment` (OLTP)
-
-**Likely fit:** defer DB partitioning in V1
-
-* prioritize indexes, idempotency constraints, bounded reads
-* consider hybrid/projection strategies first for heavy analytics/moderation paths
+```text
+One row per ArticlePublicId.
+ViewCount >= 0.
+View updates are atomic.
+No raw per-view history is stored in V1.
+```
 
 ---
 
-### 15.5 Hotspot and skew risks (V1)
+### 4.3 `ArticleLike`
 
-#### A) Hot keys (most important)
+| Field | Purpose |
+|---|---|
+| `ArticleLikeId` | Internal PK |
+| `PublicId` | Public identity |
+| `ArticlePublicId` | Article logical identity |
+| `UserId` | Authenticated user identity |
+| `IsActive` | Current like state |
+| `LikedAtUtc` | Like timestamp |
+| `UnlikedAtUtc` | Unlike timestamp, nullable |
+| `Version` | Mutation version |
+| `CreatedAtUtc`, `UpdatedAtUtc` | Tracking fields |
 
-* viral article → `articleId` becomes a hot key
-* hashing alone does **not** solve this if all writes target the same `articleId`
+Invariant:
 
-#### B) Write skew
-
-* view spikes concentrated on a small number of hot articles
-* retry storms can amplify pressure if async consumers fail/retry aggressively
-
-#### C) Read skew
-
-* top/trending articles repeatedly request the same counters/stats rows
-
----
-
-### 15.6 V1 mitigations (no sharding yet)
-
-CommercialNews V1 already applies the correct mitigations for Interaction:
-
-* **Non-blocking tracking** (tracking failure must not break reading)
-* **Redis counters** for burst absorption (`INCR` on hot path)
-* **Async flush/aggregation** into `ArticleInteractionStats`
-* **Minimal indexes** on `ArticleViewEvent` (high-write table)
-* **Idempotent processing + dedup keys** for at-least-once workflows
-* **Safe fallback semantics**: missing stats row => zeros (read path still works)
-
-These tactics are preferred before introducing shard complexity.
+```text
+At most one active like per (ArticlePublicId, UserId).
+```
 
 ---
 
-### 15.7 V2+ scale options (selective)
+### 4.4 `Comment`
 
-Introduce stronger partitioning only when signals justify it.
+| Field | Purpose |
+|---|---|
+| `CommentId` | Internal PK |
+| `PublicId` | Public identity |
+| `ArticlePublicId` | Article logical identity |
+| `AuthorUserId` | Comment author |
+| `ParentCommentId` | Nullable self-reference reserved for future replies |
+| `Content` | Comment text |
+| `Status` | Current visibility/moderation status |
+| `Version` | Concurrency version |
+| `CreatedAtUtc`, `UpdatedAtUtc` | Tracking fields |
+| `DeletedAtUtc` | Author deletion timestamp, nullable |
 
-#### Option A — Sharded counters / salted keys (for hot articles)
+Statuses:
 
-For extremely hot `articleId`s:
+```text
+Pending
+Visible
+Rejected
+Hidden
+Deleted
+```
 
-* split one logical counter into multiple shards (e.g., `views:{articleId}:{bucket}`)
-* aggregate asynchronously or on read with cache
+V1 rule:
 
-**Trade-off**
-
-* write scale improves
-* reads/aggregation become more complex
-
-#### Option B — Aggregation lanes / ownership partitioning
-
-Partition async aggregation work by:
-
-* `articleId` hash bucket, or
-* logical lane id
-
-This is often the **first scalable step** before DB sharding.
-
-#### Option C — Time/bucket partitioning for raw view events
-
-Use range/hybrid partitioning if:
-
-* retention/purge/replay operations become too expensive
-* raw event volume materially impacts operability/recovery
-
----
-
-### 15.8 Rebalancing and routing readiness (future)
-
-Interaction scaling will likely require **workload rebalancing** before truth-table sharding.
-
-**Likely rebalance unit**
-
-* aggregation lane / bucket (worker ownership)
-* later: event partitions or time buckets
-
-**Routing requirement**
-
-* authoritative mapping for `lane/bucket -> worker owner`
-* safe reassignment (throttled, observable)
-
-**Guardrail**
-
-* rebalance or concurrency increases must not degrade public read P95/P99
+```text
+Every V1-created comment has ParentCommentId = NULL.
+```
 
 ---
 
-### 15.9 Partition-readiness observability signals (Interaction)
+### 4.5 `CommentReport`
 
-Use existing V1 measurement signals to decide when stronger partitioning is needed:
+| Field | Purpose |
+|---|---|
+| `CommentReportId` | Internal PK |
+| `PublicId` | Admin-facing identity |
+| `CommentId` | Reported comment |
+| `CommentModerationCaseId` | Owning review case |
+| `ReporterUserId` | Reporting user |
+| `ReasonCode` | Allowlisted report reason |
+| `Description` | Optional bounded text |
+| `Status` | Report status |
+| `CreatedAtUtc` | Creation timestamp |
+| `ResolvedAtUtc` | Resolution timestamp, nullable |
 
-* interaction backlog / aggregation lag
-* worker processing latency P95/P99
-* consumer failure/retry rate
-* dedupe hits / idempotency anomalies
-* read path P95/P99 during hot-article spikes
-* Redis counter flush delays / batch lag (if measured)
-* missing stats fallback frequency (if measured)
+Statuses:
 
-**Scale trigger (policy-level)**
-Consider stronger workload/data partitioning when sustained spikes cause:
+```text
+Pending
+Dismissed
+Actioned
+ClosedByAuthorDeletion
+```
 
-* growing lag/backlog that does not self-recover
-* read-path degradation despite current Redis + async aggregation tactics
-* recovery/replay times becoming operationally unsafe
+Invariant:
+
+```text
+One report per (CommentId, ReporterUserId).
+```
 
 ---
 
-## 16) ERD (dbdiagram.io)
+### 4.6 `CommentModerationCase`
 
-See: `../diagrams/erd/interaction-v1.dbml`
+| Field | Purpose |
+|---|---|
+| `CommentModerationCaseId` | Internal PK |
+| `PublicId` | Admin-facing identity |
+| `CommentId` | Target comment |
+| `Status` | Case status |
+| `Priority` | Moderation priority |
+| `HighestSeverity` | Highest evaluated severity in case |
+| `AlertTriggeredAtUtc` | Alert-trigger timestamp, nullable |
+| `AlertLevel` | Triggered alert level, nullable |
+| `AlertMessageId` | Alert correlation/message identity, nullable |
+| `OpenedAtUtc` | Open timestamp |
+| `ResolvedAtUtc` | Resolution timestamp, nullable |
+| `ResolvedByUserId` | Moderator identity, nullable |
+| `ResolutionType` | Resolution result, nullable |
+| `ResolutionReasonCode` | Resolution reason, nullable |
+| `ResolutionNote` | Optional bounded note |
+| `Version` | Concurrency version |
 
-How to render:
+Statuses:
 
-1. Open dbdiagram.io
-2. Copy DBML content from the file above
-3. Paste into dbdiagram.io to view/export
+```text
+Open
+Dismissed
+Actioned
+ClosedByAuthorDeletion
+```
+
+Invariants:
+
+```text
+At most one Open case per Comment.
+One Open case triggers at most one admin-alert intent in V1.
+```
+
+---
+
+### 4.7 `CommentModerationActionHistory`
+
+| Field | Purpose |
+|---|---|
+| `CommentModerationActionHistoryId` | Internal PK |
+| `PublicId` | Admin-facing identity |
+| `CommentId` | Affected comment |
+| `CommentModerationCaseId` | Related case, nullable |
+| `ActionType` | Moderation action |
+| `FromStatus`, `ToStatus` | Transition state |
+| `ActorUserId` | Acting user/admin, nullable |
+| `ActorType` | Actor classification |
+| `ReasonCode` | Action reason, nullable |
+| `Note` | Optional bounded note |
+| `OccurredAtUtc` | Action timestamp |
+| `CorrelationId` | Flow correlation identity |
+
+Action types:
+
+```text
+Approve
+Reject
+Hide
+Restore
+DismissReportedCase
+HideReportedComment
+CloseCaseByAuthorDeletion
+```
+
+---
+
+### 4.8 `ArticleInteractionStats`
+
+| Field | Purpose |
+|---|---|
+| `ArticleInteractionStatsId` | Internal PK |
+| `ArticlePublicId` | Article logical identity |
+| `ViewCount` | Published view count |
+| `LikeCount` | Published active-like count |
+| `VisibleCommentCount` | Published visible-comment count |
+| `StatsVersion` | Monotonic snapshot version |
+| `LastMaterializedAtUtc` | Materialization time |
+| `LastPublishedMessageId` | Last publication message, nullable |
+| `LastPublishedAtUtc` | Last publication time, nullable |
+| `CreatedAtUtc`, `UpdatedAtUtc` | Tracking fields |
+
+Rules:
+
+```text
+One row per ArticlePublicId.
+Counters are non-negative.
+StatsVersion is monotonic.
+```
+
+---
+
+### 4.9 `InteractionConsumedMessage`
+
+| Field | Purpose |
+|---|---|
+| `InteractionConsumedMessageId` | Internal PK |
+| `ConsumerName` | Consumer purpose |
+| `MessageId` | Incoming message identity |
+| `ProducerModule` | Source module |
+| `EventType` | Incoming event type |
+| `AggregateId` | Source aggregate identity |
+| `AggregateVersion` | Source version, nullable |
+| `ApplyDecision` | Apply result |
+| `CorrelationId` | Correlation identity, nullable |
+| `ReceivedAtUtc`, `ProcessedAtUtc` | Processing timestamps |
+| `FailureCode`, `FailureDetail` | Safe failure diagnostics, nullable |
+
+Invariant:
+
+```text
+Unique (ConsumerName, MessageId).
+```
+
+---
+
+## 5) Relationships
+
+### 5.1 Interaction-local relationships
+
+```text
+Comment.ParentCommentId
+    -> Comment.CommentId                         // reserved for future replies
+
+CommentReport.CommentId
+    -> Comment.CommentId
+
+CommentReport.CommentModerationCaseId
+    -> CommentModerationCase.CommentModerationCaseId
+
+CommentModerationCase.CommentId
+    -> Comment.CommentId
+
+CommentModerationActionHistory.CommentId
+    -> Comment.CommentId
+
+CommentModerationActionHistory.CommentModerationCaseId
+    -> CommentModerationCase.CommentModerationCaseId
+```
+
+### 5.2 Logical external references
+
+```text
+ArticlePublicId -> Content-owned article identity
+UserId / AuthorUserId / ReporterUserId / ResolvedByUserId / ActorUserId
+    -> Identity-owned user identity
+```
+
+---
+
+## 6) Database Invariants and Index Direction
+
+| Table | Required constraint / index direction |
+|---|---|
+| `ArticleInteractionTargetProjection` | Unique `ArticlePublicId`; index for `RequiresResync` |
+| `ArticleViewCount` | Unique `ArticlePublicId`; counter checks |
+| `ArticleLike` | Unique active `(ArticlePublicId, UserId)` |
+| `Comment` | Unique `PublicId`; index by `(ArticlePublicId, Status, ParentCommentId, CreatedAtUtc)`; index for admin status queue |
+| `CommentReport` | Unique `(CommentId, ReporterUserId)`; index by case/status |
+| `CommentModerationCase` | Unique open case per `CommentId`; index by status/priority/opened time |
+| `CommentModerationActionHistory` | Index by comment/time and case/time |
+| `ArticleInteractionStats` | Unique `ArticlePublicId`; counter checks |
+| `InteractionConsumedMessage` | Unique `(ConsumerName, MessageId)`; index for processing cleanup/diagnostics |
+
+Required check-constraint values:
+
+```text
+Comment.Status:
+    Pending, Visible, Rejected, Hidden, Deleted
+
+CommentReport.Status:
+    Pending, Dismissed, Actioned, ClosedByAuthorDeletion
+
+CommentModerationCase.Status:
+    Open, Dismissed, Actioned, ClosedByAuthorDeletion
+
+ArticleViewCount.ViewCount >= 0
+ArticleInteractionStats.ViewCount >= 0
+ArticleInteractionStats.LikeCount >= 0
+ArticleInteractionStats.VisibleCommentCount >= 0
+```
+
+---
+
+## 7) Redis / Cache Posture
+
+Redis is optional in V1 and may support only temporary operational controls such as:
+
+```text
+Rate-limit keys
+Short-lived repeat-view suppression keys
+Temporary anti-abuse signals
+```
+
+Rules:
+
+```text
+Redis is not durable Interaction truth.
+Accepted view state is stored durably in ArticleViewCount.
+Like/comment/report/case truth remains in SQL Server.
+```
+
+---
+
+## 8) Transaction and Async Rules
+
+For operations requiring downstream propagation:
+
+```text
+Interaction state mutation
++ required CommentModerationActionHistory
++ required OutboxMessage
+```
+
+must commit atomically.
+
+Outbound async direction:
+
+| Consumer | Event |
+|---|---|
+| Reading | `interaction.article_counters_projection_published` |
+| Notifications | `interaction.comment_report_alert_triggered` |
+| Audit | Moderation-relevant Interaction events |
+
+Inbound async direction:
+
+| Producer | Result in Interaction |
+|---|---|
+| Content | Updates `ArticleInteractionTargetProjection` |
+
+---
+
+## 9) Article Lifecycle Behavior
+
+When Content confirms that an article is unpublished, archived or soft-deleted:
+
+```text
+Stop accepting new public interactions.
+Preserve existing Interaction truth, workflow history and counters.
+```
+
+| State / Operation | Behavior |
+|---|---|
+| New view contribution | Not accepted |
+| New like | Not accepted |
+| New comment | Not accepted |
+| New report | Not accepted |
+| Unlike own active like | Allowed |
+| Delete own comment | Allowed |
+| Resolve existing moderation case | Allowed when authorized |
+| `ArticleViewCount` | Preserved |
+| `ArticleInteractionStats` | Preserved |
+
+If the same `ArticlePublicId` is later published again, preserved interaction state continues to apply.
+
+---
+
+## 10) Reconciliation Posture
+
+Interaction may repair derived state as follows:
+
+```text
+ArticleInteractionTargetProjection
+    -> resync from Content-owned source state
+
+LikeCount
+    -> recount active ArticleLike rows
+
+VisibleCommentCount
+    -> recount Comment rows where Status = Visible
+
+ViewCount
+    -> read preserved ArticleViewCount state
+```
+
+V1 does not reconstruct `ViewCount` from raw historical page-view records because no such raw history is stored.
+
+If the outward public counter snapshot changes during repair:
+
+```text
+Update ArticleInteractionStats
+Increment StatsVersion
+Publish interaction.article_counters_projection_published
+```
+
+---
+
+## 11) DBML Entity List
+
+The Interaction ERD / DBML should contain:
+
+```text
+ArticleInteractionTargetProjection
+ArticleViewCount
+ArticleLike
+Comment
+CommentReport
+CommentModerationCase
+CommentModerationActionHistory
+ArticleInteractionStats
+InteractionConsumedMessage
+```
+
+Shared `OutboxMessage` may be referenced as infrastructure, but it is not an Interaction business entity.
+
+---
+
+## 12) Final Data Posture
+
+```text
+Interaction owns like, comment, report and moderation workflow truth.
+
+Content asynchronously supplies article interaction eligibility.
+
+Views are stored through durable ArticleViewCount, not ArticleViewEvent.
+
+Comments are top-level only in V1; ParentCommentId is reserved for future use.
+
+Reports never automatically hide comments.
+
+One open moderation case may trigger at most one async admin-alert intent.
+
+ArticleInteractionStats publishes versioned public counter snapshots to Reading.
+
+Unpublish disables new interaction but preserves counters and history.
+
+Redis is optional temporary support only, never durable truth.
+
+Async correctness relies on local transaction + Outbox,
+durable consumer dedupe, version-aware apply and bounded reconciliation.
+```
