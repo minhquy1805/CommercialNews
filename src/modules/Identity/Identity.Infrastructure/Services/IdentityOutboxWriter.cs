@@ -12,6 +12,7 @@ namespace Identity.Infrastructure.Services;
 public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
 {
     private const string AggregateTypeUserAccount = "Identity.UserAccount";
+    private const int PublicIdLength = 26;
 
     private static readonly JsonSerializerOptions SerializerOptions =
         new(JsonSerializerDefaults.Web);
@@ -37,6 +38,7 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
         string email,
         string? fullName,
         string status,
+        int version,
         DateTime registeredAtUtc,
         string? correlationId,
         CancellationToken cancellationToken = default)
@@ -45,6 +47,7 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
 
         ValidateUserEnvelope(userId, userPublicId, email, registeredAtUtc);
         ValidateRequired(status, nameof(status));
+        ValidatePositiveVersion(version, nameof(version));
 
         string businessDedupeKey =
             $"identity:user-registered:{userId}";
@@ -55,6 +58,7 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
             Email: email.Trim(),
             FullName: NormalizeOptional(fullName),
             Status: status.Trim(),
+            Version: version,
             RegisteredAtUtc: registeredAtUtc,
             BusinessDedupeKey: businessDedupeKey);
 
@@ -67,6 +71,48 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
             occurredAtUtc: registeredAtUtc,
             priority: 1,
             cancellationToken: cancellationToken,
+            aggregateVersion: version,
+            correlationId: correlationId);
+    }
+
+    public async Task<long> EnqueueUserPublicProfileUpdatedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long userId,
+        string userPublicId,
+        string? fullName,
+        string? avatarUrl,
+        int version,
+        DateTime updatedAtUtc,
+        string? correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(unitOfWork);
+
+        ValidatePublicUserEnvelope(userId, userPublicId, updatedAtUtc);
+        ValidatePositiveVersion(version, nameof(version));
+
+        string businessDedupeKey =
+            $"identity:user-public-profile-updated:{userId}:{version}";
+
+        var payload = new UserPublicProfileUpdatedIntegrationEventPayload(
+            UserId: userId,
+            UserPublicId: userPublicId.Trim(),
+            FullName: NormalizeOptional(fullName),
+            AvatarUrl: NormalizeOptional(avatarUrl),
+            Version: version,
+            UpdatedAtUtc: updatedAtUtc,
+            BusinessDedupeKey: businessDedupeKey);
+
+        return await InsertOutboxMessageAsync(
+            unitOfWork: unitOfWork,
+            eventType: IdentityIntegrationEventTypes.UserPublicProfileUpdated,
+            userId: userId,
+            userPublicId: userPublicId,
+            payload: payload,
+            occurredAtUtc: updatedAtUtc,
+            priority: 1,
+            cancellationToken: cancellationToken,
+            aggregateVersion: version,
             correlationId: correlationId);
     }
 
@@ -561,6 +607,7 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
         DateTime occurredAtUtc,
         byte priority,
         CancellationToken cancellationToken,
+        int? aggregateVersion = null,
         long? initiatorUserId = null,
         string? correlationId = null)
     {
@@ -583,7 +630,7 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
             occurredAt: occurredAtUtc,
             priority: priority,
             aggregatePublicId: userPublicId.Trim(),
-            aggregateVersion: null,
+            aggregateVersion: aggregateVersion,
             headers: null,
             correlationId: NormalizeOptional(correlationId),
             initiatorUserId: initiatorUserId ?? userId);
@@ -605,8 +652,22 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
             throw new ArgumentOutOfRangeException(nameof(userId));
         }
 
-        ValidateRequired(userPublicId, nameof(userPublicId));
+        ValidatePublicId(userPublicId, nameof(userPublicId));
         ValidateRequired(email, nameof(email));
+        ValidateRequiredDate(occurredAtUtc, nameof(occurredAtUtc));
+    }
+
+    private static void ValidatePublicUserEnvelope(
+        long userId,
+        string userPublicId,
+        DateTime occurredAtUtc)
+    {
+        if (userId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(userId));
+        }
+
+        ValidatePublicId(userPublicId, nameof(userPublicId));
         ValidateRequiredDate(occurredAtUtc, nameof(occurredAtUtc));
     }
 
@@ -635,6 +696,18 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
         }
     }
 
+    private static void ValidatePositiveVersion(
+        int value,
+        string parameterName)
+    {
+        if (value <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                "Version must be greater than zero.");
+        }
+    }
+
     private static void ValidateNonNegative(
         int value,
         string parameterName)
@@ -652,6 +725,20 @@ public sealed class IdentityOutboxWriter : IIdentityOutboxWriter
         if (string.IsNullOrWhiteSpace(value))
         {
             throw new ArgumentException($"{parameterName} is required.", parameterName);
+        }
+    }
+
+    private static void ValidatePublicId(
+        string? value,
+        string parameterName)
+    {
+        ValidateRequired(value, parameterName);
+
+        if (value!.Trim().Length != PublicIdLength)
+        {
+            throw new ArgumentException(
+                $"{parameterName} must be exactly {PublicIdLength} characters.",
+                parameterName);
         }
     }
 
