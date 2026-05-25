@@ -34,13 +34,5 @@ public sealed class SeoRabbitMqConsumerOptions
 
     public bool RequeueOnFailure { get; init; } = true;
 
-    public string[] RoutingKeys { get; init; } =
-    [
-        "content.article_created",
-        "content.article_updated",
-        "content.article_published",
-        "content.article_unpublished",
-        "content.article_archived",
-        "content.article_soft_deleted"
-    ];
+    public string[] RoutingKeys { get; init; } = [];
 }

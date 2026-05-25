@@ -40,6 +40,7 @@ public sealed class SeoRabbitMqConsumerService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         SeoRabbitMqConsumerOptions options = Options;
+        ValidateRoutingKeys(options.RoutingKeys);
 
         _logger.LogInformation(
             "SEO RabbitMQ consumer starting. Exchange={ExchangeName}, Queue={QueueName}, ConsumerTag={ConsumerTag}, PrefetchCount={PrefetchCount}",
@@ -75,6 +76,17 @@ public sealed class SeoRabbitMqConsumerService : BackgroundService
             await DisposeRabbitMqAsync();
 
             _logger.LogInformation("SEO RabbitMQ consumer stopped.");
+        }
+    }
+
+    private static void ValidateRoutingKeys(
+        string[]? routingKeys)
+    {
+        if (routingKeys is null
+            || !routingKeys.Any(static routingKey => !string.IsNullOrWhiteSpace(routingKey)))
+        {
+            throw new InvalidOperationException(
+                "SEO RabbitMQ consumer requires at least one routing key.");
         }
     }
 
