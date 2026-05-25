@@ -11,11 +11,11 @@
       * public article search
       * deterministic related articles
       * async projection apply from Content events
-      * projection updates from SEO / Media / Interaction events
+      * projection updates from SEO / Media / Identity / Interaction events
 
   Notes:
   - Public read path reads from [reading].[ArticleReadModel].
-  - Source truth remains in Content / SEO / Media / Interaction.
+  - Source truth remains in Content / SEO / Media / Identity / Interaction.
   - Projection apply must be idempotent and version-aware.
   - SourceVersion prevents stale overwrite.
   - MessageId supports duplicate tracing / dedupe.
@@ -78,6 +78,12 @@ GO
 IF OBJECT_ID(N'[reading].[ArticleSeoMetadataProjection]', N'U') IS NULL
 BEGIN
     THROW 58208, 'Table [reading].[ArticleSeoMetadataProjection] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[reading].[AuthorProfileProjection]', N'U') IS NULL
+BEGIN
+    THROW 58209, 'Table [reading].[AuthorProfileProjection] does not exist. Run reading/001_tables.sql first.', 1;
 END
 GO
 
@@ -655,6 +661,9 @@ BEGIN
     IF @CoverMediaId IS NOT NULL AND @CoverMediaId <= 0
         THROW 58257, 'CoverMediaId must be > 0 when provided.', 1;
 
+    IF @AuthorUserId IS NOT NULL AND @AuthorUserId <= 0
+        THROW 58258, 'AuthorUserId must be > 0 when provided.', 1;
+
     IF @UpdatedAtUtc IS NULL
         SET @UpdatedAtUtc = SYSUTCDATETIME();
 
@@ -692,6 +701,8 @@ BEGIN
     DECLARE @ProjectedTwitterImageUrl NVARCHAR(800) = NULL;
     DECLARE @ProjectedRobots NVARCHAR(100) = NULL;
     DECLARE @ProjectedSeoIsManualOverride BIT = 0;
+
+    DECLARE @ProjectedAuthorDisplayName NVARCHAR(200) = NULL;
 
     BEGIN TRANSACTION;
 
@@ -733,6 +744,16 @@ BEGIN
       AND [ResourceType] = 'Article'
       AND [ResourcePublicId] = @ArticlePublicId
     ORDER BY [SourceVersion] DESC, [LastSyncedAtUtc] DESC;
+
+    SET @ProjectedAuthorDisplayName = NULLIF(LTRIM(RTRIM(@AuthorDisplayName)), N'');
+
+    IF @AuthorUserId IS NOT NULL
+    BEGIN
+        SELECT TOP (1)
+            @ProjectedAuthorDisplayName = [AuthorDisplayName]
+        FROM [reading].[AuthorProfileProjection] WITH (UPDLOCK, HOLDLOCK)
+        WHERE [AuthorUserId] = @AuthorUserId;
+    END
 
     SET @EffectivePublishedAtUtc =
         CASE
@@ -847,7 +868,7 @@ BEGIN
             @CategoryId,
             @CategoryName,
             @AuthorUserId,
-            @AuthorDisplayName,
+            @ProjectedAuthorDisplayName,
             @ResolvedCoverMediaId,
             @ResolvedCoverMediaUrl,
             @ResolvedCoverAlt,
@@ -868,7 +889,7 @@ BEGIN
             @EffectiveIsPublic,
             @EffectivePublishedAtUtc,
             @UpdatedAtUtc,
-            CONCAT_WS(N' ', @Title, @Summary, @Body, @CategoryName, @AuthorDisplayName),
+            CONCAT_WS(N' ', @Title, @Summary, @Body, @CategoryName, @ProjectedAuthorDisplayName),
             0,
             0,
             0,
@@ -893,7 +914,7 @@ BEGIN
             [CategoryId] = @CategoryId,
             [CategoryName] = @CategoryName,
             [AuthorUserId] = @AuthorUserId,
-            [AuthorDisplayName] = @AuthorDisplayName,
+            [AuthorDisplayName] = @ProjectedAuthorDisplayName,
 
             [CoverMediaId] = @ResolvedCoverMediaId,
             [CoverMediaUrl] = @ResolvedCoverMediaUrl,
@@ -919,7 +940,7 @@ BEGIN
             [IsPublic] = @EffectiveIsPublic,
             [PublishedAtUtc] = @EffectivePublishedAtUtc,
             [UpdatedAtUtc] = @UpdatedAtUtc,
-            [SearchText] = CONCAT_WS(N' ', @Title, @Summary, @Body, @CategoryName, @AuthorDisplayName),
+            [SearchText] = CONCAT_WS(N' ', @Title, @Summary, @Body, @CategoryName, @ProjectedAuthorDisplayName),
 
             [SourceVersion] = @SourceVersion,
             [LastEventMessageId] = @MessageId,
@@ -1317,7 +1338,142 @@ END
 GO
 
 /* =========================================================
-   9) UPDATE COUNTERS
+   9) AUTHOR PROFILE PROJECTION FROM IDENTITY
+   ========================================================= */
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE [reading].[Reading_AuthorProfileProjection_ApplyFromIdentity]
+    @AuthorUserId              BIGINT,
+    @AuthorUserPublicId        CHAR(26),
+    @AuthorDisplayName         NVARCHAR(200) = NULL,
+    @AuthorAvatarUrl           NVARCHAR(800) = NULL,
+    @SourceVersion             BIGINT,
+    @MessageId                 CHAR(26),
+    @SourceOccurredAtUtc       DATETIME2(3)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @AuthorUserId IS NULL OR @AuthorUserId <= 0
+        THROW 58380, 'AuthorUserId must be > 0.', 1;
+
+    IF @AuthorUserPublicId IS NULL OR LEN(@AuthorUserPublicId) <> 26
+        THROW 58381, 'AuthorUserPublicId must be a valid 26-character public id.', 1;
+
+    IF @SourceVersion IS NULL OR @SourceVersion <= 0
+        THROW 58382, 'SourceVersion must be > 0.', 1;
+
+    IF @MessageId IS NULL OR LEN(@MessageId) <> 26
+        THROW 58383, 'MessageId must be a valid 26-character id.', 1;
+
+    IF @SourceOccurredAtUtc IS NULL
+        THROW 58384, 'SourceOccurredAtUtc is required.', 1;
+
+    SET @AuthorDisplayName = NULLIF(LTRIM(RTRIM(@AuthorDisplayName)), N'');
+    SET @AuthorAvatarUrl = NULLIF(LTRIM(RTRIM(@AuthorAvatarUrl)), N'');
+
+    DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @Applied BIT = 0;
+    DECLARE @CurrentSourceVersion BIGINT = NULL;
+
+    BEGIN TRANSACTION;
+
+    SELECT
+        @CurrentSourceVersion = [SourceVersion]
+    FROM [reading].[AuthorProfileProjection] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [AuthorUserId] = @AuthorUserId;
+
+    IF @CurrentSourceVersion IS NULL
+    BEGIN
+        INSERT INTO [reading].[AuthorProfileProjection]
+        (
+            [AuthorUserId],
+            [AuthorUserPublicId],
+            [AuthorDisplayName],
+            [AuthorAvatarUrl],
+            [SourceVersion],
+            [LastEventMessageId],
+            [LastSourceOccurredAtUtc],
+            [LastSyncedAtUtc],
+            [CreatedAtUtc],
+            [UpdatedAtUtc]
+        )
+        VALUES
+        (
+            @AuthorUserId,
+            @AuthorUserPublicId,
+            @AuthorDisplayName,
+            @AuthorAvatarUrl,
+            @SourceVersion,
+            @MessageId,
+            @SourceOccurredAtUtc,
+            @Now,
+            @Now,
+            @Now
+        );
+
+        SET @Applied = 1;
+    END
+    ELSE IF @SourceVersion > @CurrentSourceVersion
+    BEGIN
+        UPDATE [reading].[AuthorProfileProjection]
+        SET
+            [AuthorUserPublicId] = @AuthorUserPublicId,
+            [AuthorDisplayName] = @AuthorDisplayName,
+            [AuthorAvatarUrl] = @AuthorAvatarUrl,
+            [SourceVersion] = @SourceVersion,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now,
+            [UpdatedAtUtc] = @Now
+        WHERE [AuthorUserId] = @AuthorUserId
+          AND [SourceVersion] < @SourceVersion;
+
+        SET @Applied = CASE WHEN @@ROWCOUNT = 1 THEN 1 ELSE 0 END;
+    END
+
+    IF @Applied = 1
+    BEGIN
+        /*
+          ArticleReadModel checkpoint fields belong to the Content stream.
+          Identity author checkpoint is stored in AuthorProfileProjection.
+        */
+        UPDATE [reading].[ArticleReadModel]
+        SET
+            [AuthorDisplayName] = @AuthorDisplayName,
+            [SearchText] = CONCAT_WS(
+                N' ',
+                [Title],
+                [Summary],
+                [Body],
+                [CategoryName],
+                @AuthorDisplayName
+            )
+        WHERE [AuthorUserId] = @AuthorUserId;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @Applied AS [Applied],
+        CASE
+            WHEN @Applied = 1 THEN N'Applied'
+            WHEN @CurrentSourceVersion IS NOT NULL
+             AND @SourceVersion <= @CurrentSourceVersion THEN N'IgnoredStaleVersion'
+            ELSE N'Ignored'
+        END AS [Decision],
+        @CurrentSourceVersion AS [PreviousSourceVersion],
+        @SourceVersion AS [IncomingSourceVersion];
+END
+GO
+
+/* =========================================================
+   10) UPDATE COUNTERS
    ========================================================= */
 
 SET ANSI_NULLS ON;
@@ -1365,7 +1521,7 @@ END
 GO
 
 /* =========================================================
-   10) MEDIA PROJECTION STATE + ARTICLE MEDIA
+   11) MEDIA PROJECTION STATE + ARTICLE MEDIA
    ========================================================= */
 
 IF TYPE_ID(N'[reading].[ArticleMediaOrderListType]') IS NULL

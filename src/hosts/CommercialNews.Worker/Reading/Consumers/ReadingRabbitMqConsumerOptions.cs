@@ -34,15 +34,5 @@ public sealed class ReadingRabbitMqConsumerOptions
 
     public bool RequeueOnFailure { get; init; } = true;
 
-    public string[] RoutingKeys { get; init; } =
-    [
-        "content.article_published",
-        "content.article_updated",
-        "content.article_unpublished",
-        "content.article_archived",
-        "content.article_soft_deleted",
-        "seo.slug_route_changed",
-        "seo.slug_route_deactivated",
-        "seo.metadata_updated"
-    ];
+    public string[] RoutingKeys { get; init; } = [];
 }

@@ -34,11 +34,5 @@ public sealed class NotificationsRabbitMqConsumerOptions
 
     public bool RequeueOnFailure { get; init; } = true;
 
-    public string[] RoutingKeys { get; init; } =
-    [
-        "identity.verification_email_requested",
-        "identity.password_reset_requested",
-        "identity.password_changed",
-        "identity.email_verified"
-    ];
+    public string[] RoutingKeys { get; init; } = [];
 }

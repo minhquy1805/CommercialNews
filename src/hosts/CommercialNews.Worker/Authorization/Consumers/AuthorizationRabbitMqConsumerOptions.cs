@@ -34,8 +34,5 @@ public sealed class AuthorizationRabbitMqConsumerOptions
 
     public bool RequeueOnFailure { get; init; } = true;
 
-    public string[] RoutingKeys { get; init; } =
-    [
-        "identity.user_registered"
-    ];
+    public string[] RoutingKeys { get; init; } = [];
 }

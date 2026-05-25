@@ -5,6 +5,9 @@ public static class IdentityIntegrationEventTypes
     public const string UserRegistered =
         "identity.user_registered";
 
+    public const string UserPublicProfileUpdated =
+        "identity.user_public_profile_updated";
+
     public const string VerificationEmailRequested =
         "identity.verification_email_requested";
 
