@@ -11,6 +11,7 @@
       * ArticleMediaProjectionState
       * ArticleSeoRouteProjection
       * ArticleSeoMetadataProjection
+      * AuthorProfileProjection
   - Support:
       * public article list/detail/search/related reads
       * slug-based public serving
@@ -24,6 +25,7 @@
   - Content remains source of truth for article lifecycle/editorial data.
   - SEO remains source of truth for slug/canonical metadata.
   - Media remains source of truth for media assets.
+  - Identity remains source of truth for public author profile data.
   - Interaction remains source of truth for counters/engagement.
   - Reading projection tables intentionally avoid cross-module FKs.
   - Index-heavy tuning belongs in 010_indexes.sql.
@@ -632,5 +634,171 @@ END
 ELSE
 BEGIN
     PRINT N'Table exists: [reading].[ArticleSeoMetadataProjection]';
+END
+GO
+
+/* =========================================================
+   7) [reading].[AuthorProfileProjection]
+   ========================================================= */
+IF OBJECT_ID(N'[reading].[AuthorProfileProjection]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [reading].[AuthorProfileProjection]
+    (
+        [AuthorUserId]              BIGINT               NOT NULL,
+        [AuthorUserPublicId]        CHAR(26)             NOT NULL,
+
+        [AuthorDisplayName]         NVARCHAR(200)        NULL,
+        [AuthorAvatarUrl]           NVARCHAR(800)        NULL,
+
+        /*
+          SourceVersion means Identity.UserAccount.Version.
+          It must not be compared with Content article version,
+          Media attachment-set version, or SEO projection versions.
+        */
+        [SourceVersion]             BIGINT               NOT NULL,
+
+        [LastEventMessageId]        CHAR(26)             NOT NULL,
+        [LastSourceOccurredAtUtc]   DATETIME2(3)         NOT NULL,
+        [LastSyncedAtUtc]           DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_AuthorProfileProjection_LastSyncedAtUtc]
+            DEFAULT (SYSUTCDATETIME()),
+
+        [CreatedAtUtc]              DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_AuthorProfileProjection_CreatedAtUtc]
+            DEFAULT (SYSUTCDATETIME()),
+
+        [UpdatedAtUtc]              DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_AuthorProfileProjection_UpdatedAtUtc]
+            DEFAULT (SYSUTCDATETIME()),
+
+        CONSTRAINT [PK_AuthorProfileProjection]
+            PRIMARY KEY CLUSTERED ([AuthorUserId] ASC),
+
+        CONSTRAINT [UQ_AuthorProfileProjection_AuthorUserPublicId]
+            UNIQUE ([AuthorUserPublicId]),
+
+        CONSTRAINT [CK_AuthorProfileProjection_AuthorUserId_Positive]
+            CHECK ([AuthorUserId] > 0),
+
+        CONSTRAINT [CK_AuthorProfileProjection_AuthorUserPublicId_Length]
+            CHECK (LEN([AuthorUserPublicId]) = 26),
+
+        CONSTRAINT [CK_AuthorProfileProjection_SourceVersion_Positive]
+            CHECK ([SourceVersion] > 0),
+
+        CONSTRAINT [CK_AuthorProfileProjection_LastEventMessageId_Length]
+            CHECK (LEN([LastEventMessageId]) = 26)
+    );
+
+    PRINT N'Created table: [reading].[AuthorProfileProjection]';
+END
+ELSE
+BEGIN
+    PRINT N'Table exists: [reading].[AuthorProfileProjection]';
+END
+GO
+
+/*
+  Projection timestamps can be assigned from a captured @Now value before
+  CreatedAtUtc is evaluated by its DEFAULT constraint during INSERT.
+  Therefore these timestamp comparison constraints are not safe.
+*/
+IF OBJECT_ID(N'[reading].[CK_AuthorProfileProjection_LastSyncedAtUtc]', N'C') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[AuthorProfileProjection]
+        DROP CONSTRAINT [CK_AuthorProfileProjection_LastSyncedAtUtc];
+
+    PRINT N'Dropped obsolete constraint: [CK_AuthorProfileProjection_LastSyncedAtUtc]';
+END
+GO
+
+IF OBJECT_ID(N'[reading].[CK_AuthorProfileProjection_UpdatedAtUtc]', N'C') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[AuthorProfileProjection]
+        DROP CONSTRAINT [CK_AuthorProfileProjection_UpdatedAtUtc];
+
+    PRINT N'Dropped obsolete constraint: [CK_AuthorProfileProjection_UpdatedAtUtc]';
+END
+GO
+
+/* =========================================================
+   AuthorProfileProjection - existing DB compatibility
+   ========================================================= */
+IF COL_LENGTH(N'reading.AuthorProfileProjection', N'LastEventMessageId') IS NULL
+   AND COL_LENGTH(N'reading.AuthorProfileProjection', N'LastAppliedMessageId') IS NOT NULL
+BEGIN
+    IF OBJECT_ID(N'[reading].[CK_AuthorProfileProjection_LastAppliedMessageId_Length]', N'C') IS NOT NULL
+    BEGIN
+        ALTER TABLE [reading].[AuthorProfileProjection]
+            DROP CONSTRAINT [CK_AuthorProfileProjection_LastAppliedMessageId_Length];
+    END
+
+    EXEC sp_rename
+        N'reading.AuthorProfileProjection.LastAppliedMessageId',
+        N'LastEventMessageId',
+        N'COLUMN';
+
+    PRINT N'Renamed column: [reading].[AuthorProfileProjection].[LastAppliedMessageId] -> [LastEventMessageId]';
+END
+GO
+
+IF COL_LENGTH(N'reading.AuthorProfileProjection', N'LastEventMessageId') IS NOT NULL
+   AND OBJECT_ID(N'[reading].[CK_AuthorProfileProjection_LastEventMessageId_Length]', N'C') IS NULL
+BEGIN
+    IF OBJECT_ID(N'[reading].[CK_AuthorProfileProjection_LastAppliedMessageId_Length]', N'C') IS NOT NULL
+    BEGIN
+        ALTER TABLE [reading].[AuthorProfileProjection]
+            DROP CONSTRAINT [CK_AuthorProfileProjection_LastAppliedMessageId_Length];
+    END
+
+    ALTER TABLE [reading].[AuthorProfileProjection]
+        ADD CONSTRAINT [CK_AuthorProfileProjection_LastEventMessageId_Length]
+            CHECK (LEN([LastEventMessageId]) = 26);
+
+    PRINT N'Created constraint: [CK_AuthorProfileProjection_LastEventMessageId_Length]';
+END
+GO
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.columns
+    WHERE object_id = OBJECT_ID(N'[reading].[AuthorProfileProjection]')
+      AND name = N'SourceVersion'
+      AND system_type_id = TYPE_ID(N'int')
+)
+BEGIN
+    IF EXISTS
+    (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = N'IX_AuthorProfileProjection_LastSyncedAtUtc'
+          AND object_id = OBJECT_ID(N'[reading].[AuthorProfileProjection]')
+    )
+    BEGIN
+        DROP INDEX [IX_AuthorProfileProjection_LastSyncedAtUtc]
+            ON [reading].[AuthorProfileProjection];
+
+        PRINT N'Dropped index before SourceVersion type migration: [IX_AuthorProfileProjection_LastSyncedAtUtc]';
+    END
+
+    IF OBJECT_ID(N'[reading].[CK_AuthorProfileProjection_SourceVersion_Positive]', N'C') IS NOT NULL
+    BEGIN
+        ALTER TABLE [reading].[AuthorProfileProjection]
+            DROP CONSTRAINT [CK_AuthorProfileProjection_SourceVersion_Positive];
+
+        PRINT N'Dropped constraint before SourceVersion type migration: [CK_AuthorProfileProjection_SourceVersion_Positive]';
+    END
+
+    ALTER TABLE [reading].[AuthorProfileProjection]
+        ALTER COLUMN [SourceVersion] BIGINT NOT NULL;
+
+    PRINT N'Altered column: [reading].[AuthorProfileProjection].[SourceVersion] BIGINT';
+
+    ALTER TABLE [reading].[AuthorProfileProjection]
+        ADD CONSTRAINT [CK_AuthorProfileProjection_SourceVersion_Positive]
+            CHECK ([SourceVersion] > 0);
+
+    PRINT N'Recreated constraint: [CK_AuthorProfileProjection_SourceVersion_Positive]';
 END
 GO

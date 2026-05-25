@@ -63,6 +63,16 @@ public interface IArticleReadModelRepository
 
     /*
       =========================================================
+      Identity projection writes
+      =========================================================
+    */
+
+    Task<ArticleProjectionApplyResult> ApplyAuthorProfileAsync(
+        ApplyAuthorProfileProjectionCommand command,
+        CancellationToken cancellationToken = default);
+
+    /*
+      =========================================================
       Media projection writes
       =========================================================
     */
