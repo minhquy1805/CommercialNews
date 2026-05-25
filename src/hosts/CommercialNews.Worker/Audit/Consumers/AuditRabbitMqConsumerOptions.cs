@@ -34,50 +34,5 @@ public sealed class AuditRabbitMqConsumerOptions
 
     public bool RequeueOnFailure { get; init; } = true;
 
-    public string[] RoutingKeys { get; init; } =
-    [
-        "authorization.user_role_assigned",
-        "authorization.user_role_revoked",
-
-        "authorization.role_permission_granted",
-        "authorization.role_permission_revoked",
-
-        "authorization.role_created",
-        "authorization.role_updated",
-        "authorization.role_activated",
-        "authorization.role_deactivated",
-
-        "authorization.permission_created",
-        "authorization.permission_updated",
-        "authorization.permission_activated",
-        "authorization.permission_deactivated",
-
-        "identity.email_verified",
-        "identity.password_changed",
-
-        "identity.user_activated",
-        "identity.user_disabled",
-        "identity.user_locked",
-        "identity.user_unlocked",
-
-        "identity.email_marked_verified",
-        "identity.user_sessions_revoked",
-
-        "content.article_created",
-        "content.article_updated",
-        "content.article_published",
-        "content.article_unpublished",
-        "content.article_archived",
-        "content.article_soft_deleted",
-
-        "media.asset_registered",
-        "media.asset_updated",
-        "media.asset_soft_deleted",
-        "media.asset_restored",
-
-        "media.article_media_attached",
-        "media.article_media_detached",
-        "media.article_media_reordered",
-        "media.article_primary_media_set"
-    ];
+    public string[] RoutingKeys { get; init; } = [];
 }
