@@ -17,17 +17,18 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
               =========================================================
             */
 
-            58201 => Reading(
+            56001 or 56101 or 58201 => Reading(
                 "READING.DATABASE_NOT_FOUND",
                 "Database CommercialNews does not exist.",
                 exception),
 
-            58202 => Reading(
+            56002 or 56102 or 58202 => Reading(
                 "READING.SCHEMA_NOT_FOUND",
                 "Schema reading does not exist.",
                 exception),
 
-            58203 or 58204 or 58205 or 58206 or 58207 or 58208 => Reading(
+            56103 or 56104 or 56105 or 56106 or 56107 or 56108 or 56109
+                or 58203 or 58204 or 58205 or 58206 or 58207 or 58208 or 58209 => Reading(
                 "READING.PROJECTION_STORE_NOT_FOUND",
                 "A required Reading projection table does not exist.",
                 exception),
@@ -92,6 +93,11 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
             58257 => Reading(
                 "READING.INVALID_COVER_MEDIA_ID",
                 "Cover media id must be greater than zero when provided.",
+                exception),
+
+            58258 or 58380 => Reading(
+                "READING.INVALID_AUTHOR_USER_ID",
+                "Author user id must be greater than zero.",
                 exception),
 
             /*
@@ -235,6 +241,32 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
 
             /*
               =========================================================
+              Identity author profile projection validation
+              =========================================================
+            */
+
+            58381 => Reading(
+                "READING.INVALID_AUTHOR_USER_PUBLIC_ID",
+                "Author user public id must be a valid 26-character public id.",
+                exception),
+
+            58382 => Reading(
+                "READING.INVALID_AUTHOR_PROFILE_SOURCE_VERSION",
+                "Author profile source version must be greater than zero.",
+                exception),
+
+            58383 => Reading(
+                "READING.INVALID_AUTHOR_PROFILE_MESSAGE_ID",
+                "Author profile message id must be a valid 26-character value.",
+                exception),
+
+            58384 => Reading(
+                "READING.INVALID_AUTHOR_PROFILE_SOURCE_OCCURRED_AT_UTC",
+                "Author profile source occurred timestamp is required.",
+                exception),
+
+            /*
+              =========================================================
               SQL Server constraints
               =========================================================
             */
@@ -331,6 +363,26 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
             return Reading(
                 "READING.SEO_METADATA_PROJECTION_ALREADY_EXISTS",
                 "Article SEO metadata projection already exists.",
+                exception);
+        }
+
+        if (message.Contains(
+                "PK_AuthorProfileProjection",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.AUTHOR_PROFILE_PROJECTION_ALREADY_EXISTS",
+                "Author profile projection already exists.",
+                exception);
+        }
+
+        if (message.Contains(
+                "UQ_AuthorProfileProjection_AuthorUserPublicId",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.AUTHOR_PROFILE_PUBLIC_ID_ALREADY_EXISTS",
+                "Author user public id already exists in the Reading projection.",
                 exception);
         }
 
@@ -783,6 +835,73 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
             return Reading(
                 "READING.INVALID_SEO_METADATA_MESSAGE_ID",
                 "SEO metadata message id must be a valid 26-character value.",
+                exception);
+        }
+
+        /*
+          =========================================================
+          AuthorProfileProjection constraints
+          =========================================================
+        */
+
+        if (message.Contains(
+                "CK_AuthorProfileProjection_AuthorUserId_Positive",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_AUTHOR_USER_ID",
+                "Author user id must be greater than zero.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_AuthorProfileProjection_AuthorUserPublicId_Length",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_AUTHOR_USER_PUBLIC_ID",
+                "Author user public id must be a valid 26-character public id.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_AuthorProfileProjection_SourceVersion_Positive",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_AUTHOR_PROFILE_SOURCE_VERSION",
+                "Author profile source version must be greater than zero.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_AuthorProfileProjection_LastEventMessageId_Length",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_AUTHOR_PROFILE_MESSAGE_ID",
+                "Author profile message id must be a valid 26-character value.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_AuthorProfileProjection_LastAppliedMessageId_Length",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.OBSOLETE_AUTHOR_PROFILE_MESSAGE_ID_CONSTRAINT",
+                "Reading author profile projection still contains an obsolete LastAppliedMessageId constraint. Re-run the Reading table migration script.",
+                exception);
+        }
+
+        if (ContainsAny(
+                message,
+                "CK_AuthorProfileProjection_LastSyncedAtUtc",
+                "CK_AuthorProfileProjection_UpdatedAtUtc"))
+        {
+            return Reading(
+                "READING.OBSOLETE_AUTHOR_PROFILE_TIMESTAMP_CONSTRAINT",
+                "Reading author profile projection has obsolete timestamp constraints. Re-run the Reading table migration script.",
                 exception);
         }
 
