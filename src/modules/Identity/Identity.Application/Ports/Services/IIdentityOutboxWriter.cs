@@ -11,7 +11,19 @@ public interface IIdentityOutboxWriter
         string email,
         string? fullName,
         string status,
+        int version,
         DateTime registeredAtUtc,
+        string? correlationId,
+        CancellationToken cancellationToken = default);
+
+    Task<long> EnqueueUserPublicProfileUpdatedAsync(
+        IIdentityUnitOfWork unitOfWork,
+        long userId,
+        string userPublicId,
+        string? fullName,
+        string? avatarUrl,
+        int version,
+        DateTime updatedAtUtc,
         string? correlationId,
         CancellationToken cancellationToken = default);
 

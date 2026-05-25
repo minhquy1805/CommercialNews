@@ -35,13 +35,7 @@ public sealed class AuthorizationRabbitMqConsumerService : BackgroundService
     protected override async Task ExecuteAsync(
         CancellationToken stoppingToken)
     {
-        if (_options.RoutingKeys.Length == 0)
-        {
-            _logger.LogWarning(
-                "Authorization RabbitMQ consumer has no routing keys configured. Consumer will not start.");
-
-            return;
-        }
+        ValidateRoutingKeys(_options.RoutingKeys);
 
         var factory = new ConnectionFactory
         {
@@ -98,6 +92,17 @@ public sealed class AuthorizationRabbitMqConsumerService : BackgroundService
         {
             _logger.LogInformation(
                 "Authorization RabbitMQ consumer is stopping.");
+        }
+    }
+
+    private static void ValidateRoutingKeys(
+        string[]? routingKeys)
+    {
+        if (routingKeys is null
+            || !routingKeys.Any(static routingKey => !string.IsNullOrWhiteSpace(routingKey)))
+        {
+            throw new InvalidOperationException(
+                "Authorization RabbitMQ consumer requires at least one routing key.");
         }
     }
 

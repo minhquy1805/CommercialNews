@@ -11,13 +11,14 @@
       * popularity sorting
       * related article lookup
       * SEO route lookup and SEO projection freshness diagnostics
+      * author profile enrichment from Identity events
       * projection freshness diagnostics
       * async projection apply diagnostics
   - Idempotent: safe to re-run.
 
   Notes:
   - Reading projection tables are derived state.
-  - Source truth remains in Content / SEO / Media / Interaction.
+  - Source truth remains in Content / SEO / Media / Identity / Interaction.
   - Table creation belongs in 001_tables.sql.
   - Stored procedures belong in 020_procs.sql.
   - Keep indexes focused on known V1 access patterns; avoid speculative over-indexing.
@@ -79,6 +80,12 @@ GO
 IF OBJECT_ID(N'[reading].[ArticleSeoMetadataProjection]', N'U') IS NULL
 BEGIN
     THROW 56108, 'Table [reading].[ArticleSeoMetadataProjection] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
+IF OBJECT_ID(N'[reading].[AuthorProfileProjection]', N'U') IS NULL
+BEGIN
+    THROW 56109, 'Table [reading].[AuthorProfileProjection] does not exist. Run reading/001_tables.sql first.', 1;
 END
 GO
 
@@ -292,6 +299,54 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [IX_ArticleReadModel_LastSyncedAtUtc]';
+END
+GO
+
+/* Replace an earlier over-wide fan-out index, if present. */
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.indexes AS [i]
+    INNER JOIN sys.index_columns AS [ic]
+        ON [ic].[object_id] = [i].[object_id]
+       AND [ic].[index_id] = [i].[index_id]
+    WHERE [i].[name] = N'IX_ArticleReadModel_AuthorUserId'
+      AND [i].[object_id] = OBJECT_ID(N'[reading].[ArticleReadModel]')
+      AND [ic].[is_included_column] = 1
+)
+BEGIN
+    DROP INDEX [IX_ArticleReadModel_AuthorUserId]
+        ON [reading].[ArticleReadModel];
+
+    PRINT N'Dropped over-wide index: [IX_ArticleReadModel_AuthorUserId]';
+END
+GO
+
+/* Identity author profile enrichment fan-out.
+   This supports updating AuthorDisplayName for all projected articles owned by
+   an author. Identity projection checkpoint/version remains in
+   AuthorProfileProjection and must not overwrite Content article checkpoints. */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleReadModel_AuthorUserId'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleReadModel]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_ArticleReadModel_AuthorUserId]
+    ON [reading].[ArticleReadModel]
+    (
+        [AuthorUserId] ASC,
+        [ArticleId] ASC
+    )
+    WHERE [AuthorUserId] IS NOT NULL;
+
+    PRINT N'Created index: [IX_ArticleReadModel_AuthorUserId]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_ArticleReadModel_AuthorUserId]';
 END
 GO
 
@@ -620,5 +675,40 @@ END
 ELSE
 BEGIN
     PRINT N'Index exists: [IX_ArticleSeoMetadataProjection_LastSyncedAtUtc]';
+END
+GO
+
+/* =========================================================
+   7) [reading].[AuthorProfileProjection]
+   ========================================================= */
+
+/* Identity author profile projection freshness scan / reconciliation */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_AuthorProfileProjection_LastSyncedAtUtc'
+      AND object_id = OBJECT_ID(N'[reading].[AuthorProfileProjection]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_AuthorProfileProjection_LastSyncedAtUtc]
+    ON [reading].[AuthorProfileProjection]
+    (
+        [LastSyncedAtUtc] ASC,
+        [AuthorUserId] ASC
+    )
+    INCLUDE
+    (
+        [AuthorUserPublicId],
+        [SourceVersion],
+        [LastEventMessageId],
+        [LastSourceOccurredAtUtc]
+    );
+
+    PRINT N'Created index: [IX_AuthorProfileProjection_LastSyncedAtUtc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_AuthorProfileProjection_LastSyncedAtUtc]';
 END
 GO

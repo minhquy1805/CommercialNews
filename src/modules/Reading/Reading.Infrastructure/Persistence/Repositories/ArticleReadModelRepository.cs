@@ -27,6 +27,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
     private const string DetachMediaProc = "[reading].[Reading_ArticleReadModelMedia_DetachFromMedia]";
     private const string ApplySeoRouteProc = "[reading].[Reading_ArticleSeoRouteProjection_ApplyFromSeo]";
     private const string ApplySeoMetadataProc = "[reading].[Reading_ArticleSeoMetadataProjection_ApplyFromSeo]";
+    private const string ApplyAuthorProfileProc = "[reading].[Reading_AuthorProfileProjection_ApplyFromIdentity]";
 
     private readonly ReadingUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
@@ -629,6 +630,61 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 new SqlParameter("@MessageId", SqlDbType.Char, 26)
                 {
                     Value = ToDbValue(commandModel.MessageId)
+                },
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
+            ]);
+
+            using SqlDataReader reader =
+                await command.ExecuteReaderAsync(cancellationToken);
+
+            return await ReadProjectionApplyResultAsync(
+                reader,
+                commandModel.SourceVersion,
+                cancellationToken);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
+    public async Task<ArticleProjectionApplyResult> ApplyAuthorProfileAsync(
+        ApplyAuthorProfileProjectionCommand commandModel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandModel);
+
+        try
+        {
+            using SqlCommand command = CreateTransactionalCommand(ApplyAuthorProfileProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@AuthorUserId", SqlDbType.BigInt)
+                {
+                    Value = commandModel.AuthorUserId
+                },
+                new SqlParameter("@AuthorUserPublicId", SqlDbType.Char, 26)
+                {
+                    Value = commandModel.AuthorUserPublicId
+                },
+                new SqlParameter("@AuthorDisplayName", SqlDbType.NVarChar, 200)
+                {
+                    Value = ToDbValue(commandModel.AuthorDisplayName)
+                },
+                new SqlParameter("@AuthorAvatarUrl", SqlDbType.NVarChar, 800)
+                {
+                    Value = ToDbValue(commandModel.AuthorAvatarUrl)
+                },
+                new SqlParameter("@SourceVersion", SqlDbType.BigInt)
+                {
+                    Value = commandModel.SourceVersion
+                },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26)
+                {
+                    Value = commandModel.MessageId
                 },
                 CreateDateTime2Parameter(
                     "@SourceOccurredAtUtc",
