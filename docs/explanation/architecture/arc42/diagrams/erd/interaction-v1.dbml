@@ -1,139 +1,486 @@
 // =====================================================
-// CommercialNews — Interaction Module (V1) — dbdiagram.io
-// File: explanation/architecture/arc42/diagrams/erd/interaction-v1.dbml
+// CommercialNews — Interaction Module (V1 Async + Admin Moderation)
+// File: docs/explanation/architecture/arc42/diagrams/erd/interaction-v1.dbml
 //
 // Purpose
-// - Track views/likes/comments without blocking the public read path.
-// - Provide derived counters for later Reading enrichment / popularity sorting.
+// - Store Interaction-owned engagement and moderation workflow state.
+// - Keep public article reading independent from Interaction availability.
+// - Consume article interaction eligibility asynchronously from Content.
+// - Publish versioned public counter snapshots asynchronously to Reading.
 //
-// Design notes
-// - ArticleViewEvent is a high-write append-only log -> keep indexes minimal.
-// - ArticleLike is idempotent via UNIQUE (ArticleId, UserId) and toggle IsActive.
-// - Comment is soft-lifecycle; public reads only Visible.
-// - ArticleInteractionStats is derived; missing row => treat totals as 0.
+// V1 decisions
+// - No raw ArticleViewEvent history.
+// - Views are stored in ArticleViewCount as durable materialized accepted counts.
+// - Comments are top-level only; ParentCommentId is reserved for future replies.
+// - Reports never automatically hide comments.
+// - One open moderation case may trigger at most one async admin-alert intent.
+// - ArticleInteractionStats is derived and published to Reading by StatsVersion.
+// - Cross-module references use logical identifiers only.
 // =====================================================
 
+
+// -----------------------------------------------------
+// Interaction-local status/value enums
+// -----------------------------------------------------
+
 Enum CommentStatusEnum {
+  Pending
   Visible
+  Rejected
   Hidden
   Deleted
-  Pending
 }
 
-Table ArticleViewEvent {
-  ArticleViewEventId bigint [pk, increment]
+Enum CommentReportStatusEnum {
+  Pending
+  Dismissed
+  Actioned
+  ClosedByAuthorDeletion
+}
 
-  ArticleId bigint [not null]       // logical ref -> Content.Article
-  UserId bigint [null]              // nullable for anonymous views
-  VisitorKey nvarchar(100) [null]   // optional policy hook
+Enum CommentModerationCaseStatusEnum {
+  Open
+  Dismissed
+  Actioned
+  ClosedByAuthorDeletion
+}
 
-  ViewedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  IpAddress nvarchar(64) [null]
-  UserAgent nvarchar(512) [null]
+Enum CommentModerationActionTypeEnum {
+  Approve
+  Reject
+  Hide
+  Restore
+  DismissReportedCase
+  HideReportedComment
+  CloseCaseByAuthorDeletion
+}
+
+Enum ReportSeverityEnum {
+  Normal
+  High
+  Critical
+}
+
+Enum ConsumerApplyDecisionEnum {
+  Applied
+  DuplicateIgnored
+  StaleIgnored
+  GapDetected
+  ResyncRequired
+  Failed
+}
+
+
+// -----------------------------------------------------
+// Derived article interaction eligibility projection
+// Source ownership: Content
+// -----------------------------------------------------
+
+Table ArticleInteractionTargetProjection {
+  ArticleInteractionTargetProjectionId bigint [pk, increment]
+
+  ArticlePublicId char(26) [not null, unique] // logical ref -> Content.Article.PublicId
+
+  SourceStatus nvarchar(30) [not null]
+  IsInteractionEnabled bit [not null, default: 0]
+
+  LastSourceVersion bigint [not null, default: 0]
+  LastSourceMessageId char(26) [null]
+  LastSourceOccurredAtUtc datetime2(3) [null]
+
+  LastSyncedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  RequiresResync bit [not null, default: 0]
+
+  CreatedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAtUtc datetime2(3) [null]
 
   Indexes {
-    (ArticleId) [name: "IX_ArticleViewEvent_ArticleId"]
-    (ViewedAt)  [name: "IX_ArticleViewEvent_ViewedAt"]
+    (ArticlePublicId) [unique, name: "UX_ArticleInteractionTargetProjection_ArticlePublicId"]
+    (RequiresResync, UpdatedAtUtc) [name: "IX_ArticleInteractionTargetProjection_RequiresResync_UpdatedAtUtc"]
   }
 
-  Note: "Append-only high-write log. Public read path must not depend on this table."
+  Note: "Derived eligibility projection consumed asynchronously from Content. Missing or unsafe eligibility fails closed for new public interactions."
 }
+
+
+// -----------------------------------------------------
+// Durable accepted-view materialized counter
+// -----------------------------------------------------
+
+Table ArticleViewCount {
+  ArticleViewCountId bigint [pk, increment]
+
+  ArticlePublicId char(26) [not null, unique] // logical ref -> Content.Article.PublicId
+
+  ViewCount bigint [not null, default: 0]
+  ViewVersion bigint [not null, default: 0]
+
+  LastAcceptedViewAtUtc datetime2(3) [null]
+
+  CreatedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAtUtc datetime2(3) [null]
+
+  Indexes {
+    (ArticlePublicId) [unique, name: "UX_ArticleViewCount_ArticlePublicId"]
+  }
+
+  Note: "Durable materialized accepted-view counter. V1 does not retain raw per-view event history. Updates must be atomic."
+}
+
+
+// -----------------------------------------------------
+// Authoritative like relationship truth
+// -----------------------------------------------------
 
 Table ArticleLike {
   ArticleLikeId bigint [pk, increment]
+  PublicId char(26) [not null, unique]
 
-  ArticleId bigint [not null]       // logical ref -> Content.Article
-  UserId bigint [not null]          // logical ref -> Identity.UserAccount
+  ArticlePublicId char(26) [not null] // logical ref -> Content.Article.PublicId
+  UserId bigint [not null]            // logical ref -> Identity.UserAccount
 
   IsActive bit [not null, default: 1]
-  LikedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  UnlikedAt datetime2(3) [null]
 
-  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  UpdatedAt datetime2(3) [null]
+  LikedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UnlikedAtUtc datetime2(3) [null]
+
+  Version bigint [not null, default: 1]
+
+  CreatedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAtUtc datetime2(3) [null]
 
   Indexes {
-    (ArticleId, UserId) [unique, name: "UQ_ArticleLike_ArticleId_UserId"]
-    (ArticleId, IsActive) [name: "IX_ArticleLike_ArticleId_IsActive"]
+    (PublicId) [unique, name: "UX_ArticleLike_PublicId"]
+
+    // V1 uses one reusable relationship row per article/user pair.
+    // IsActive is toggled for unlike/relike.
+    (ArticlePublicId, UserId) [unique, name: "UX_ArticleLike_ArticlePublicId_UserId"]
+
+    (ArticlePublicId, IsActive) [name: "IX_ArticleLike_ArticlePublicId_IsActive"]
+    (UserId, IsActive, UpdatedAtUtc) [name: "IX_ArticleLike_UserId_IsActive_UpdatedAtUtc"]
   }
 
-  Note: "Idempotent like truth. One row per (ArticleId, UserId); toggle IsActive for unlike/relike."
+  Note: "Authoritative like relationship truth. One row per article/user pair in V1; IsActive controls current like state."
 }
+
+
+// -----------------------------------------------------
+// Authoritative comment truth
+// -----------------------------------------------------
 
 Table Comment {
   CommentId bigint [pk, increment]
+  PublicId char(26) [not null, unique]
 
-  ArticleId bigint [not null]          // logical ref -> Content.Article
-  UserId bigint [not null]             // author -> Identity.UserAccount
-  ParentCommentId bigint [null]        // optional threading
+  ArticlePublicId char(26) [not null] // logical ref -> Content.Article.PublicId
+  AuthorUserId bigint [not null]      // logical ref -> Identity.UserAccount
+
+  ParentCommentId bigint [null]       // reserved for future reply support only
 
   Content nvarchar(2000) [not null]
-  Status nvarchar(20) [not null, default: "Visible"]
+  Status CommentStatusEnum [not null, default: 'Pending']
 
-  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  UpdatedAt datetime2(3) [null]
-  DeletedAt datetime2(3) [null]
-  DeletedByUserId bigint [null]
+  Version bigint [not null, default: 1]
 
-  EditCount int [not null, default: 0]
+  CreatedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAtUtc datetime2(3) [null]
+  DeletedAtUtc datetime2(3) [null]
 
   Indexes {
-    (ArticleId, Status, CreatedAt) [name: "IX_Comment_ArticleId_Status_CreatedAt"]
-    (ParentCommentId, CreatedAt)   [name: "IX_Comment_ParentCommentId_CreatedAt"]
+    (PublicId) [unique, name: "UX_Comment_PublicId"]
+
+    // Public visible top-level comment query.
+    (ArticlePublicId, Status, ParentCommentId, CreatedAtUtc) [name: "IX_Comment_ArticlePublicId_Status_ParentCommentId_CreatedAtUtc"]
+
+    // Admin moderation queue.
+    (Status, CreatedAtUtc) [name: "IX_Comment_Status_CreatedAtUtc"]
+
+    // Author-owned comment lookup / administration.
+    (AuthorUserId, CreatedAtUtc) [name: "IX_Comment_AuthorUserId_CreatedAtUtc"]
   }
 
-  Note: "Comment truth with soft lifecycle. Public reads only Status = Visible."
+  Note: "Comment truth. V1 supports top-level comments only; every newly created comment must have ParentCommentId = NULL. Public reads return Visible comments only."
 }
+
+
+// -----------------------------------------------------
+// User-submitted report against a visible comment
+// -----------------------------------------------------
+
+Table CommentReport {
+  CommentReportId bigint [pk, increment]
+  PublicId char(26) [not null, unique]
+
+  CommentId bigint [not null]
+  CommentModerationCaseId bigint [not null]
+
+  ReporterUserId bigint [not null] // logical ref -> Identity.UserAccount
+
+  ReasonCode nvarchar(40) [not null]
+  Description nvarchar(1000) [null]
+
+  Status CommentReportStatusEnum [not null, default: 'Pending']
+
+  CreatedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  ResolvedAtUtc datetime2(3) [null]
+
+  Indexes {
+    (PublicId) [unique, name: "UX_CommentReport_PublicId"]
+
+    // One user may report one comment only once in V1.
+    (CommentId, ReporterUserId) [unique, name: "UX_CommentReport_CommentId_ReporterUserId"]
+
+    (CommentModerationCaseId, Status, CreatedAtUtc) [name: "IX_CommentReport_CaseId_Status_CreatedAtUtc"]
+    (CommentId, Status, CreatedAtUtc) [name: "IX_CommentReport_CommentId_Status_CreatedAtUtc"]
+  }
+
+  Note: "Authoritative user report truth. Reports request moderator review and never automatically hide comments."
+}
+
+
+// -----------------------------------------------------
+// One report-review cycle for a comment
+// -----------------------------------------------------
+
+Table CommentModerationCase {
+  CommentModerationCaseId bigint [pk, increment]
+  PublicId char(26) [not null, unique]
+
+  CommentId bigint [not null]
+
+  Status CommentModerationCaseStatusEnum [not null, default: 'Open']
+
+  Priority ReportSeverityEnum [not null, default: 'Normal']
+  HighestSeverity ReportSeverityEnum [not null, default: 'Normal']
+
+  AlertTriggeredAtUtc datetime2(3) [null]
+  AlertLevel ReportSeverityEnum [null]
+  AlertMessageId char(26) [null]
+
+  OpenedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  ResolvedAtUtc datetime2(3) [null]
+
+  ResolvedByUserId bigint [null] // logical ref -> Identity.UserAccount
+  ResolutionType nvarchar(40) [null]
+  ResolutionReasonCode nvarchar(40) [null]
+  ResolutionNote nvarchar(1000) [null]
+
+  Version bigint [not null, default: 1]
+
+  Indexes {
+    (PublicId) [unique, name: "UX_CommentModerationCase_PublicId"]
+
+    // Filtered unique index for one Open case per Comment
+    // must be created in SQL Server script:
+    // UNIQUE WHERE Status = 'Open'.
+    (CommentId, Status) [name: "IX_CommentModerationCase_CommentId_Status"]
+
+    (Status, Priority, OpenedAtUtc) [name: "IX_CommentModerationCase_Status_Priority_OpenedAtUtc"]
+    (Status, AlertTriggeredAtUtc, OpenedAtUtc) [name: "IX_CommentModerationCase_Status_AlertTriggeredAtUtc_OpenedAtUtc"]
+  }
+
+  Note: "Moderation workflow truth. SQL Server must enforce at most one Open case per Comment using a filtered unique index. One Open case may trigger at most one admin-alert intent in V1."
+}
+
+
+// -----------------------------------------------------
+// Local moderation operational history
+// -----------------------------------------------------
+
+Table CommentModerationActionHistory {
+  CommentModerationActionHistoryId bigint [pk, increment]
+  PublicId char(26) [not null, unique]
+
+  CommentId bigint [not null]
+  CommentModerationCaseId bigint [null]
+
+  ActionType CommentModerationActionTypeEnum [not null]
+
+  FromStatus nvarchar(30) [null]
+  ToStatus nvarchar(30) [null]
+
+  ActorUserId bigint [null] // logical ref -> Identity.UserAccount
+  ActorType nvarchar(30) [not null]
+
+  ReasonCode nvarchar(40) [null]
+  Note nvarchar(1000) [null]
+
+  OccurredAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  CorrelationId char(26) [null]
+
+  Indexes {
+    (PublicId) [unique, name: "UX_CommentModerationActionHistory_PublicId"]
+
+    (CommentId, OccurredAtUtc) [name: "IX_CommentModerationActionHistory_CommentId_OccurredAtUtc"]
+    (CommentModerationCaseId, OccurredAtUtc) [name: "IX_CommentModerationActionHistory_CaseId_OccurredAtUtc"]
+  }
+
+  Note: "Interaction-owned local moderation history for admin operational flows. Audit remains separate asynchronous canonical evidence."
+}
+
+
+// -----------------------------------------------------
+// Derived public counter snapshot state for Reading
+// -----------------------------------------------------
 
 Table ArticleInteractionStats {
-  ArticleId bigint [pk] // derived projection: 0..1 per article
+  ArticleInteractionStatsId bigint [pk, increment]
 
-  ViewsTotal bigint [not null, default: 0]
-  LikesTotal bigint [not null, default: 0]
-  CommentsTotal bigint [not null, default: 0]
+  ArticlePublicId char(26) [not null, unique] // logical ref -> Content.Article.PublicId
 
-  PopularityScore decimal(18,4) [not null, default: 0]
+  ViewCount bigint [not null, default: 0]
+  LikeCount bigint [not null, default: 0]
+  VisibleCommentCount bigint [not null, default: 0]
 
-  CreatedAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  UpdatedAt datetime2(3) [null]
-  LastAggregatedAt datetime2(3) [null]
+  StatsVersion bigint [not null, default: 0]
+
+  LastMaterializedAtUtc datetime2(3) [null]
+  LastPublishedMessageId char(26) [null]
+  LastPublishedAtUtc datetime2(3) [null]
+
+  CreatedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  UpdatedAtUtc datetime2(3) [null]
 
   Indexes {
-    (PopularityScore, ArticleId) [name: "IX_ArticleInteractionStats_PopularityScore"]
-    (UpdatedAt)                  [name: "IX_ArticleInteractionStats_UpdatedAt"]
+    (ArticlePublicId) [unique, name: "UX_ArticleInteractionStats_ArticlePublicId"]
   }
 
-  Note: "Derived/materialized counters. Missing row means safe fallback to zero."
+  Note: "Derived public counter snapshot state. Interaction publishes versioned known-value snapshots to Reading; counters must never replace truth."
 }
 
-// ---------- Cross-module stubs (ERD readability only) ----------
+
+// -----------------------------------------------------
+// Durable Interaction consumer dedupe/apply state
+// -----------------------------------------------------
+
+Table InteractionConsumedMessage {
+  InteractionConsumedMessageId bigint [pk, increment]
+
+  ConsumerName nvarchar(100) [not null]
+  MessageId char(26) [not null]
+
+  ProducerModule nvarchar(50) [not null]
+  EventType nvarchar(150) [not null]
+
+  AggregateId nvarchar(100) [not null]
+  AggregateVersion bigint [null]
+
+  ApplyDecision ConsumerApplyDecisionEnum [not null]
+
+  CorrelationId char(26) [null]
+
+  ReceivedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
+  ProcessedAtUtc datetime2(3) [null]
+
+  FailureCode nvarchar(100) [null]
+  FailureDetail nvarchar(500) [null]
+
+  Indexes {
+    (ConsumerName, MessageId) [unique, name: "UX_InteractionConsumedMessage_ConsumerName_MessageId"]
+
+    (ConsumerName, ApplyDecision, ProcessedAtUtc) [name: "IX_InteractionConsumedMessage_ConsumerName_ApplyDecision_ProcessedAtUtc"]
+    (ProcessedAtUtc) [name: "IX_InteractionConsumedMessage_ProcessedAtUtc"]
+  }
+
+  Note: "Durable consumer processing state. Message dedupe does not replace source-version validation."
+}
+
+
+// -----------------------------------------------------
+// Cross-module stubs for ERD readability only
+// No physical cross-module FK ownership is implied.
+// -----------------------------------------------------
+
 Table ContentArticle {
-  ArticleId bigint [pk]
-  Note: "EXTERNAL (Content module). Logical reference only."
+  ArticlePublicId char(26) [pk]
+
+  Note: "EXTERNAL Content-owned article identity. Logical reference only."
 }
 
 Table IdentityUserAccount {
   UserId bigint [pk]
-  Note: "EXTERNAL (Identity module). Logical reference only."
+
+  Note: "EXTERNAL Identity-owned user identity. Logical reference only."
 }
 
-// ---------- Logical relationships ----------
-Ref: ArticleViewEvent.ArticleId > ContentArticle.ArticleId
-Ref: ArticleLike.ArticleId > ContentArticle.ArticleId
-Ref: Comment.ArticleId > ContentArticle.ArticleId
-Ref: ArticleInteractionStats.ArticleId > ContentArticle.ArticleId
 
-Ref: ArticleViewEvent.UserId > IdentityUserAccount.UserId
-Ref: ArticleLike.UserId > IdentityUserAccount.UserId
-Ref: Comment.UserId > IdentityUserAccount.UserId
-Ref: Comment.DeletedByUserId > IdentityUserAccount.UserId
+// -----------------------------------------------------
+// Interaction-local relationships
+// -----------------------------------------------------
 
 Ref: Comment.ParentCommentId > Comment.CommentId
 
-// ---------- SQL Server enforcement notes ----------
-// 1) CHECK [Status] IN ('Visible','Hidden','Deleted','Pending')
-// 2) CHECK [ViewsTotal] >= 0 AND [LikesTotal] >= 0 AND [CommentsTotal] >= 0
-// 3) CHECK [EditCount] >= 0
-// 4) Retention/purge for ArticleViewEvent by ViewedAt
-// 5) Cross-module refs are logical; physical FK constraints are optional and not required for V1
-// 6) ArticleInteractionStats is derived and must never be treated as correctness truth
+Ref: CommentReport.CommentId > Comment.CommentId
+Ref: CommentReport.CommentModerationCaseId > CommentModerationCase.CommentModerationCaseId
+
+Ref: CommentModerationCase.CommentId > Comment.CommentId
+
+Ref: CommentModerationActionHistory.CommentId > Comment.CommentId
+Ref: CommentModerationActionHistory.CommentModerationCaseId > CommentModerationCase.CommentModerationCaseId
+
+
+// -----------------------------------------------------
+// Logical cross-module relationships
+// -----------------------------------------------------
+
+Ref: ArticleInteractionTargetProjection.ArticlePublicId > ContentArticle.ArticlePublicId
+Ref: ArticleViewCount.ArticlePublicId > ContentArticle.ArticlePublicId
+Ref: ArticleLike.ArticlePublicId > ContentArticle.ArticlePublicId
+Ref: Comment.ArticlePublicId > ContentArticle.ArticlePublicId
+Ref: ArticleInteractionStats.ArticlePublicId > ContentArticle.ArticlePublicId
+
+Ref: ArticleLike.UserId > IdentityUserAccount.UserId
+Ref: Comment.AuthorUserId > IdentityUserAccount.UserId
+Ref: CommentReport.ReporterUserId > IdentityUserAccount.UserId
+Ref: CommentModerationCase.ResolvedByUserId > IdentityUserAccount.UserId
+Ref: CommentModerationActionHistory.ActorUserId > IdentityUserAccount.UserId
+
+
+// -----------------------------------------------------
+// SQL Server enforcement notes
+// -----------------------------------------------------
+//
+// 1) Cross-module refs shown above are logical documentation references.
+//    Physical foreign keys into Content/Identity are not required for V1.
+//
+// 2) V1 create-comment procedures/use cases must enforce:
+//      ParentCommentId IS NULL
+//    ParentCommentId exists only for future reply compatibility.
+//
+// 3) SQL Server must enforce comment status allowlist equivalent to:
+//      Pending, Visible, Rejected, Hidden, Deleted
+//
+// 4) SQL Server must enforce report status allowlist equivalent to:
+//      Pending, Dismissed, Actioned, ClosedByAuthorDeletion
+//
+// 5) SQL Server must enforce moderation-case status allowlist equivalent to:
+//      Open, Dismissed, Actioned, ClosedByAuthorDeletion
+//
+// 6) SQL Server must create a filtered unique index for open cases:
+//      UNIQUE (CommentId) WHERE Status = 'Open'
+//
+// 7) ArticleLike uses one reusable relationship row per:
+//      (ArticlePublicId, UserId)
+//    IsActive is toggled for like/unlike semantics.
+//
+// 8) Counter checks:
+//      ArticleViewCount.ViewCount >= 0
+//      ArticleViewCount.ViewVersion >= 0
+//      ArticleInteractionStats.ViewCount >= 0
+//      ArticleInteractionStats.LikeCount >= 0
+//      ArticleInteractionStats.VisibleCommentCount >= 0
+//      ArticleInteractionStats.StatsVersion >= 0
+//
+// 9) Unpublish/archive/soft-delete disables new interactions but must not
+//    reset ArticleViewCount or ArticleInteractionStats.
+//
+// 10) Reading consumes only:
+//      interaction.article_counters_projection_published
+//     and applies snapshots by StatsVersion.
+//
+// 11) Notifications consumes:
+//      interaction.comment_report_alert_triggered
+//     Interaction persists one-alert-per-open-case trigger state.
+//
+// 12) Shared OutboxMessage infrastructure is intentionally not modeled
+//     as an Interaction-owned business entity in this ERD.
