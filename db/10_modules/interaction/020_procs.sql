@@ -7,7 +7,7 @@
       * Content-derived article interaction eligibility projection
       * durable accepted-view counting through ArticleViewCount
       * idempotent like / unlike relationship truth
-      * top-level pending comment creation and public comment queries
+      * top-level visible comment creation and public comment queries
       * admin comment moderation and author delete-own-comment
       * comment report and moderation-case workflow
       * local moderation action history queries
@@ -103,12 +103,6 @@ BEGIN
 END
 GO
 
-IF OBJECT_ID(N'[interaction].[InteractionConsumedMessage]', N'U') IS NULL
-BEGIN
-    THROW 58211, 'Table [interaction].[InteractionConsumedMessage] does not exist. Run interaction/001_tables.sql first.', 1;
-END
-GO
-
 /* =========================================================
    ARTICLE INTERACTION TARGET PROJECTION
    ========================================================= */
@@ -151,13 +145,6 @@ GO
 
 /*
   Consumer apply procedure for Content -> Interaction eligibility projection.
-
-  Application flow:
-  1. Begin Interaction transaction.
-  2. Call Interaction_ConsumedMessage_TryReserve.
-  3. If reserved, call this procedure.
-  4. Call Interaction_ConsumedMessage_Complete with @ApplyDecision.
-  5. Commit.
 
   @RequiresResync = 1 is used when the consumer has detected an unsafe gap.
   In that case new interaction is disabled until repaired.
@@ -723,7 +710,13 @@ GO
   V1 supports top-level comments only.
   ParentCommentId is intentionally not accepted as an input.
 */
-CREATE OR ALTER PROCEDURE [interaction].[Interaction_Comment_InsertPending]
+IF OBJECT_ID(N'[interaction].[Interaction_Comment_InsertPending]', N'P') IS NOT NULL
+BEGIN
+    DROP PROCEDURE [interaction].[Interaction_Comment_InsertPending];
+END
+GO
+
+CREATE OR ALTER PROCEDURE [interaction].[Interaction_Comment_InsertVisible]
     @PublicId        CHAR(26),
     @ArticlePublicId CHAR(26),
     @AuthorUserId    BIGINT,
@@ -775,7 +768,7 @@ BEGIN
         @AuthorUserId,
         NULL,
         @Content,
-        N'Pending',
+        N'Visible',
         1,
         SYSUTCDATETIME(),
         NULL,
@@ -2593,194 +2586,5 @@ BEGIN
         @SnapshotChanged AS [SnapshotChanged]
     FROM [interaction].[ArticleInteractionStats]
     WHERE [ArticlePublicId] = @ArticlePublicId;
-END
-GO
-
-/* =========================================================
-   CONSUMED MESSAGE DEDUPE / APPLY TRACKING
-   ========================================================= */
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-/*
-  This procedure must be called inside an active application transaction.
-
-  The row is initially reserved as Applied, then the caller invokes
-  Interaction_ConsumedMessage_Complete with the actual apply decision.
-  If processing fails, the outer transaction must roll back both the
-  reservation and the projection mutation.
-*/
-CREATE OR ALTER PROCEDURE [interaction].[Interaction_ConsumedMessage_TryReserve]
-    @ConsumerName     NVARCHAR(100),
-    @MessageId        CHAR(26),
-    @ProducerModule   NVARCHAR(50),
-    @EventType        NVARCHAR(150),
-    @AggregateId      NVARCHAR(100),
-    @AggregateVersion BIGINT = NULL,
-    @CorrelationId    CHAR(26) = NULL,
-    @Reserved         BIT OUTPUT
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-
-    SET @Reserved = 0;
-
-    IF @@TRANCOUNT = 0
-        THROW 58400, 'An active transaction is required for consumed-message reservation.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@ConsumerName, N'')))) = 0
-        THROW 58401, 'ConsumerName is required.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@MessageId, '')))) = 0
-        THROW 58402, 'MessageId is required.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@ProducerModule, N'')))) = 0
-        THROW 58403, 'ProducerModule is required.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@EventType, N'')))) = 0
-        THROW 58404, 'EventType is required.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@AggregateId, N'')))) = 0
-        THROW 58405, 'AggregateId is required.', 1;
-
-    BEGIN TRY
-        INSERT INTO [interaction].[InteractionConsumedMessage]
-        (
-            [ConsumerName],
-            [MessageId],
-            [ProducerModule],
-            [EventType],
-            [AggregateId],
-            [AggregateVersion],
-            [ApplyDecision],
-            [CorrelationId],
-            [ReceivedAtUtc],
-            [ProcessedAtUtc],
-            [FailureCode],
-            [FailureDetail]
-        )
-        VALUES
-        (
-            @ConsumerName,
-            @MessageId,
-            @ProducerModule,
-            @EventType,
-            @AggregateId,
-            @AggregateVersion,
-            N'Applied',
-            @CorrelationId,
-            SYSUTCDATETIME(),
-            NULL,
-            NULL,
-            NULL
-        );
-
-        SET @Reserved = 1;
-    END TRY
-    BEGIN CATCH
-        IF ERROR_NUMBER() IN (2601, 2627)
-        BEGIN
-            SET @Reserved = 0;
-            RETURN;
-        END
-
-        THROW;
-    END CATCH
-END
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-CREATE OR ALTER PROCEDURE [interaction].[Interaction_ConsumedMessage_Complete]
-    @ConsumerName   NVARCHAR(100),
-    @MessageId      CHAR(26),
-    @ApplyDecision  NVARCHAR(30),
-    @FailureCode    NVARCHAR(100) = NULL,
-    @FailureDetail  NVARCHAR(500) = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-
-    IF @@TRANCOUNT = 0
-        THROW 58410, 'An active transaction is required for consumed-message completion.', 1;
-
-    IF @ApplyDecision NOT IN
-    (
-        N'Applied',
-        N'DuplicateIgnored',
-        N'StaleIgnored',
-        N'GapDetected',
-        N'ResyncRequired',
-        N'Failed'
-    )
-        THROW 58411, 'ApplyDecision is invalid.', 1;
-
-    IF @ApplyDecision = N'Failed'
-       AND LEN(LTRIM(RTRIM(ISNULL(@FailureCode, N'')))) = 0
-        THROW 58412, 'FailureCode is required when ApplyDecision is Failed.', 1;
-
-    IF @ApplyDecision <> N'Failed'
-    BEGIN
-        SET @FailureCode = NULL;
-        SET @FailureDetail = NULL;
-    END
-
-    UPDATE [interaction].[InteractionConsumedMessage]
-    SET
-        [ApplyDecision] = @ApplyDecision,
-        [ProcessedAtUtc] = SYSUTCDATETIME(),
-        [FailureCode] = @FailureCode,
-        [FailureDetail] = @FailureDetail
-    WHERE [ConsumerName] = @ConsumerName
-      AND [MessageId] = @MessageId;
-
-    IF @@ROWCOUNT <> 1
-        THROW 58413, 'Consumed message reservation does not exist.', 1;
-END
-GO
-
-SET ANSI_NULLS ON;
-GO
-SET QUOTED_IDENTIFIER ON;
-GO
-
-CREATE OR ALTER PROCEDURE [interaction].[Interaction_ConsumedMessage_SelectByConsumerAndMessageId]
-    @ConsumerName NVARCHAR(100),
-    @MessageId    CHAR(26)
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@ConsumerName, N'')))) = 0
-        THROW 58420, 'ConsumerName is required.', 1;
-
-    IF LEN(LTRIM(RTRIM(ISNULL(@MessageId, '')))) = 0
-        THROW 58421, 'MessageId is required.', 1;
-
-    SELECT TOP (1)
-        [InteractionConsumedMessageId],
-        [ConsumerName],
-        [MessageId],
-        [ProducerModule],
-        [EventType],
-        [AggregateId],
-        [AggregateVersion],
-        [ApplyDecision],
-        [CorrelationId],
-        [ReceivedAtUtc],
-        [ProcessedAtUtc],
-        [FailureCode],
-        [FailureDetail]
-    FROM [interaction].[InteractionConsumedMessage]
-    WHERE [ConsumerName] = @ConsumerName
-      AND [MessageId] = @MessageId;
 END
 GO

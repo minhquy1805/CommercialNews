@@ -11,13 +11,14 @@
       * ArticleMediaProjectionState
       * ArticleSeoRouteProjection
       * ArticleSeoMetadataProjection
+      * ArticleInteractionCounterProjection
       * AuthorProfileProjection
   - Support:
       * public article list/detail/search/related reads
       * slug-based public serving
       * source-derived visibility
       * optional projected tags/media
-      * counters as derived values
+      * Interaction-owned public counter snapshots projected locally for display
       * idempotent async projection apply via SourceVersion + LastEventMessageId
       * rebuild/reconciliation posture
 
@@ -27,6 +28,9 @@
   - Media remains source of truth for media assets.
   - Identity remains source of truth for public author profile data.
   - Interaction remains source of truth for counters/engagement.
+  - Interaction counter snapshots are stored independently from ArticleReadModel
+    because Interaction projection messages may arrive before Content projection messages.
+  - Popularity/trending is deferred beyond V1.
   - Reading projection tables intentionally avoid cross-module FKs.
   - Index-heavy tuning belongs in 010_indexes.sql.
   - Stored procedures belong in 020_procs.sql.
@@ -104,14 +108,6 @@ BEGIN
 
         [SearchText]                NVARCHAR(MAX)        NULL,
 
-        [ViewCount]                 BIGINT               NOT NULL
-            CONSTRAINT [DF_ArticleReadModel_ViewCount] DEFAULT (0),
-        [LikeCount]                 BIGINT               NOT NULL
-            CONSTRAINT [DF_ArticleReadModel_LikeCount] DEFAULT (0),
-        [CommentCount]              BIGINT               NOT NULL
-            CONSTRAINT [DF_ArticleReadModel_CommentCount] DEFAULT (0),
-        [PopularityScore]           FLOAT                NULL,
-
         [SourceVersion]             BIGINT               NOT NULL
             CONSTRAINT [DF_ArticleReadModel_SourceVersion] DEFAULT (0),
 
@@ -159,13 +155,6 @@ BEGIN
         CONSTRAINT [CK_ArticleReadModel_SourceVersion_NonNegative]
             CHECK ([SourceVersion] >= 0),
 
-        CONSTRAINT [CK_ArticleReadModel_Counters_NonNegative]
-            CHECK (
-                [ViewCount] >= 0
-                AND [LikeCount] >= 0
-                AND [CommentCount] >= 0
-            ),
-
         CONSTRAINT [CK_ArticleReadModel_SeoIndexableRequiresActive]
             CHECK (
                 [SeoIsIndexable] = 0
@@ -202,6 +191,128 @@ BEGIN
         DROP CONSTRAINT [CK_ArticleReadModel_PublishedAtUtc];
 
     PRINT N'Dropped obsolete constraint: [CK_ArticleReadModel_PublishedAtUtc]';
+END
+GO
+
+/*
+  Interaction counters are stored in ArticleInteractionCounterProjection.
+  Older databases may still have these columns on ArticleReadModel from an
+  earlier draft, so drop them idempotently.
+*/
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_ArticleReadModel_Public_Popularity'
+      AND [object_id] = OBJECT_ID(N'[reading].[ArticleReadModel]')
+)
+BEGIN
+    DROP INDEX [IX_ArticleReadModel_Public_Popularity]
+        ON [reading].[ArticleReadModel];
+
+    PRINT N'Dropped obsolete index: [IX_ArticleReadModel_Public_Popularity]';
+END
+GO
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_ArticleReadModel_Public_Category_PublishedAt'
+      AND [object_id] = OBJECT_ID(N'[reading].[ArticleReadModel]')
+)
+BEGIN
+    DROP INDEX [IX_ArticleReadModel_Public_Category_PublishedAt]
+        ON [reading].[ArticleReadModel];
+
+    PRINT N'Dropped obsolete index before counter-column removal: [IX_ArticleReadModel_Public_Category_PublishedAt]';
+END
+GO
+
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE [name] = N'IX_ArticleReadModel_Public_PublishedAt'
+      AND [object_id] = OBJECT_ID(N'[reading].[ArticleReadModel]')
+)
+BEGIN
+    DROP INDEX [IX_ArticleReadModel_Public_PublishedAt]
+        ON [reading].[ArticleReadModel];
+
+    PRINT N'Dropped obsolete index before counter-column removal: [IX_ArticleReadModel_Public_PublishedAt]';
+END
+GO
+
+IF OBJECT_ID(N'[reading].[CK_ArticleReadModel_Counters_NonNegative]', N'C') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP CONSTRAINT [CK_ArticleReadModel_Counters_NonNegative];
+
+    PRINT N'Dropped obsolete constraint: [CK_ArticleReadModel_Counters_NonNegative]';
+END
+GO
+
+IF OBJECT_ID(N'[reading].[DF_ArticleReadModel_ViewCount]', N'D') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP CONSTRAINT [DF_ArticleReadModel_ViewCount];
+
+    PRINT N'Dropped obsolete default: [DF_ArticleReadModel_ViewCount]';
+END
+GO
+
+IF OBJECT_ID(N'[reading].[DF_ArticleReadModel_LikeCount]', N'D') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP CONSTRAINT [DF_ArticleReadModel_LikeCount];
+
+    PRINT N'Dropped obsolete default: [DF_ArticleReadModel_LikeCount]';
+END
+GO
+
+IF OBJECT_ID(N'[reading].[DF_ArticleReadModel_CommentCount]', N'D') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP CONSTRAINT [DF_ArticleReadModel_CommentCount];
+
+    PRINT N'Dropped obsolete default: [DF_ArticleReadModel_CommentCount]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'ViewCount') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP COLUMN [ViewCount];
+
+    PRINT N'Dropped obsolete column: [reading].[ArticleReadModel].[ViewCount]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'LikeCount') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP COLUMN [LikeCount];
+
+    PRINT N'Dropped obsolete column: [reading].[ArticleReadModel].[LikeCount]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'CommentCount') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP COLUMN [CommentCount];
+
+    PRINT N'Dropped obsolete column: [reading].[ArticleReadModel].[CommentCount]';
+END
+GO
+
+IF COL_LENGTH(N'reading.ArticleReadModel', N'PopularityScore') IS NOT NULL
+BEGIN
+    ALTER TABLE [reading].[ArticleReadModel]
+        DROP COLUMN [PopularityScore];
+
+    PRINT N'Dropped obsolete column: [reading].[ArticleReadModel].[PopularityScore]';
 END
 GO
 
@@ -481,7 +592,83 @@ END
 GO
 
 /* =========================================================
-   5) [reading].[ArticleSeoRouteProjection]
+   5) [reading].[ArticleInteractionCounterProjection]
+   Interaction-owned public counter snapshot projected locally
+   for Reading response composition.
+   ========================================================= */
+IF OBJECT_ID(N'[reading].[ArticleInteractionCounterProjection]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [reading].[ArticleInteractionCounterProjection]
+    (
+        [ArticlePublicId]                   CHAR(26)             NOT NULL,
+
+        [ViewCount]                         BIGINT               NOT NULL
+            CONSTRAINT [DF_ArticleInteractionCounterProjection_ViewCount]
+            DEFAULT (0),
+
+        [LikeCount]                         BIGINT               NOT NULL
+            CONSTRAINT [DF_ArticleInteractionCounterProjection_LikeCount]
+            DEFAULT (0),
+
+        [VisibleCommentCount]               BIGINT               NOT NULL
+            CONSTRAINT [DF_ArticleInteractionCounterProjection_VisibleCommentCount]
+            DEFAULT (0),
+
+        /*
+          InteractionStatsVersion means the version of the Interaction-owned
+          public counter snapshot for one article.
+
+          It must not be compared with:
+          - Content article version
+          - SEO route/metadata version
+          - Media projection version
+          - Identity author profile version
+        */
+        [InteractionStatsVersion]           BIGINT               NOT NULL,
+
+        [LastEventMessageId]                CHAR(26)             NOT NULL,
+        [LastSourceOccurredAtUtc]           DATETIME2(3)         NOT NULL,
+
+        [LastSyncedAtUtc]                   DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_ArticleInteractionCounterProjection_LastSyncedAtUtc]
+            DEFAULT (SYSUTCDATETIME()),
+
+        [CreatedAtUtc]                      DATETIME2(3)         NOT NULL
+            CONSTRAINT [DF_ArticleInteractionCounterProjection_CreatedAtUtc]
+            DEFAULT (SYSUTCDATETIME()),
+
+        [UpdatedAtUtc]                      DATETIME2(3)         NULL,
+
+        CONSTRAINT [PK_ArticleInteractionCounterProjection]
+            PRIMARY KEY CLUSTERED ([ArticlePublicId] ASC),
+
+        CONSTRAINT [CK_ArticleInteractionCounterProjection_ArticlePublicId_Length]
+            CHECK (LEN([ArticlePublicId]) = 26),
+
+        CONSTRAINT [CK_ArticleInteractionCounterProjection_Counters_NonNegative]
+            CHECK (
+                [ViewCount] >= 0
+                AND [LikeCount] >= 0
+                AND [VisibleCommentCount] >= 0
+            ),
+
+        CONSTRAINT [CK_ArticleInteractionCounterProjection_StatsVersion_Positive]
+            CHECK ([InteractionStatsVersion] > 0),
+
+        CONSTRAINT [CK_ArticleInteractionCounterProjection_LastEventMessageId_Length]
+            CHECK (LEN([LastEventMessageId]) = 26)
+    );
+
+    PRINT N'Created table: [reading].[ArticleInteractionCounterProjection]';
+END
+ELSE
+BEGIN
+    PRINT N'Table exists: [reading].[ArticleInteractionCounterProjection]';
+END
+GO
+
+/* =========================================================
+   6) [reading].[ArticleSeoRouteProjection]
    ========================================================= */
 IF OBJECT_ID(N'[reading].[ArticleSeoRouteProjection]', N'U') IS NULL
 BEGIN
@@ -560,7 +747,7 @@ END
 GO
 
 /* =========================================================
-   6) [reading].[ArticleSeoMetadataProjection]
+   7) [reading].[ArticleSeoMetadataProjection]
    ========================================================= */
 IF OBJECT_ID(N'[reading].[ArticleSeoMetadataProjection]', N'U') IS NULL
 BEGIN
@@ -638,7 +825,7 @@ END
 GO
 
 /* =========================================================
-   7) [reading].[AuthorProfileProjection]
+   8) [reading].[AuthorProfileProjection]
    ========================================================= */
 IF OBJECT_ID(N'[reading].[AuthorProfileProjection]', N'U') IS NULL
 BEGIN
