@@ -38,8 +38,20 @@ Like / Unlike
 Create Comment
 Delete Own Comment
 Create Comment Report
-Approve / Reject / Hide / Restore Comment
+Hide / Restore Comment
 Dismiss / Action Reported-Comment Case
+```
+
+`Approve` and `Reject` are not part of the default V1 runtime flow.
+
+V1 uses post-moderation:
+
+```text
+Create valid comment -> Visible immediately
+Visible comment -> may later be Hidden by moderator/admin
+Hidden comment -> may later be Restored by moderator/admin
+
+Pending / Rejected remain reserved for a future selective-moderation workflow only.
 ```
 
 A successful command means:
@@ -118,7 +130,6 @@ CommentModerationActionHistory
 ArticleInteractionTargetProjection
 ArticleViewCount
 ArticleInteractionStats
-InteractionConsumedMessage
 ```
 
 ### 2.3 Public counter output
@@ -130,6 +141,38 @@ interaction.article_counters_projection_published
 Reading consumes only this known-value counter snapshot from Interaction.
 
 Reading does not consume raw like, comment moderation or individual view behavior to calculate public counters.
+
+### 2.4 Runtime event posture
+
+Default V1 post-moderation events include:
+
+```text
+interaction.comment_created
+interaction.comment_hidden
+interaction.comment_restored
+interaction.comment_deleted_by_author
+interaction.comment_reported
+interaction.comment_reports_dismissed
+interaction.comment_report_alert_triggered
+interaction.article_counters_projection_published
+```
+
+For default V1 post-moderation:
+
+```text
+interaction.comment_created
+```
+
+represents a comment created in `Visible` status.
+
+Reserved future selective-moderation events:
+
+```text
+interaction.comment_approved
+interaction.comment_rejected
+```
+
+These events are not emitted by the default V1 runtime flow.
 
 ---
 
@@ -423,25 +466,27 @@ The counter must never become negative.
 
 ### Goal
 
-Persist a user-submitted top-level comment for moderation before public exposure.
+Persist a valid user-submitted top-level comment and make it immediately eligible for public display under the default V1 post-moderation policy.
 
 ### Preconditions
 
-```text
-Authenticated actor exists
-Article is locally interaction-enabled
-Comment content is valid and safe to persist/render later
-```
+- actor is authenticated;
+- article interaction eligibility is `Enabled`;
+- comment content passes validation and adopted safety checks;
+- V1 comment creation does not accept reply input;
+- `ParentCommentId = NULL`.
 
-### V1 reply rule
+### V1 reply posture
 
-The `Comment` model may contain:
+The `Comment` model may retain:
 
 ```text
 ParentCommentId nullable
 ```
 
-but V1 supports top-level comments only.
+as a schema extension point, but V1 supports top-level comments only.
+
+Rules:
 
 ```text
 Every V1-created comment must use ParentCommentId = NULL.
@@ -449,34 +494,50 @@ Every V1-created comment must use ParentCommentId = NULL.
 
 The V1 create-comment API must not accept a parent-comment identifier.
 
-### Flow
+Reply creation, reply listing and reply moderation are deferred.
+
+### Runtime flow
 
 ```text
 Authenticated user submits comment
-    -> Interaction checks local article eligibility
-    -> Validate content and rate-limit policy
+    -> Validate article interaction eligibility
+    -> Validate actor and content
     -> Create Comment:
-         Status = Pending
+         Status = Visible
          ParentCommentId = NULL
-         AuthorUserId = current user
+         Version = 1
     -> Write interaction.comment_created outbox message where required
-    -> Commit Interaction transaction
-    -> Return created pending comment identity/state
+    -> Commit Interaction truth
+    -> Return created visible comment identity/state
 ```
 
-### Public visibility behavior
+### Visibility behavior
 
-A newly created comment:
+A successfully created valid V1 comment:
 
-- is not public;
-- does not increase `VisibleCommentCount`;
-- may appear in authorized admin moderation queries.
+- is immediately eligible for public comment listing;
+- is visible while the article remains publicly interactable/readable;
+- does not require moderator approval before display;
+- may later be hidden through post-moderation action.
 
-### Timeout and duplicate submission
+### Counter behavior
+
+```text
+Create valid comment: New -> Visible
+    -> VisibleCommentCount eventually increases
+    -> Interaction eventually publishes a newer public counter snapshot
+    -> Reading eventually displays the newer count
+```
+
+Counter materialization and Reading freshness are asynchronous and must not block successful comment creation.
+
+### Idempotency / timeout behavior
 
 A timeout may occur after the comment has committed.
 
 Production-oriented V1 should use a create-comment idempotency key or document duplicate-submission handling explicitly.
+
+Duplicate create retry must not silently create repeated logical comments when idempotency protection is adopted.
 
 ---
 
@@ -504,21 +565,26 @@ Client requests comments for public article
     -> Return public-safe comment response
 ```
 
-### Non-public exclusion
+### Excluded public comment data
 
-Public APIs must not expose:
+Public comment reads must not return:
 
 ```text
-Pending comments
-Rejected comments
 Hidden comments
 Deleted comments
+Pending comments reserved for future selective moderation
+Rejected comments reserved for future selective moderation
 Report details
 Moderation case metadata
 Moderation notes
-Moderator identity
 Reporter identity
 ```
+
+### Post-moderation clarification
+
+A newly created valid V1 comment normally appears in this public query immediately because its initial status is `Visible`.
+
+`Pending` and `Rejected` are not produced by the default V1 create-comment flow.
 
 ### Article unavailable behavior
 
@@ -528,102 +594,47 @@ Such a comment must not be publicly returned while the article is not public.
 
 ---
 
-## 9) Flow G — Admin Approve Pending Comment
+## 9) Deferred Flow Hook — Selective Pre-Moderation
 
-### Goal
+### V1 status
 
-Make an eligible pending comment publicly visible.
+Not active in the default V1 runtime flow.
 
-### Preconditions
-
-```text
-Actor has Interaction.Comments.Moderate
-Comment.Status = Pending
-Expected Comment.Version matches current truth
-```
-
-### Flow
+V1 uses post-moderation:
 
 ```text
-Moderator approves pending comment
-    -> Authorize moderation permission
-    -> Load current comment truth/version
-    -> Validate Pending -> Visible transition
-    -> Update Comment:
-         Status = Visible
-         Version = Version + 1
-    -> Append CommentModerationActionHistory:
-         ActionType = Approve
-         FromStatus = Pending
-         ToStatus = Visible
-    -> Write interaction.comment_approved outbox message
-    -> Commit Interaction transaction
-    -> Return committed comment state
+Create valid comment -> Visible immediately
 ```
 
-### Async effects
+The following transitions remain reserved for a future explicit selective-moderation policy:
 
-After commit:
+| Current status | Action | Actor | Next status |
+|---|---|---|---|
+| `Pending` | Approve | Authorized moderator/admin | `Visible` |
+| `Pending` | Reject | Authorized moderator/admin | `Rejected` |
+
+Reserved future events:
 
 ```text
-Audit may ingest approval fact asynchronously
-Counter materialization eventually increases VisibleCommentCount
-Reading eventually receives newer counter snapshot
+interaction.comment_approved
+interaction.comment_rejected
 ```
 
-### Retry behavior
+Until selective moderation is explicitly adopted:
 
-If the approve request is retried after commit:
-
-- comment must not be approved twice;
-- history must not be appended twice for the same effective transition;
-- counter effects must not be applied twice;
-- stale/version conflict or documented already-applied outcome is returned.
+- public/admin APIs must not expose ordinary approve/reject commands;
+- default comment creation must not produce `Pending`;
+- default counter materialization must not depend on approval.
 
 ---
 
-## 10) Flow H — Admin Reject Pending Comment
+## 10) Flow I — Admin Hide Visible Comment
 
 ### Goal
 
-Prevent a pending comment from becoming public.
+Apply post-moderation by removing a currently visible comment from public display after authorized review.
 
-### Preconditions
-
-```text
-Actor has Interaction.Comments.Moderate
-Comment.Status = Pending
-Expected Comment.Version matches current truth
-Valid required rejection reason is supplied
-```
-
-### Flow
-
-```text
-Moderator rejects pending comment
-    -> Authorize permission
-    -> Validate Pending -> Rejected transition
-    -> Update Comment status/version
-    -> Append CommentModerationActionHistory:
-         ActionType = Reject
-         FromStatus = Pending
-         ToStatus = Rejected
-         ReasonCode / Note
-    -> Write interaction.comment_rejected outbox message
-    -> Commit Interaction transaction
-```
-
-### Counter behavior
-
-Rejecting a pending comment does not change `VisibleCommentCount`.
-
----
-
-## 11) Flow I — Admin Hide Visible Comment
-
-### Goal
-
-Remove an already visible comment from public display.
+This is a primary V1 moderation flow because valid comments are created as `Visible` immediately.
 
 ### Preconditions
 
@@ -663,11 +674,15 @@ A hidden comment must not be hidden again as a new effective transition.
 
 ---
 
-## 12) Flow J — Admin Restore Hidden Comment
+## 11) Flow J — Admin Restore Hidden Comment
 
 ### Goal
 
 Return a hidden comment to eligible visible state.
+
+Restore reverses a previous post-moderation hide decision.
+
+It does not represent initial approval of a newly submitted comment.
 
 ### Preconditions
 
@@ -705,7 +720,7 @@ Reading receives updated counter snapshot later
 
 ---
 
-## 13) Flow K — Author Deletes Own Comment
+## 12) Flow K — Author Deletes Own Comment
 
 ### Goal
 
@@ -719,29 +734,39 @@ Comment.AuthorUserId = current user
 Comment is not already deleted, or retry is treated idempotently
 ```
 
-### Normal deletion flow without open case
+### Default V1 runtime flow
 
 ```text
 Author requests delete own comment
-    -> Validate authoritative ownership
-    -> If current status is Pending / Visible / Rejected / Hidden:
+    -> Authorize ownership
+    -> If current status is Visible or Hidden:
          update Comment.Status = Deleted
-         increment Comment.Version
          set DeletedAtUtc
+         increment Comment.Version
          write interaction.comment_deleted_by_author outbox message where required
-         commit
-    -> If already Deleted by author:
-         return idempotent success/no-op
+    -> If already Deleted:
+         return documented idempotent success or safe no-op
+    -> Commit
 ```
+
+### Reserved selective-moderation extension
+
+If a future selective-moderation workflow creates `Pending` or `Rejected` comments, the author may also delete their own comments from those reserved states.
 
 ### Counter behavior
 
 | Previous comment status | Counter effect |
-|---|---:|
-| `Pending` | No visible-counter change |
+|---|---|
 | `Visible` | `VisibleCommentCount` eventually decreases |
-| `Rejected` | No visible-counter change |
 | `Hidden` | No visible-counter change |
+| `Deleted` | No additional change on retry |
+
+Reserved future states:
+
+| Previous comment status | Counter effect |
+|---|---|
+| `Pending` | No visible-counter change |
+| `Rejected` | No visible-counter change |
 
 ### Deletion with open moderation case
 
@@ -768,7 +793,7 @@ Retry after ambiguous timeout must not:
 
 ---
 
-## 14) Flow L — Submit Comment Report
+## 13) Flow L — Submit Comment Report
 
 ### Goal
 
@@ -827,6 +852,18 @@ Creating a report:
 - does not publish a counter snapshot merely because a report exists;
 - makes the report/case available for authorized moderation queries.
 
+This is post-moderation behavior:
+
+```text
+Comment was already publicly visible before the report.
+Report creates or joins an Open moderation case.
+Comment remains visible until an authorized moderation action hides it.
+
+A report must not automatically convert a comment to Pending, Hidden or Deleted.
+```
+
+`CommentReport.Status = Pending` is still valid. This is the state of the report awaiting resolution, not the state of the comment.
+
 ### Duplicate behavior
 
 ```text
@@ -841,7 +878,7 @@ A retry after timeout must not create:
 
 ---
 
-## 15) Flow M — Admin Alert Trigger for Reported Comment
+## 14) Flow M — Admin Alert Trigger for Reported Comment
 
 ### Goal
 
@@ -901,7 +938,7 @@ Alert trigger never automatically changes Comment.Status.
 
 ---
 
-## 16) Flow N — Admin Dismisses Reported-Comment Case
+## 15) Flow N — Admin Dismisses Reported-Comment Case
 
 ### Goal
 
@@ -944,7 +981,7 @@ A dismissed case must not be dismissed again as a new business effect.
 
 ---
 
-## 17) Flow O — Admin Hides Reported Comment
+## 16) Flow O — Admin Hides Reported Comment
 
 ### Goal
 
@@ -1011,7 +1048,7 @@ event is not required in V1 if `interaction.comment_hidden` contains the require
 
 ---
 
-## 18) Flow P — Async Counter Materialization
+## 17) Flow P — Async Counter Materialization
 
 ### Goal
 
@@ -1031,13 +1068,32 @@ ArticleInteractionStats
 - LastPublishedAtUtc nullable
 ```
 
-### Source posture
+### Counter source truth
 
 | Counter | Source |
 |---|---|
-| `ViewCount` | `ArticleViewCount.ViewCount` |
-| `LikeCount` | Active `ArticleLike` relationships |
-| `VisibleCommentCount` | `Comment.Status = Visible` |
+| `ViewCount` | Accepted view count contributions according to Interaction view policy |
+| `LikeCount` | Active article likes |
+| `VisibleCommentCount` | Comments whose current status is `Visible` |
+
+### Default V1 comment counter effects
+
+| Comment transition | Counter effect |
+|---|---|
+| `New -> Visible` on valid comment creation | `VisibleCommentCount` eventually increases |
+| `Visible -> Hidden` | `VisibleCommentCount` eventually decreases |
+| `Hidden -> Visible` | `VisibleCommentCount` eventually increases |
+| `Visible -> Deleted` | `VisibleCommentCount` eventually decreases |
+| `Hidden -> Deleted` | No counter change |
+| Report created or dismissed | No counter change |
+
+Reserved selective-moderation effects, not used in default V1:
+
+| Comment transition | Counter effect |
+|---|---|
+| `New -> Pending` | No counter change |
+| `Pending -> Visible` | `VisibleCommentCount` eventually increases |
+| `Pending -> Rejected` | No counter change |
 
 ### Typical flow
 
@@ -1092,16 +1148,15 @@ Reading does not increment counters from raw like/comment/view events.
 
 ---
 
-## 19) Flow Q — Consumer Dedupe and Version-Aware Apply
+## 18) Flow Q — Consumer Dedupe and Version-Aware Apply
 
 ### Goal
 
 Protect Interaction async consumers from duplicate and stale message application.
 
-### Durable processing state
+### Durable processing posture
 
 ```text
-InteractionConsumedMessage
 - ConsumerName
 - MessageId
 - ProducerModule
@@ -1153,7 +1208,7 @@ Both must be handled.
 
 ---
 
-## 20) Flow R — Counter Reconciliation and Repair
+## 19) Flow R — Counter Reconciliation and Repair
 
 ### Goal
 
@@ -1202,7 +1257,7 @@ Operator or approved recovery workflow selects bounded article scope
 
 ---
 
-## 21) Flow S — Truth-Safe Behavior Under Lag or Failure
+## 20) Flow S — Truth-Safe Behavior Under Lag or Failure
 
 ### Goal
 
@@ -1229,7 +1284,7 @@ to unsafe state application or cross-module truth corruption.
 
 ---
 
-## 22) Flow T — Deferred Reply Compatibility
+## 21) Flow T — Deferred Reply Compatibility
 
 ### Goal
 
@@ -1266,25 +1321,27 @@ A later reply-comment phase must define:
 
 ---
 
-## 23) Summary of V1 Runtime Rules
+## 22) Summary of V1 Runtime Rules
 
 Interaction V1 runtime is governed by the following rules:
 
 1. Interaction owns like, comment, report and moderation workflow state.
-2. Interaction uses local Content-derived eligibility projection and fails closed when eligibility is uncertain.
+2. Content-derived article eligibility determines whether new Interaction commands are accepted.
 3. Unpublish, archive or soft-delete disables new interaction but preserves existing counters and history.
-4. View tracking is non-blocking and stored as `ArticleViewCount`, not individual raw view events.
-5. Like/unlike truth is per user/article and remains safe under duplicate requests and concurrency.
+4. Article views use accepted-count contribution semantics owned by Interaction.
+5. Like/unlike is idempotent per authenticated user and article.
 6. Comments are top-level only in V1; `ParentCommentId` is reserved but always `NULL` for new V1 comments.
-7. Comments begin as `Pending`; only `Visible` comments are publicly readable.
-8. Author may delete their own comment without moderator approval.
-9. Users may report visible comments of other users; reports never auto-hide content.
-10. Reports are grouped into `CommentModerationCase`; only one case may be open for a comment.
-11. One open report case may trigger at most one asynchronous administrator-alert intent.
-12. `CommentModerationActionHistory` is committed locally for required admin moderation operations.
-13. `ArticleInteractionStats` is a derived public counter snapshot and may lag.
-14. Reading consumes only `interaction.article_counters_projection_published`.
-15. Interaction mutations with async consequences commit state/history/outbox atomically.
-16. Consumers dedupe by stable `MessageId` and reject stale updates by version.
-17. Counters and projections support approved reconciliation/recovery posture.
-18. Audit and Notifications may lag without invalidating committed Interaction workflow truth.
+7. Valid V1-created comments begin as `Visible` and are publicly readable immediately while the article remains public/interaction-enabled.
+8. V1 uses post-moderation: moderator/admin may later hide or restore visible comments.
+9. `Pending` and `Rejected` are reserved for future selective moderation and are not part of the default V1 create-comment flow.
+10. Authors may delete their own visible or hidden comments without moderator approval.
+11. Users may report visible comments of other users; reports never auto-hide content.
+12. Reports are grouped into `CommentModerationCase`; only one case may be open for a comment.
+13. One open report case may trigger at most one asynchronous administrator-alert intent.
+14. `CommentModerationActionHistory` is committed locally for required moderation operations.
+15. `ArticleInteractionStats` is a derived public counter snapshot and may lag.
+16. `VisibleCommentCount` increases when a valid comment is created as visible and decreases when a visible comment becomes hidden or deleted.
+17. Reading consumes only `interaction.article_counters_projection_published`.
+18. Audit and Notifications consume relevant committed intents asynchronously.
+19. Consumers reject stale projection updates using version-aware apply rules.
+20. Counters and projections support approved reconciliation/recovery posture.

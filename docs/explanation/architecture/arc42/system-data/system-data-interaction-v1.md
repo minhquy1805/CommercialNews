@@ -20,7 +20,6 @@ CommentModerationActionHistory
 ArticleInteractionTargetProjection
 ArticleViewCount
 ArticleInteractionStats
-InteractionConsumedMessage
 ```
 
 Interaction does not own:
@@ -64,7 +63,6 @@ Interaction must not directly modify Content, Reading, Notifications or Audit ta
 | `ArticleInteractionTargetProjection` | Local article interaction eligibility derived from Content |
 | `ArticleViewCount` | Durable accepted-view materialized counter |
 | `ArticleInteractionStats` | Public counter snapshot published to Reading |
-| `InteractionConsumedMessage` | Durable async consumer dedupe/apply tracking |
 
 Derived state may lag, but it must never replace Interaction truth.
 
@@ -430,32 +428,6 @@ Counters are non-negative.
 StatsVersion is monotonic.
 ```
 
----
-
-### 4.9 `InteractionConsumedMessage`
-
-| Field | Purpose |
-|---|---|
-| `InteractionConsumedMessageId` | Internal PK |
-| `ConsumerName` | Consumer purpose |
-| `MessageId` | Incoming message identity |
-| `ProducerModule` | Source module |
-| `EventType` | Incoming event type |
-| `AggregateId` | Source aggregate identity |
-| `AggregateVersion` | Source version, nullable |
-| `ApplyDecision` | Apply result |
-| `CorrelationId` | Correlation identity, nullable |
-| `ReceivedAtUtc`, `ProcessedAtUtc` | Processing timestamps |
-| `FailureCode`, `FailureDetail` | Safe failure diagnostics, nullable |
-
-Invariant:
-
-```text
-Unique (ConsumerName, MessageId).
-```
-
----
-
 ## 5) Relationships
 
 ### 5.1 Interaction-local relationships
@@ -502,7 +474,6 @@ UserId / AuthorUserId / ReporterUserId / ResolvedByUserId / ActorUserId
 | `CommentModerationCase` | Unique open case per `CommentId`; index by status/priority/opened time |
 | `CommentModerationActionHistory` | Index by comment/time and case/time |
 | `ArticleInteractionStats` | Unique `ArticlePublicId`; counter checks |
-| `InteractionConsumedMessage` | Unique `(ConsumerName, MessageId)`; index for processing cleanup/diagnostics |
 
 Required check-constraint values:
 
@@ -640,7 +611,6 @@ CommentReport
 CommentModerationCase
 CommentModerationActionHistory
 ArticleInteractionStats
-InteractionConsumedMessage
 ```
 
 Shared `OutboxMessage` may be referenced as infrastructure, but it is not an Interaction business entity.

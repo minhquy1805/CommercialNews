@@ -1,17 +1,18 @@
-namespace Interaction.Domain.Enums;
-public static class CommentStatus
+namespace Interaction.Domain.Constants;
+
+public static class CommentReportStatuses
 {
-    public const string Visible = "Visible";
-    public const string Hidden = "Hidden";
-    public const string Deleted = "Deleted";
     public const string Pending = "Pending";
+    public const string Dismissed = "Dismissed";
+    public const string Actioned = "Actioned";
+    public const string ClosedByAuthorDeletion = "ClosedByAuthorDeletion";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        Visible,
-        Hidden,
-        Deleted,
-        Pending
+        Pending,
+        Dismissed,
+        Actioned,
+        ClosedByAuthorDeletion
     };
 
     public static bool IsValid(string? value)

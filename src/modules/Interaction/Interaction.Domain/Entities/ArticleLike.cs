@@ -1,55 +1,105 @@
-namespace Interaction.Domain.Entities;
-
 using Interaction.Domain.Exceptions;
+
+namespace Interaction.Domain.Entities;
 
 public sealed class ArticleLike
 {
     public long ArticleLikeId { get; private set; }
 
-    public long ArticleId { get; private set; }
+    public string PublicId { get; private set; } = string.Empty;
+    public string ArticlePublicId { get; private set; } = string.Empty;
     public long UserId { get; private set; }
 
     public bool IsActive { get; private set; }
 
-    public DateTime LikedAt { get; private set; }
-    public DateTime? UnlikedAt { get; private set; }
+    public DateTime LikedAtUtc { get; private set; }
+    public DateTime? UnlikedAtUtc { get; private set; }
 
-    public DateTime CreatedAt { get; private set; }
-    public DateTime? UpdatedAt { get; private set; }
+    public long Version { get; private set; }
+
+    public DateTime CreatedAtUtc { get; private set; }
+    public DateTime? UpdatedAtUtc { get; private set; }
 
     private ArticleLike()
     {
     }
 
-    public static ArticleLike Create(
-        long articleId,
+    /// <summary>
+    /// Creates a new active like relationship.
+    /// The application uses this shape when initiating a new like command,
+    /// while the authoritative insert/reactivation decision is performed
+    /// through the database procedure.
+    /// </summary>
+    public static ArticleLike CreateActive(
+        string publicId,
+        string articlePublicId,
         long userId,
-        DateTime nowUtc)
+        DateTime likedAtUtc)
     {
-        ValidateArticleId(articleId);
+        ValidatePublicId(publicId);
+        ValidateArticlePublicId(articlePublicId);
         ValidateUserId(userId);
+        ValidateTimestamp(likedAtUtc, "LikedAtUtc");
 
         return new ArticleLike
         {
-            ArticleId = articleId,
+            PublicId = NormalizeRequired(publicId),
+            ArticlePublicId = NormalizeRequired(articlePublicId),
             UserId = userId,
             IsActive = true,
-            LikedAt = nowUtc,
-            UnlikedAt = null,
-            CreatedAt = nowUtc,
-            UpdatedAt = null
+            LikedAtUtc = likedAtUtc,
+            UnlikedAtUtc = null,
+            Version = 1,
+            CreatedAtUtc = likedAtUtc,
+            UpdatedAtUtc = null
         };
     }
 
+    /// <summary>
+    /// Rehydrates the relationship state returned by Interaction persistence.
+    /// Like/unlike transitions are executed by authoritative database procedures
+    /// because they must be idempotent under concurrent requests.
+    /// </summary>
     public static ArticleLike Rehydrate(
         long articleLikeId,
-        long articleId,
+        string publicId,
+        string articlePublicId,
         long userId,
         bool isActive,
-        DateTime likedAt,
-        DateTime? unlikedAt,
-        DateTime createdAt,
-        DateTime? updatedAt)
+        DateTime likedAtUtc,
+        DateTime? unlikedAtUtc,
+        long version,
+        DateTime createdAtUtc,
+        DateTime? updatedAtUtc)
+    {
+        ValidateArticleLikeId(articleLikeId);
+        ValidatePublicId(publicId);
+        ValidateArticlePublicId(articlePublicId);
+        ValidateUserId(userId);
+        ValidateVersion(version);
+        ValidateState(
+            isActive,
+            likedAtUtc,
+            unlikedAtUtc,
+            createdAtUtc,
+            updatedAtUtc);
+
+        return new ArticleLike
+        {
+            ArticleLikeId = articleLikeId,
+            PublicId = NormalizeRequired(publicId),
+            ArticlePublicId = NormalizeRequired(articlePublicId),
+            UserId = userId,
+            IsActive = isActive,
+            LikedAtUtc = likedAtUtc,
+            UnlikedAtUtc = unlikedAtUtc,
+            Version = version,
+            CreatedAtUtc = createdAtUtc,
+            UpdatedAtUtc = updatedAtUtc
+        };
+    }
+
+    private static void ValidateArticleLikeId(long articleLikeId)
     {
         if (articleLikeId <= 0)
         {
@@ -57,56 +107,25 @@ public sealed class ArticleLike
                 "INTERACTION.ARTICLE_LIKE_INVALID_ID",
                 "Article like id must be greater than zero.");
         }
-
-        ValidateArticleId(articleId);
-        ValidateUserId(userId);
-        ValidateState(isActive, likedAt, unlikedAt, createdAt, updatedAt);
-
-        return new ArticleLike
-        {
-            ArticleLikeId = articleLikeId,
-            ArticleId = articleId,
-            UserId = userId,
-            IsActive = isActive,
-            LikedAt = likedAt,
-            UnlikedAt = unlikedAt,
-            CreatedAt = createdAt,
-            UpdatedAt = updatedAt
-        };
     }
 
-    public void Activate(DateTime nowUtc)
+    private static void ValidatePublicId(string publicId)
     {
-        if (IsActive)
-        {
-            return;
-        }
-
-        IsActive = true;
-        LikedAt = nowUtc;
-        UnlikedAt = null;
-        UpdatedAt = nowUtc;
-    }
-
-    public void Deactivate(DateTime nowUtc)
-    {
-        if (!IsActive)
-        {
-            return;
-        }
-
-        IsActive = false;
-        UnlikedAt = nowUtc;
-        UpdatedAt = nowUtc;
-    }
-
-    private static void ValidateArticleId(long articleId)
-    {
-        if (articleId <= 0)
+        if (string.IsNullOrWhiteSpace(publicId))
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_LIKE_INVALID_ARTICLE_ID",
-                "Article id must be greater than zero.");
+                "INTERACTION.ARTICLE_LIKE_PUBLIC_ID_REQUIRED",
+                "Article like public id is required.");
+        }
+    }
+
+    private static void ValidateArticlePublicId(string articlePublicId)
+    {
+        if (string.IsNullOrWhiteSpace(articlePublicId))
+        {
+            throw new InteractionDomainException(
+                "INTERACTION.ARTICLE_LIKE_ARTICLE_PUBLIC_ID_REQUIRED",
+                "Article public id is required.");
         }
     }
 
@@ -120,60 +139,74 @@ public sealed class ArticleLike
         }
     }
 
+    private static void ValidateVersion(long version)
+    {
+        if (version < 1)
+        {
+            throw new InteractionDomainException(
+                "INTERACTION.ARTICLE_LIKE_INVALID_VERSION",
+                "Article like version must be greater than or equal to one.");
+        }
+    }
+
     private static void ValidateState(
         bool isActive,
-        DateTime likedAt,
-        DateTime? unlikedAt,
-        DateTime createdAt,
-        DateTime? updatedAt)
+        DateTime likedAtUtc,
+        DateTime? unlikedAtUtc,
+        DateTime createdAtUtc,
+        DateTime? updatedAtUtc)
     {
-        if (createdAt == default)
+        ValidateTimestamp(createdAtUtc, "CreatedAtUtc");
+        ValidateTimestamp(likedAtUtc, "LikedAtUtc");
+
+        if (likedAtUtc < createdAtUtc)
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_LIKE_INVALID_CREATED_AT",
-                "CreatedAt must be a valid UTC datetime.");
+                "INTERACTION.ARTICLE_LIKE_INVALID_LIKED_AT_UTC_ORDER",
+                "LikedAtUtc must be greater than or equal to CreatedAtUtc.");
         }
 
-        if (likedAt == default)
+        if (updatedAtUtc.HasValue && updatedAtUtc.Value < createdAtUtc)
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_LIKE_INVALID_LIKED_AT",
-                "LikedAt must be a valid UTC datetime.");
+                "INTERACTION.ARTICLE_LIKE_INVALID_UPDATED_AT_UTC_ORDER",
+                "UpdatedAtUtc must be greater than or equal to CreatedAtUtc.");
         }
 
-        if (likedAt < createdAt)
-        {
-            throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_LIKE_INVALID_LIKED_AT_ORDER",
-                "LikedAt must be greater than or equal to CreatedAt.");
-        }
-
-        if (updatedAt.HasValue && updatedAt.Value < createdAt)
-        {
-            throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_LIKE_INVALID_UPDATED_AT_ORDER",
-                "UpdatedAt must be greater than or equal to CreatedAt.");
-        }
-
-        if (isActive && unlikedAt.HasValue)
+        if (isActive && unlikedAtUtc.HasValue)
         {
             throw new InteractionDomainException(
                 "INTERACTION.ARTICLE_LIKE_INVALID_ACTIVE_STATE",
-                "Active article like must not have UnlikedAt.");
+                "Active article like must not have UnlikedAtUtc.");
         }
 
-        if (!isActive && !unlikedAt.HasValue)
+        if (!isActive && !unlikedAtUtc.HasValue)
         {
             throw new InteractionDomainException(
                 "INTERACTION.ARTICLE_LIKE_INVALID_INACTIVE_STATE",
-                "Inactive article like must have UnlikedAt.");
+                "Inactive article like must have UnlikedAtUtc.");
         }
 
-        if (unlikedAt.HasValue && unlikedAt.Value < likedAt)
+        if (unlikedAtUtc.HasValue && unlikedAtUtc.Value < likedAtUtc)
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_LIKE_INVALID_UNLIKED_AT_ORDER",
-                "UnlikedAt must be greater than or equal to LikedAt.");
+                "INTERACTION.ARTICLE_LIKE_INVALID_UNLIKED_AT_UTC_ORDER",
+                "UnlikedAtUtc must be greater than or equal to LikedAtUtc.");
         }
+    }
+
+    private static void ValidateTimestamp(DateTime value, string propertyName)
+    {
+        if (value == default)
+        {
+            throw new InteractionDomainException(
+                $"INTERACTION.ARTICLE_LIKE_INVALID_{propertyName.ToUpperInvariant()}",
+                $"{propertyName} must be a valid datetime.");
+        }
+    }
+
+    private static string NormalizeRequired(string value)
+    {
+        return value.Trim();
     }
 }
