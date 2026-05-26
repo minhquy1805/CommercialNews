@@ -2,7 +2,7 @@
   File: db/10_modules/interaction/001_tables.sql
   Module: Interaction
   Purpose:
-  - Create Interaction-owned truth, workflow, derived and consumer-processing tables
+  - Create Interaction-owned truth, workflow and derived tables
     for CommercialNews V1 Async + Admin Moderation.
   - Truth / workflow state:
       * ArticleLike
@@ -14,7 +14,6 @@
       * ArticleInteractionTargetProjection
       * ArticleViewCount
       * ArticleInteractionStats
-      * InteractionConsumedMessage
   - Support:
       * async article interaction eligibility from Content
       * durable materialized accepted-view counting
@@ -23,7 +22,6 @@
       * comment report and moderation-case workflow
       * one-time admin alert intent metadata
       * versioned public counter snapshots for Reading
-      * consumer dedupe and apply diagnostics
   - Idempotent for fresh/current schema: safe to re-run when tables already match this definition.
 
   Notes:
@@ -312,7 +310,7 @@ BEGIN
 
         [Status]                    NVARCHAR(20)         NOT NULL
             CONSTRAINT [DF_Comment_Status]
-            DEFAULT (N'Pending'),
+            DEFAULT (N'Visible'),
 
         [Version]                   BIGINT               NOT NULL
             CONSTRAINT [DF_Comment_Version]
@@ -389,6 +387,29 @@ END
 ELSE
 BEGIN
     PRINT N'Table exists: [interaction].[Comment]';
+END
+GO
+
+/*
+  V1 uses post-moderation by default. Valid newly-created comments are
+  visible immediately; Pending remains reserved for future selective moderation.
+*/
+IF OBJECT_ID(N'[interaction].[DF_Comment_Status]', N'D') IS NOT NULL
+BEGIN
+    ALTER TABLE [interaction].[Comment]
+        DROP CONSTRAINT [DF_Comment_Status];
+
+    PRINT N'Dropped default constraint for rebuild: [DF_Comment_Status]';
+END
+GO
+
+IF OBJECT_ID(N'[interaction].[DF_Comment_Status]', N'D') IS NULL
+BEGIN
+    ALTER TABLE [interaction].[Comment]
+        ADD CONSTRAINT [DF_Comment_Status]
+            DEFAULT (N'Visible') FOR [Status];
+
+    PRINT N'Created default constraint: [DF_Comment_Status]';
 END
 GO
 
@@ -1036,123 +1057,5 @@ END
 ELSE
 BEGIN
     PRINT N'Table exists: [interaction].[ArticleInteractionStats]';
-END
-GO
-
-/* =========================================================
-   9) [interaction].[InteractionConsumedMessage]
-   Durable consumer dedupe and apply-decision tracking.
-   ========================================================= */
-IF OBJECT_ID(N'[interaction].[InteractionConsumedMessage]', N'U') IS NULL
-BEGIN
-    CREATE TABLE [interaction].[InteractionConsumedMessage]
-    (
-        [InteractionConsumedMessageId] BIGINT IDENTITY(1,1) NOT NULL,
-
-        [ConsumerName]              NVARCHAR(100)        NOT NULL,
-        [MessageId]                 CHAR(26)             NOT NULL,
-
-        [ProducerModule]            NVARCHAR(50)         NOT NULL,
-        [EventType]                 NVARCHAR(150)        NOT NULL,
-
-        [AggregateId]               NVARCHAR(100)        NOT NULL,
-        [AggregateVersion]          BIGINT               NULL,
-
-        [ApplyDecision]             NVARCHAR(30)         NOT NULL,
-
-        [CorrelationId]             CHAR(26)             NULL,
-
-        [ReceivedAtUtc]             DATETIME2(3)         NOT NULL
-            CONSTRAINT [DF_InteractionConsumedMessage_ReceivedAtUtc]
-            DEFAULT (SYSUTCDATETIME()),
-
-        [ProcessedAtUtc]            DATETIME2(3)         NULL,
-
-        [FailureCode]               NVARCHAR(100)        NULL,
-        [FailureDetail]             NVARCHAR(500)        NULL,
-
-        CONSTRAINT [PK_InteractionConsumedMessage]
-            PRIMARY KEY CLUSTERED ([InteractionConsumedMessageId] ASC),
-
-        CONSTRAINT [UQ_InteractionConsumedMessage_ConsumerName_MessageId]
-            UNIQUE ([ConsumerName], [MessageId]),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_ConsumerName_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([ConsumerName]))) > 0),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_MessageId_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([MessageId]))) > 0),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_ProducerModule_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([ProducerModule]))) > 0),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_EventType_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([EventType]))) > 0),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_AggregateId_NotBlank]
-            CHECK (LEN(LTRIM(RTRIM([AggregateId]))) > 0),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_AggregateVersion]
-            CHECK (
-                [AggregateVersion] IS NULL
-                OR [AggregateVersion] >= 0
-            ),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_ApplyDecision]
-            CHECK (
-                [ApplyDecision] IN (
-                    N'Applied',
-                    N'DuplicateIgnored',
-                    N'StaleIgnored',
-                    N'GapDetected',
-                    N'ResyncRequired',
-                    N'Failed'
-                )
-            ),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_CorrelationId_NotBlank]
-            CHECK (
-                [CorrelationId] IS NULL
-                OR LEN(LTRIM(RTRIM([CorrelationId]))) > 0
-            ),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_ProcessedAtUtc]
-            CHECK (
-                [ProcessedAtUtc] IS NULL
-                OR [ProcessedAtUtc] >= [ReceivedAtUtc]
-            ),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_FailureCode_NotBlank]
-            CHECK (
-                [FailureCode] IS NULL
-                OR LEN(LTRIM(RTRIM([FailureCode]))) > 0
-            ),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_FailureDetail_NotBlank]
-            CHECK (
-                [FailureDetail] IS NULL
-                OR LEN(LTRIM(RTRIM([FailureDetail]))) > 0
-            ),
-
-        CONSTRAINT [CK_InteractionConsumedMessage_FailureState]
-            CHECK (
-                (
-                    [ApplyDecision] = N'Failed'
-                    AND [FailureCode] IS NOT NULL
-                )
-                OR
-                (
-                    [ApplyDecision] <> N'Failed'
-                    AND [FailureCode] IS NULL
-                    AND [FailureDetail] IS NULL
-                )
-            )
-    );
-
-    PRINT N'Created table: [interaction].[InteractionConsumedMessage]';
-END
-ELSE
-BEGIN
-    PRINT N'Table exists: [interaction].[InteractionConsumedMessage]';
 END
 GO

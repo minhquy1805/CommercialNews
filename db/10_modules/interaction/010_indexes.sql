@@ -7,12 +7,11 @@
       * eligibility projection resync diagnostics
       * active-like recount and like-state support
       * public visible top-level comment paging
-      * admin pending/moderation comment queues
+      * admin comment moderation queues
       * comment report lookup and case investigation
       * one-open-case-per-comment enforcement
       * moderation-case admin queues and alert inspection
       * moderation action history lookup
-      * consumer apply/dedupe diagnostics and retention cleanup
   - Idempotent: safe to re-run.
 
   Notes:
@@ -96,12 +95,6 @@ GO
 IF OBJECT_ID(N'[interaction].[ArticleInteractionStats]', N'U') IS NULL
 BEGIN
     THROW 58110, 'Table [interaction].[ArticleInteractionStats] does not exist. Run interaction/001_tables.sql first.', 1;
-END
-GO
-
-IF OBJECT_ID(N'[interaction].[InteractionConsumedMessage]', N'U') IS NULL
-BEGIN
-    THROW 58111, 'Table [interaction].[InteractionConsumedMessage] does not exist. Run interaction/001_tables.sql first.', 1;
 END
 GO
 
@@ -649,82 +642,4 @@ GO
    - No extra secondary index is intentionally added here.
 */
 PRINT N'No additional secondary indexes required for [interaction].[ArticleInteractionStats] in V1.';
-GO
-
-/* =========================================================
-   9) [interaction].[InteractionConsumedMessage]
-   ========================================================= */
-
-/*
-   Note:
-   - [UQ_InteractionConsumedMessage_ConsumerName_MessageId] already enforces
-     durable consumer message dedupe.
-*/
-
-/* Consumer apply-decision diagnostics */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_InteractionConsumedMessage_ConsumerName_ApplyDecision_ProcessedAtUtc'
-      AND [object_id] = OBJECT_ID(N'[interaction].[InteractionConsumedMessage]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_InteractionConsumedMessage_ConsumerName_ApplyDecision_ProcessedAtUtc]
-    ON [interaction].[InteractionConsumedMessage]
-    (
-        [ConsumerName] ASC,
-        [ApplyDecision] ASC,
-        [ProcessedAtUtc] DESC,
-        [InteractionConsumedMessageId] DESC
-    )
-    INCLUDE
-    (
-        [MessageId],
-        [ProducerModule],
-        [EventType],
-        [AggregateId],
-        [AggregateVersion],
-        [CorrelationId],
-        [FailureCode]
-    );
-
-    PRINT N'Created index: [IX_InteractionConsumedMessage_ConsumerName_ApplyDecision_ProcessedAtUtc]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_InteractionConsumedMessage_ConsumerName_ApplyDecision_ProcessedAtUtc]';
-END
-GO
-
-/* Retention cleanup / processed-message operational scan */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE [name] = N'IX_InteractionConsumedMessage_ProcessedAtUtc'
-      AND [object_id] = OBJECT_ID(N'[interaction].[InteractionConsumedMessage]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_InteractionConsumedMessage_ProcessedAtUtc]
-    ON [interaction].[InteractionConsumedMessage]
-    (
-        [ProcessedAtUtc] ASC,
-        [InteractionConsumedMessageId] ASC
-    )
-    INCLUDE
-    (
-        [ConsumerName],
-        [MessageId],
-        [EventType],
-        [ApplyDecision]
-    )
-    WHERE [ProcessedAtUtc] IS NOT NULL;
-
-    PRINT N'Created index: [IX_InteractionConsumedMessage_ProcessedAtUtc]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_InteractionConsumedMessage_ProcessedAtUtc]';
-END
 GO

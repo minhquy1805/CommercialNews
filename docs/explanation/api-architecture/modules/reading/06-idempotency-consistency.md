@@ -1,308 +1,647 @@
-# Reading — Idempotency & Consistency (V1)
+# Reading — Idempotency & Consistency (V1 Async Projections)
 
-This document defines Reading-specific consistency guarantees for public read APIs, async projection updates, replay behavior, stale event handling, cache safety, and rebuild/reconciliation workflows.
+This document defines Reading-specific consistency guarantees for:
 
-System-wide rules live in:
+```text
+Public read APIs
+Async projection consumption
+Duplicate / stale / out-of-order event handling
+Slug-route serving from Reading-owned projection
+Interaction counter snapshot application
+Cache safety
+Repair and rebuild workflows
+```
 
-* `../../../../architecture/arc42/11-replication-v1.md`
-* `../../../../architecture/arc42/13-transactions-and-consistency-v1.md`
-* `../../../../architecture/arc42/14-distributed-systems-assumptions-v1.md`
-* `../../../../architecture/arc42/15-consistency-ordering-and-consensus-v1.md`
-* `../../../../architecture/arc42/16-batch-processing-and-derived-data-v1.md`
-* `../../../../architecture/arc42/17-dataflow-and-batch-workflows-v1.md`
-* `../../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md`
-* `../../../../architecture/arc42/19-stream-processing-runtime-v1.md`
-* ADR-0013 (Outbox & delivery semantics)
-* ADR-0015 (Redis cache policy)
-* ADR-0018 (Transaction boundaries & consistency model)
-* ADR-0020 (Timeout, retry, and failure detection policy)
-* ADR-0021 (Clock, time, and ordering policy)
-* ADR-0022 (Versioning and fencing strategy)
-* ADR-0025 (Batch processing and derived state policy)
-* ADR-0026 (Batch job orchestration and materialization policy)
-* ADR-0027 (Stream processing and derived state policy)
-* ADR-0028 (Consumer idempotency, replay, and rebuild policy)
+Related system-wide rules:
+
+```text
+../../../architecture/arc42/11-replication-v1.md
+../../../architecture/arc42/13-transactions-and-consistency-v1.md
+../../../architecture/arc42/14-distributed-systems-assumptions-v1.md
+../../../architecture/arc42/15-consistency-ordering-and-consensus-v1.md
+../../../architecture/arc42/16-batch-processing-and-derived-data-v1.md
+../../../architecture/arc42/17-dataflow-and-batch-workflows-v1.md
+../../../architecture/arc42/18-stream-processing-and-derived-state-v1.md
+../../../architecture/arc42/19-stream-processing-runtime-v1.md
+
+../../../decisions/adr-0013-outbox-and-delivery-semantics-v1.md
+../../../decisions/adr-0015-cache-policy-and-invalidation-redis-v1.md
+../../../decisions/adr-0018-transaction-boundaries-and-consistency-model-v1.md
+../../../decisions/adr-0020-timeout-retry-and-failure-detection-policy-v1.md
+../../../decisions/adr-0021-clock-time-and-ordering-policy-v1.md
+../../../decisions/adr-0022-versioning-and-fencing-strategy-v1.md
+../../../decisions/adr-0025-batch-processing-and-derived-state-policy-v1.md
+../../../decisions/adr-0026-batch-job-orchestration-and-materialization-policy-v1.md
+../../../decisions/adr-0027-stream-processing-and-derived-state-policy-v1.md
+../../../decisions/adr-0028-consumer-idempotency-replay-and-rebuild-policy-v1.md
+```
 
 ---
 
-## 1) Consistency model
+## 1. Consistency Model
 
-Reading is a derived public read projection module.
+Reading is an asynchronously maintained public serving module.
 
 Reading owns:
 
-* public read model
-* public query semantics
-* response composition
-* projection freshness metadata
-* safe degradation behavior
-* rebuild/reconciliation posture for Reading-owned derived outputs
+```text
+ArticleReadModel
+ArticleSeoRouteProjection
+Public query semantics
+Public response composition
+Reading-side projection freshness metadata
+Reading-side consumer apply/dedupe behavior
+Repair and rebuild of Reading-owned projections
+```
 
 Reading does not own:
 
-* article lifecycle truth
-* slug generation truth
-* media lifecycle truth
-* interaction counter truth
-* audit truth
-* notification truth
+```text
+Content publication truth
+SEO canonical route truth
+Media asset truth
+Interaction counter truth
+Notification delivery truth
+Canonical audit evidence
+```
 
 Source ownership remains:
 
-| Concern | Source owner |
-|---|---|
-| Article lifecycle and editorial fields | Content |
-| Slug and SEO metadata | SEO |
-| Media assets and primary media | Media |
-| Views, likes, comments, counters | Interaction |
-| Public serving projection | Reading |
+| Concern | Source owner | Reading usage |
+|---|---|---|
+| Article content and public visibility | Content | Project into `ArticleReadModel` |
+| Slug route and SEO metadata | SEO | Project into `ArticleSeoRouteProjection` |
+| Cover/media presentation | Media | Project optional media enrichment |
+| Views, likes and visible comment totals | Interaction | Project counter snapshot fields |
+| Public serving response | Reading | Query local projections only |
 
-Reading follows source truth asynchronously.
-
-Normal public path for list/detail-by-public-id/search/related:
+Core rule:
 
 ```text
-Public API
-    ↓
-Reading projection
-    ↓
-Response
+Reading serves ordinary public requests from Reading-owned projections only.
 ```
 
-Slug-based public path:
-
-```text
-Public API
-    ↓
-SEO route resolve
-    ↓
-Reading projection by ResourcePublicId
-    ↓
-Reading visibility check
-    ↓
-Response
-```
-
-Policy-controlled fallback may read source truth when correctness requires it, but fallback must be explicit and must not become hidden cross-module ownership.
+Reading does not synchronously query Content, SEO, Media or Interaction during the normal public read path.
 
 ---
 
-## 2) Truth vs derived state
+## 2. Truth vs Derived Serving State
 
-### 2.1 Source truth
+### 2.1. Source truth
 
-Source truth is committed synchronously in the owning module.
+Source truth is committed in the module that owns it.
 
 Examples:
 
-* Content publishes/unpublishes an article.
-* SEO changes canonical slug data.
-* Media changes primary media.
-* Interaction updates counter truth or aggregate state.
+```text
+Content publishes or unpublishes an article.
+SEO activates, changes or deactivates a public slug route.
+Media changes public cover/media presentation.
+Interaction materializes a new public counter snapshot.
+```
 
-### 2.2 Reading derived state
+### 2.2. Reading derived state
 
-Reading projection is derived state.
+Reading state is derived serving state.
 
 It may be:
 
-* stale
-* missing
-* delayed
-* replayed
-* repaired
-* rebuilt
-* replaced
+```text
+Delayed
+Missing
+Stale within accepted async lag
+Replayed
+Repaired
+Rebuilt
+Marked unsafe / requires resync
+```
 
-Reading projection must not silently become source truth.
+Reading projection state must not be treated as upstream truth.
 
-Reading projection must be rebuildable from authoritative source modules.
+Reading must preserve enough source-version and message metadata to:
+
+```text
+Reject stale input
+Investigate lag
+Repair divergence
+Rebuild safely
+```
 
 ---
 
-## 3) Delivery assumption
+## 3. Normal Public Read Path
 
-CommercialNews V1 uses Outbox + RabbitMQ + consumers with at-least-once delivery.
+### 3.1. Article list / detail by public id
+
+```text
+Public API
+    -> Reading ArticleReadModel
+    -> Local visibility check
+    -> Response
+```
+
+### 3.2. Article detail by slug
+
+```text
+Public API
+    -> Reading ArticleSeoRouteProjection by Scope + Slug
+    -> Reading ArticleReadModel by ArticlePublicId
+    -> Local route and visibility checks
+    -> Response
+```
+
+Rules:
+
+```text
+Reading does not synchronously resolve slug through SEO.
+
+Reading does not synchronously load counters from Interaction.
+
+Reading does not synchronously confirm public state through Content.
+
+Missing or unsafe core projection state fails closed.
+```
+
+---
+
+## 4. Source-Specific Versioning
+
+Reading consumes independent projection lanes from multiple source owners.
+
+A single shared `SourceVersion` is not sufficient because versions from different modules are not comparable.
+
+### Required version lanes
+
+| Source input | Reading freshness marker |
+|---|---|
+| Content article projection | `ContentSourceVersion` |
+| SEO route projection | `SeoSourceVersion` |
+| Media presentation projection | `MediaSourceVersion` |
+| Interaction counter snapshot | `InteractionStatsVersion` |
+
+Apply rule per source lane:
+
+```text
+If IncomingVersion > CurrentAppliedVersion:
+    apply known-value snapshot
+Else:
+    ignore as duplicate or stale input
+```
+
+Forbidden comparison:
+
+```text
+Do not compare ContentSourceVersion against SeoSourceVersion.
+Do not compare MediaSourceVersion against InteractionStatsVersion.
+Do not use timestamps to arbitrate source freshness.
+```
+
+---
+
+## 5. Delivery Assumption
+
+CommercialNews V1 uses:
+
+```text
+Source transaction + Outbox
+    -> RabbitMQ transport
+    -> Reading consumer
+```
+
+Delivery is at-least-once.
 
 Reading must assume:
 
-* events may be delivered more than once
-* broker may redeliver
-* outbox publisher may retry
-* consumers may crash and restart
-* older events may arrive after newer events
-* replay/rebuild may intentionally reprocess input
-
-Reading targets effectively-once projection outcomes through:
-
-* message-level identity
-* version-aware projection apply
-* idempotent upsert
-* stale event rejection
-* rebuild/reconciliation posture
+```text
+The same message may be delivered more than once.
+A consumer may crash and restart.
+An older message may arrive after a newer message.
+A publisher may retry.
+A message may be manually replayed.
+Projection repair or rebuild may rerun bounded input.
+```
 
 Exactly-once delivery is not assumed.
 
+Reading targets effectively-once projection outcomes through:
+
+```text
+Message-level dedupe
+Source-specific version-aware apply
+Idempotent known-value upsert
+Safe stale-message rejection
+Repair / rebuild posture
+```
+
 ---
 
-## 4) Event identity
+## 6. Event Identity and Apply Metadata
 
-Baseline V1 Reading consumes Content events for core article projection. Media and Interaction events are optional/adopted flows. SEO-emitted events are future optimization only; baseline slug correctness comes from explicit SEO route resolution.
-
-Important events consumed by Reading should carry:
+Inbound messages used to build important Reading projections must carry:
 
 | Field | Purpose |
 |---|---|
-| `MessageId` | Message-level identity and dedupe key |
+| `MessageId` | Message-level dedupe identity |
 | `EventType` | Handler routing |
-| `AggregateId` | Source aggregate identity |
-| `Version` | Per-aggregate freshness marker |
-| `OccurredAtUtc` | Event timestamp for investigation and lag measurement |
-| `CorrelationId` | End-to-end tracing |
+| `AggregateType` | Source aggregate/projection classification |
+| `AggregateId` / `AggregatePublicId` | Source identity |
+| `AggregateVersion` or projection version | Ordered freshness marker for that source lane |
+| `Payload` | Known-value snapshot data |
+| `CorrelationId` | Cross-module tracing |
+| `OccurredAtUtc` | Diagnostics and lag measurement |
 
-Reading should log these fields for every important apply decision.
+Reading consumer diagnostics should capture:
+
+```text
+ConsumerName
+MessageId
+EventType
+Source lane
+IncomingVersion
+CurrentAppliedVersion
+ApplyDecision
+CorrelationId
+ReceivedAtUtc
+ProcessedAtUtc
+FailureCode where applicable
+```
 
 ---
 
-## 5) Message-level idempotency
+## 7. Message-Level Idempotency
 
 Message-level idempotency protects against the same delivered message being processed more than once.
 
-Primary key:
+Required invariant:
 
 ```text
-MessageId
+Unique (ConsumerName, MessageId)
 ```
 
-Reading may implement this through:
+Expected behavior for duplicate delivery:
 
-* `LastEventMessageId`
-* durable processed-message table
-* unique apply log
-* idempotent repository/stored procedure behavior
+```text
+Same MessageId arrives again
+    -> do not reapply mutation
+    -> acknowledge or record duplicate outcome safely
+    -> do not republish downstream side effects
+```
 
-Duplicate processing of the same message must be harmless.
+Message-level dedupe alone is not enough because a different older message may arrive after a newer message has already been applied.
 
 ---
 
-## 6) Projection-level idempotency
+## 8. Projection-Level Idempotency and Stale Input
 
-Message-level dedupe alone is not sufficient.
+Projection-level freshness prevents older state from overwriting newer applied state.
 
-A different older message may arrive after a newer message.
-
-Therefore Reading must also protect projection state with source versioning.
-
-Primary freshness marker:
+### Example: Interaction counter snapshot
 
 ```text
-SourceVersion
-```
-
-Approved apply rule:
-
-```text
-If IncomingVersion > CurrentSourceVersion:
-    apply event
-Else:
-    ignore or reject as duplicate/stale
-```
-
-The version guard should be enforced at the repository/stored procedure boundary, not only in application memory.
-
----
-
-## 7) Duplicate vs stale delivery
-
-### 7.1 Duplicate delivery
-
-The same message arrives again.
-
-Example:
-
-```text
-MessageId = 01ABC
-Version = 7
+CurrentInteractionStatsVersion = 12
+IncomingStatsVersion = 11
 ```
 
 Expected behavior:
 
-* no duplicate row
-* no harmful side effect
-* no projection corruption
-* duplicate metric/log may be emitted
+```text
+Ignore incoming snapshot.
+Do not overwrite ViewCount / LikeCount / VisibleCommentCount.
+Record stale apply decision if diagnostics require it.
+```
 
-### 7.2 Stale delivery
-
-An older but different message arrives after newer state is already applied.
-
-Example:
+### Example: SEO route projection
 
 ```text
-CurrentSourceVersion = 7
-IncomingVersion = 6
+CurrentSeoSourceVersion = 8
+IncomingSeoSourceVersion = 7
 ```
 
 Expected behavior:
 
-* ignore or reject stale event
-* do not overwrite projection
-* emit stale-event metric
-* retain enough logs for investigation
+```text
+Ignore incoming route state.
+Do not reactivate an older route mapping.
+```
+
+### Example: Content visibility projection
+
+```text
+CurrentContentSourceVersion = 20 with IsPublic = false
+IncomingContentSourceVersion = 19 with IsPublic = true
+```
+
+Expected behavior:
+
+```text
+Ignore stale Content snapshot.
+Never re-expose the article from older local input.
+```
+
+Version guards should be enforced at the repository/stored-procedure boundary, not only in application memory.
 
 ---
 
-## 8) Timestamp policy
+## 9. Snapshot vs Delta Rule
 
-Reading must not use wall-clock timestamps as freshness authority.
+Reading V1 should consume known-value snapshot-shaped projection events.
+
+Approved shape:
+
+```text
+Incoming snapshot contains the complete values Reading needs to set
+for that source lane.
+```
+
+Examples:
+
+```text
+Content article public projection snapshot
+SEO article route snapshot
+Media public cover/presentation snapshot
+Interaction counter snapshot
+```
+
+Approved behavior:
+
+```text
+Apply newer snapshot by setting known values.
+```
+
+Reading V1 must not build public serving counters from blind delta processing such as:
+
+```text
+On each delivered interaction event:
+    ViewCount = ViewCount + 1
+```
+
+Reason:
+
+```text
+At-least-once delivery and replay would make blind increments unsafe.
+```
+
+If a future lane introduces delta events, it must define strict-order or resync behavior before adoption.
+
+---
+
+## 10. Timestamp Policy
+
+Reading must not use wall-clock timestamps as ordering authority.
 
 Do not use:
 
-* `largest UpdatedAtUtc wins`
-* `largest OccurredAtUtc wins`
-* `latest ProcessedAtUtc wins`
+```text
+Largest UpdatedAtUtc wins
+Largest OccurredAtUtc wins
+Latest ProcessedAtUtc wins
+```
 
 Use:
 
-* `AggregateId + Version`
-* `SourceVersion / LastAppliedVersion`
+```text
+Source lane identity + source-specific version
+```
 
-Timestamps are allowed for:
-
-* public display
-* audit/investigation
-* projection lag measurement
-* reporting
-* scheduling
-
-They are not ordering authority.
-
----
-
-## 9) Version gap policy
-
-V1 default:
-
-* snapshot-like events may be applied when `IncomingVersion > CurrentSourceVersion`
-* delta-like events require strict ordering or resync
-* if exact prior state matters and a gap is detected, Reading must defer, resync, or rebuild according to policy
-
-Event shape must be explicit:
+Timestamps remain useful for:
 
 ```text
-Snapshot event => newer version can replace projection.
-Delta event => strict order or resync may be required.
+Public display
+Projection lag measurement
+Diagnostics
+Audit investigation
+Operational reporting
+Scheduling repair/rebuild workflows
 ```
 
 ---
 
-## 10) Public read idempotency
+## 11. Content Visibility Consistency
 
-Public read endpoints are naturally idempotent.
+Content owns public article visibility truth.
 
-Repeated reads must not mutate source truth.
+Reading applies Content-owned projection snapshots into `ArticleReadModel`.
 
-Affected endpoints:
+### Locally known safe-public condition
+
+A Reading row may be served publicly only when local state confirms:
+
+```text
+Status = Published
+AND IsPublic = true
+AND visibility state is not unsafe / resync-required
+```
+
+### Locally known deny condition
+
+Reading must deny exposure when local state says:
+
+```text
+IsPublic = false
+OR Status is not Published
+OR visibility state is unsafe / requires resync
+OR ArticleReadModel is missing
+```
+
+### Important bounded-lag clarification
+
+Reading is asynchronous. Therefore, if Content has committed an unpublish/archive/soft-delete but the corresponding projection update has **not yet reached Reading**, Reading may temporarily still hold the previous public projection.
+
+V1 accepts this as bounded eventual-consistency lag.
+
+Required controls:
+
+```text
+Monitor Content -> Reading projection lag.
+Keep lag within defined SLO.
+Apply non-public snapshots urgently and idempotently.
+Fail closed immediately once local state is known unsafe or non-public.
+Support reconciliation / repair when drift is detected.
+```
+
+Reading must not claim that local projections instantly reflect newly committed source truth.
+
+---
+
+## 12. SEO Route Consistency
+
+SEO owns canonical slug and routing truth.
+
+Reading consumes SEO route projection state into:
+
+```text
+ArticleSeoRouteProjection
+```
+
+Slug-based reads require local route state:
+
+```text
+Scope = public
+AND Slug matches request
+AND IsActive = true
+AND RequiresResync = false
+```
+
+Then Reading must also confirm article public visibility in `ArticleReadModel`.
+
+### Async route lag behavior
+
+Because route projection is asynchronous:
+
+| Situation | Public behavior |
+|---|---|
+| New SEO route committed but not yet projected to Reading | New slug may temporarily return safe 404 |
+| Route deactivated in SEO but deactivation not yet projected | Old local route may remain usable within accepted bounded lag |
+| Route locally marked inactive | Return safe 404 |
+| Route locally marked `RequiresResync` | Return safe 404 |
+| Route exists but article projection is non-public | Return safe 404 |
+
+Required controls:
+
+```text
+Monitor SEO -> Reading route projection lag.
+Use source-version guards.
+Reject stale route reactivation.
+Repair route projection drift when detected.
+```
+
+Reading does not synchronously call SEO as a hidden correctness fallback.
+
+---
+
+## 13. Media Enrichment Consistency
+
+Media owns public media truth.
+
+Reading may consume media presentation snapshots into optional fields such as:
+
+```text
+CoverMediaPublicId
+CoverMediaUrl
+CoverAlt
+MediaSourceVersion
+```
+
+Rules:
+
+```text
+Media projection updates must not change article visibility.
+Media lag must not block safely public article content.
+Older MediaSourceVersion must not overwrite newer presentation state.
+```
+
+Safe degradation:
+
+```text
+Missing media snapshot
+    -> return null/omitted media fields.
+
+Delayed media snapshot
+    -> return last-known or absent media fields according to API contract.
+```
+
+---
+
+## 14. Interaction Counter Consistency
+
+Interaction owns:
+
+```text
+ArticleViewCount
+ArticleLike truth
+Comment truth
+ArticleInteractionStats
+```
+
+Reading consumes:
+
+```text
+interaction.article_counters_projection_published
+```
+
+### Snapshot payload
+
+```text
+ArticlePublicId
+ViewCount
+LikeCount
+VisibleCommentCount
+StatsVersion
+OccurredAtUtc
+```
+
+### Reading apply rule
+
+```text
+If IncomingStatsVersion > CurrentInteractionStatsVersion:
+    ViewCount = Incoming.ViewCount
+    LikeCount = Incoming.LikeCount
+    VisibleCommentCount = Incoming.VisibleCommentCount
+    InteractionStatsVersion = Incoming.StatsVersion
+Else:
+    ignore duplicate or stale snapshot
+```
+
+### Counter guarantees
+
+```text
+Counters are derived enrichment.
+Counters may lag.
+Counters may be missing before first snapshot.
+Counters do not determine article visibility.
+Counters must not be incremented blindly by Reading.
+```
+
+### Safe response behavior
+
+When no Interaction snapshot has been applied:
+
+```text
+Return zero/default counters according to public response contract.
+```
+
+When an older snapshot is available:
+
+```text
+Return last-known counters.
+```
+
+Reading must not synchronously query Interaction for fresher values during ordinary public requests.
+
+---
+
+## 15. View Tracking Consistency
+
+Reading does not own view acceptance or view persistence.
+
+Runtime flow:
+
+```text
+Reading returns public article detail
+    -> Client separately sends view contribution to Interaction
+    -> Interaction applies eligibility and abuse policy
+    -> Interaction durably updates ArticleViewCount when accepted
+    -> Interaction eventually publishes a newer counter snapshot
+    -> Reading eventually applies that snapshot
+```
+
+Rules:
+
+```text
+Article read success does not depend on view recording success.
+
+Reading does not consume one raw event per view.
+
+Client retry or Interaction suppression does not alter Reading visibility.
+
+Counter freshness is eventually consistent.
+```
+
+---
+
+## 16. Public Read Idempotency
+
+Public GET endpoints are naturally idempotent:
 
 ```text
 GET /api/v1/articles
@@ -312,381 +651,341 @@ GET /api/v1/articles/search
 GET /api/v1/articles/{articlePublicId}/related
 ```
 
-A repeated read may return a newer projection if Reading has caught up between requests.
+Repeated reads:
 
-This is acceptable.
+```text
+Must not mutate upstream truth.
+May return newer local projection data if consumers have applied newer snapshots between requests.
+```
+
+This change in returned freshness is expected and correct.
+
+View contribution is separate from the Reading GET response path.
 
 ---
 
-## 11) Public visibility consistency
+## 17. Projection Lag and Safe Degradation
 
-Reading must fail closed for public visibility.
+Projection lag is expected in V1.
 
-Public APIs must not expose:
+### Core projection lag
 
-* draft articles
-* unpublished articles
-* archived articles
-* soft-deleted articles
-* visibility-uncertain articles
+| Missing / unsafe state | Result |
+|---|---|
+| `ArticleReadModel` missing | Safe 404 / omission |
+| Article locally non-public | Safe 404 / omission |
+| Article visibility marked unsafe | Safe 404 / omission |
+| `ArticleSeoRouteProjection` missing for slug request | Safe 404 |
+| Route inactive | Safe 404 |
+| Route `RequiresResync = true` | Safe 404 |
 
-Public visibility requires:
+### Optional enrichment lag
 
-* source-derived status is `Published`
-* projection `IsPublic = true`
-* article is not archived
-* article is not soft-deleted
-* SEO route resolution returns an active public route if accessed by slug
-* visibility is not uncertain
+| Missing / stale enrichment | Result |
+|---|---|
+| Interaction counters missing | Zero/default counters |
+| Interaction counters delayed | Last-known counters |
+| Cover media missing | Null/omitted cover |
+| Related content delayed | Empty/deterministic fallback |
 
-If visibility is uncertain:
+Principle:
 
 ```text
-Unknown visibility => not public.
-Safe 404 is preferred over incorrect public exposure.
+Core visibility and route uncertainty fails closed.
+
+Optional enrichment lag degrades safely.
 ```
 
 ---
 
-## 12) Projection lag behavior
-
-Projection lag is expected.
-
-### After publish
-
-If Content has published an article but Reading projection has not caught up yet:
-
-* article may be missing from list
-* detail by slug/public id may return safe `404`
-* search may not include the article yet
-
-This lag is acceptable within SLO and must be observable.
-
-### After unpublish/archive/soft-delete
-
-If source truth has hidden an article but Reading projection has not caught up yet:
-
-* visibility-sensitive stale exposure is not acceptable where detected
-* if projection freshness policy marks visibility as uncertain, Reading must fail closed
-* repair/reconciliation must correct projection drift
-
----
-
-## 13) Optional enrichment consistency
-
-The following are allowed to be eventually consistent:
-
-* counters
-* cover media
-* media gallery
-* optional projected SEO metadata
-* related article signals
-* popularity/trending signals
-* summaries
-
-Slug routing for slug-based reads is handled by explicit SEO route resolution in baseline V1; projected slug fields in Reading are optional optimization data.
-
-If optional enrichments are missing, stale, or unavailable, Reading may:
-
-* omit them
-* return null
-* return empty arrays
-* return safe defaults
-* return stale non-sensitive values where policy allows
-
-Optional enrichment failure must not make visibility permissive.
-
----
-
-## 14) Counter consistency
-
-Counters are derived and may lag.
-
-Examples:
-
-* views
-* likes
-* comments
-
-Reading must not blindly increment counters under at-least-once delivery.
-
-Disallowed pattern:
-
-```text
-On every delivered view event:
-    ViewCount = ViewCount + 1
-```
-
-Preferred patterns:
-
-```text
-Set ViewCount to known aggregate value.
-```
-
-or:
-
-```text
-Deduplicate raw interaction event before incrementing.
-```
-
-For V1, Reading should prefer absolute counter updates or default counters until Interaction counter projection is designed.
-
-Counter truth belongs to Interaction.
-
----
-
-## 15) View tracking consistency
-
-Reading does not expose interaction write endpoints in V1.
-
-Recommended flow:
-
-```text
-Reading returns article detail
-    ↓
-Client sends view signal to Interaction
-    ↓
-Interaction handles dedupe, counting, abuse controls, and aggregation
-```
-
-Rules:
-
-* Reading success does not depend on view tracking success
-* view signal failure does not change article visibility
-* duplicate view signals must be tolerated by Interaction
-* Reading counters may lag behind Interaction
-
----
-
-## 16) Cache consistency
+## 18. Cache Consistency
 
 Cache is acceleration only.
 
-Cache must not become hidden truth.
+Cache must not become hidden source truth or hidden upstream fallback.
 
 Rules:
 
-* cache hit must not bypass source-derived visibility
-* stale cache must not expose unpublished, archived, or soft-deleted content
-* cache refresh must be harmless under duplicate requests/signals
-* cache refresh failure must not break a safe projection-backed response
-* cache data must not override Reading projection visibility
-
-If cache conflicts with projection visibility:
-
 ```text
-Projection visibility wins.
+Cache stores responses or projection-derived data only according to cache policy.
+
+Cache must not bypass local Reading visibility checks.
+
+Cache must not cause a locally denied or unsafe article/route to be served.
+
+Cache must not query upstream modules implicitly on miss.
+
+Cached media/counters may lag according to optional-enrichment policy.
 ```
 
-If projection visibility is uncertain:
+Conflict rule:
 
 ```text
-Fail closed unless explicit fallback confirms visibility safely.
+Reading local deny/unsafe state wins over cached public response.
 ```
+
+When local projection state itself has not yet consumed an upstream visibility/route change, the same bounded eventual-consistency limitation applies and must be monitored.
 
 ---
 
-## 17) Transaction boundary
+## 19. Consumer Transaction Boundary
 
-Reading projection updates use bounded local transactions.
+Reading projection apply uses bounded local transactions.
 
-A Reading projection transaction may update:
+A consumer apply transaction may update:
 
-* projection fields
-* `SourceVersion`
-* `LastEventMessageId`
-* `LastSourceOccurredAtUtc`
-* `LastSyncedAtUtc`
+```text
+Reading projection row
+Source-specific version metadata
+Source message metadata
+Consumed-message / apply-decision state
+Local diagnostics fields
+```
 
-It must not update source module truth.
+It must not update:
 
-It must not open long-running cross-module transactions.
+```text
+Content truth
+SEO truth
+Media truth
+Interaction truth
+Notification truth
+Audit truth
+```
 
-Source modules must not wait for Reading projection completion as part of their truth transactions.
+Conceptual consumer transaction:
+
+```text
+Begin Reading local transaction
+    -> Reserve MessageId for ConsumerName
+    -> Compare source-specific version
+    -> Apply newer snapshot or record stale decision
+    -> Complete consumed-message apply metadata
+Commit
+```
+
+If processing cannot complete safely:
+
+```text
+Rollback or mark failure according to consumer policy.
+Retry / resync / repair as required.
+```
+
+Source producers do not wait for Reading projection completion as part of their own truth transaction.
 
 ---
 
-## 18) Producer-side vs consumer-side failure
-
-Reading distinguishes producer-side and consumer-side failures.
+## 20. Producer-Side vs Consumer-Side Failure
 
 ### Producer-side failure
 
 Examples:
 
-* outbox publication is delayed
-* outbox publisher cannot publish to RabbitMQ
-* message is not yet handed off to the broker
+```text
+Content/SEO/Media/Interaction truth committed but Outbox publish is delayed.
+Outbox publisher cannot hand message to RabbitMQ yet.
+```
 
-This is not a Reading consumer failure.
+These are upstream publication/delivery issues, not Reading apply failures.
 
-### Consumer-side failure
+### Reading consumer-side failure
 
 Examples:
 
-* Reading receives event but cannot apply projection
-* Reading repository is unavailable
-* version conflict or stale event is detected
-* projection update fails transiently
+```text
+Reading receives message but cannot update projection.
+Reading database is temporarily unavailable.
+Reading detects stale or unsafe source input.
+Reading detects a version gap requiring resync.
+```
 
-This belongs to Reading consumer/retry/recovery behavior.
+These belong to Reading consumer retry, apply-decision and repair handling.
 
-These must be logged and measured separately.
-
----
-
-## 19) Rebuild and reconciliation posture
-
-`ArticleReadModel` is derived state.
-
-It must have a documented recovery path.
-
-Approved recovery strategies:
-
-* rebuild from Content truth
-* resolve/reconcile optional projected slug and metadata from SEO truth
-* rebuild from Media truth
-* rebuild/reconcile counters from Interaction
-* bounded recomputation
-* replay from retained operational history where policy allows
-
-RabbitMQ is not the permanent replay source.
-
-Production rebuild should avoid exposing partial output as complete.
-
-Candidate-before-cutover or equivalent safe publication is preferred for full rebuilds.
+Metrics and logs must distinguish producer publication lag from Reading consumer apply lag.
 
 ---
 
-## 20) Rerun safety
-
-Important rebuild/reconciliation workflows must be safe to rerun on the same bounded input.
-
-Rerun must not:
-
-* duplicate articles
-* double-count counters
-* expose non-public content
-* overwrite newer projection state with older data
-* publish partial candidate output as complete
-
----
-
-## 21) Coordination and ownership posture
-
-Reading should not depend on global singleton assumptions by default.
-
-Correctness should come from:
-
-* source-derived projection state
-* version-aware apply
-* idempotent upsert
-* safe cache behavior
-* rerun-safe rebuild/reconciliation
-
-If a future rebuild or repair workflow requires exclusive ownership, it must define:
-
-* ownership source of truth
-* monotonic generation/fencing token
-* resource-side rejection of stale owner actions
-
-Safe non-progress is preferred over unsafe dual publication or unsafe repair.
-
----
-
-## 22) Timeout and ambiguity
+## 21. Timeout and Ambiguity
 
 Timeouts are ambiguous.
 
 A timeout does not prove:
 
-* a source event was not published
-* a projection update did not apply
-* an article does not exist
-* SEO route resolution did not complete or did not map the slug
-* a media/counter enrichment is absent
+```text
+A projection event was not published.
+A Reading consumer apply did not commit.
+An article does not exist in source truth.
+A slug route does not exist in SEO truth.
+An Interaction counter snapshot is absent at source.
+```
 
-Reading must handle ambiguity through:
+Public request behavior remains local-projection based:
 
-* bounded retry where safe
-* safe degradation
-* fail-closed visibility
-* explicit fallback policy
-* rebuild/reconciliation
+```text
+No safe local public article/route projection
+    -> safe deny / 404.
 
----
+Optional media/counter enrichment missing
+    -> degrade safely.
+```
 
-## 23) Safe non-progress rule
+Consumer/rebuild behavior handles ambiguity through:
 
-When Reading cannot establish safe forward progress, it must prefer:
+```text
+Bounded retry
+Message dedupe
+Version-aware apply
+Resync
+Repair
+Rebuild
+Operator investigation
+```
 
-* no-op
-* reject
-* retry
-* defer
-* resync
-* rebuild
-* operator-controlled remediation
-
-over applying a possibly wrong effect.
-
-This applies especially to:
-
-* public visibility
-* slug routing
-* stale projection writes
-* rebuild/cutover
-* counter exactness
+Reading must not introduce synchronous upstream calls in the public hot path to resolve timeout ambiguity.
 
 ---
 
-## 24) Observability signals
+## 22. Reconciliation and Rebuild
 
-Reading should expose or log:
+Reading projections must have recovery paths.
 
-* projection apply count
-* projection apply failure count
-* duplicate message count
-* stale version reject count
-* version gap detected count
-* projection lag / freshness age
-* rebuild/reconciliation count
-* rebuild/reconciliation failure count
-* fallback count
-* degraded response count
-* omitted enrichment count
-* cache hit/miss count
-* visibility uncertain count
+| Reading state | Approved recovery input |
+|---|---|
+| Article core and visibility | Content-owned projection/rebuild input |
+| Slug route and SEO metadata | SEO-owned projection/rebuild input |
+| Media enrichment | Media-owned presentation input |
+| Interaction counters | Interaction-owned stats snapshot/reconciliation input |
 
-Logs should include:
+Rules:
 
-* `MessageId`
-* `EventType`
-* `AggregateId`
-* `IncomingVersion`
-* `CurrentSourceVersion`
-* `CorrelationId`
-* apply decision
-* failure/reject reason
+```text
+Reading rebuild updates Reading-owned projections only.
+
+Reading must not recalculate Interaction truth.
+
+RabbitMQ is transport, not permanent replay storage.
+
+Rebuild must preserve source-specific freshness semantics.
+
+Full rebuild must not expose incomplete candidate state as fully current serving state.
+```
+
+### Rerun safety
+
+Repair/rebuild rerun must not:
+
+```text
+Duplicate article projections
+Reactivate stale routes
+Double-count counters
+Expose locally known non-public content
+Overwrite newer projected state with older source input
+Publish partial candidate output as complete
+```
 
 ---
 
-## 25) Summary
+## 23. Safe Non-Progress Rule
+
+When Reading cannot prove that applying or serving state is safe, it must prefer:
+
+```text
+Ignore stale input
+Reject unsafe input
+Fail closed
+Retry
+Resync
+Repair
+Rebuild
+Require operator intervention
+```
+
+over:
+
+```text
+Applying uncertain projection changes
+Serving locally known unsafe content
+Inventing missing enrichment values beyond documented defaults
+Synchronously coupling to source modules as an undocumented fallback
+```
+
+---
+
+## 24. Observability Signals
+
+Reading should expose or log metrics for:
+
+```text
+Projection apply count by source lane and event type
+Projection apply failure count
+Duplicate message count
+Stale version ignore count
+Version gap / resync-required count
+Content projection lag
+SEO route projection lag
+Media enrichment lag
+Interaction counter snapshot lag
+Visibility deny / unsafe deny count
+Route missing / inactive / unsafe deny count
+Counter defaulted / last-known response count
+Repair and rebuild execution count
+Repair and rebuild failure count
+Cache hit / miss / invalidation count
+```
+
+Apply-decision logs should include:
+
+```text
+ConsumerName
+MessageId
+EventType
+SourceLane
+AggregateId / ArticlePublicId
+IncomingVersion
+CurrentAppliedVersion
+ApplyDecision
+CorrelationId
+OccurredAtUtc
+ReceivedAtUtc
+ProcessedAtUtc
+FailureCode where applicable
+```
+
+---
+
+## 25. Non-Goals
+
+Reading V1 does not provide:
+
+```text
+Synchronous SEO slug resolution on the public read path
+Synchronous Content visibility verification on ordinary public requests
+Synchronous Interaction counter fallback
+Raw view-event processing
+Blind counter increment processing
+Reading-owned engagement truth
+Reading-owned moderation truth
+Popularity/trending ranking without a separately designed projection contract
+Instant global consistency after upstream source commits
+```
+
+---
+
+## 26. Summary
 
 Reading consistency in V1 rests on these rules:
 
-* Reading is a derived public read projection module.
-* Source modules own truth; Reading owns projection.
-* Normal list/detail/search/related paths read from Reading projection; slug-based reads resolve route through SEO before loading Reading projection.
-* Delivery is at-least-once; handlers must be idempotent.
-* `MessageId` protects duplicate delivery.
-* `SourceVersion` protects stale overwrite.
-* Timestamps are not freshness authority.
-* Public visibility fails closed.
-* Optional enrichments may lag or degrade.
-* Counters must not increment blindly under replay.
-* Cache is acceleration only, not hidden truth.
-* Source modules do not wait for Reading projection completion.
-* RabbitMQ is delivery infrastructure, not permanent replay history.
-* Rebuild/reconciliation is required for important derived outputs.
-* Safe non-progress beats unsafe stale apply.
+1. Reading serves public requests from Reading-owned asynchronous projections only.
+2. Content owns article visibility truth; Reading applies Content projection snapshots locally.
+3. SEO owns canonical route truth; Reading serves slug requests from `ArticleSeoRouteProjection`.
+4. Media enrichment is optional and may lag safely.
+5. Interaction owns counter truth; Reading applies `interaction.article_counters_projection_published` by `StatsVersion`.
+6. Every source lane uses an independent version marker.
+7. `MessageId` protects duplicate processing; source-specific version protects stale overwrite.
+8. Reading applies known-value snapshots, not blind counter deltas.
+9. Visibility and route state fail closed once local state is missing, denied or unsafe.
+10. Because propagation is asynchronous, a bounded lag may exist before Reading learns upstream visibility or route changes; that lag must be monitored and repaired.
+11. Cache accelerates Reading-owned state only and never overrides local deny/unsafe state.
+12. Repair and rebuild update Reading projections only; upstream modules retain truth ownership.
+13. RabbitMQ is transport, not permanent replay history.
+14. Safe non-progress is preferred over unsafe stale apply or hidden synchronous coupling.

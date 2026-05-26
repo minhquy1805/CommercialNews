@@ -1,476 +1,714 @@
-# Reading — Open Questions & ADR Hooks (V1)
+# Reading — Open Questions & ADR Hooks (V1 Async Projections)
 
 ## Purpose
 
-This document tracks Reading-specific open questions, deferred decisions, and future ADR hooks.
+This document tracks Reading-specific deferred decisions and future ADR hooks.
 
-Reading V1 is a derived public read projection module.
+It does not reopen decisions already accepted for Reading V1.
 
-Open questions must preserve the following accepted constraints:
-
-- Reading does not own article truth.
-- Content owns publication and editorial truth.
-- SEO owns slug and canonical routing truth.
-- Media owns media truth.
-- Interaction owns engagement truth.
-- Reading owns public serving projections.
-- Reading follows source truth asynchronously.
-- Reading must fail closed when public visibility is uncertain.
-- Reading projection must remain idempotent, version-aware, and rebuildable.
+Reading V1 is a fully asynchronous public serving module built from Reading-owned projections.
 
 ---
 
-## ADR-01: Popularity definition
+## 1. Accepted V1 Constraints
 
-Questions:
+The following decisions are already accepted and are not open questions:
 
-- Should popularity be based on views, likes, comments, shares, reading time, or a blended score?
-- Should popularity use lifetime counters or a time window?
-- Should popularity decay over time?
-- Should bot-filtered interaction data be required?
-- Should popularity be computed by Interaction, Reading, or a separate analytics workflow?
+```text
+Reading does not own article truth.
 
-Current V1 decision:
+Content owns article lifecycle, editorial and publication truth.
 
-- `popularity` is allowed as a sort option, but it is derived and may lag.
-- Popularity must not affect public visibility.
-- If popularity data is unavailable, Reading may fall back to `publishedAt` sorting according to policy.
+SEO owns canonical slug, route and metadata truth.
 
-Future ADR should define:
+Media owns media asset and presentation truth.
 
-- scoring formula
-- source input ownership
-- windowing semantics
-- event-time vs processing-time behavior
-- bot/abuse filtering dependency
-- rebuild/reconciliation strategy
+Interaction owns engagement and public counter truth.
 
----
+Reading owns public serving projections and public response composition.
 
-## ADR-02: Slug routing and canonical behavior
+Reading serves ordinary public requests from Reading-owned projections only.
 
-Questions:
+Slug-based public detail uses Reading.ArticleSeoRouteProjection,
+not synchronous SEO route resolution.
 
-- Should `GET /articles/slug/{slug}` be the preferred public website route?
-- Should clients ever call SEO `/resolve` directly, or should Reading hide SEO resolution behind its public API?
-- Should Reading ever use projected slug lookup as an optimization?
-- How should canonical redirects be handled?
-- Should old slugs redirect or return safe `404`?
-- If SEO route resolution is unavailable, should slug-based reads fail safe `404`, return `503`, or use a documented fallback?
+Interaction publishes versioned known-value counter snapshots consumed by Reading.
 
-Current V1 decision:
+Reading does not consume raw view events or blindly increment counters.
 
-- Reading exposes `GET /articles/slug/{slug}` as the preferred public detail route for website clients.
-- Baseline V1 slug-based reads resolve route through SEO first.
-- SEO owns `Scope + Slug -> ResourcePublicId` routing truth.
-- Reading uses SEO `ResourcePublicId` to load `ArticleReadModel`.
-- SEO `/resolve` is an explicit hot-path dependency for slug routing, not a fallback.
-- Projected slug lookup inside Reading is optional future optimization only.
-- A slug match or route resolve is not serve authority; Reading visibility must still pass.
+Each source lane uses its own version marker.
 
-Future ADR should define:
+Core route or visibility uncertainty fails closed locally.
 
-- canonical redirect response behavior
-- old slug retention
-- slug conflict handling
-- redirect cache rules
-- SEO route resolve timeout/fallback policy
-- direct projected-slug optimization policy
-- route-level observability
+Optional media/counter lag degrades safely.
+
+Bounded eventual-consistency lag before Reading receives an upstream change is accepted in V1.
+
+RabbitMQ is transport, not permanent replay storage.
+```
 
 ---
 
-## ADR-03: Search capability
+## ADR-01: Popularity and Trending Pipeline
 
-Questions:
+### Status
 
-- Is V1 search limited to basic keyword search against Reading projection?
-- Should search be implemented with SQL `LIKE`, SQL Server full-text search, external search, or managed search later?
-- Should search support tags, categories, author filters, and date filters?
-- Should search support relevance ranking?
-- Should search index rebuild be candidate-before-cutover?
+```text
+Deferred beyond V1.
+```
 
-Current V1 decision:
+### Current V1 Decision
 
-- V1 search may start as basic keyword search.
-- Search must only return publicly visible content.
-- Search/materialized query outputs are derived and may lag.
-- Stale search output must not expose non-public content.
+Reading V1 does not expose popularity/trending as an established sort pipeline.
 
-Future ADR should define:
+Baseline sort options are limited to publication-time ordering:
 
-- search backend
-- indexing strategy
-- relevance model
-- rebuild/reindex workflow
-- query abuse limits
-- fallback behavior when search backend is unavailable
+```text
+-publishedAt
+publishedAt
+```
 
----
+Interaction counters may be displayed as enrichment, but they do not establish a ranking contract.
 
-## ADR-04: Caching policy for Reading
+### Questions for a Future ADR
 
-Questions:
+- Should popularity be based on views, likes, visible comments, shares, reading time or a blended score?
+- Should ranking use lifetime values or bounded time windows?
+- Should score decay over time?
+- Should abuse-filtered or bot-filtered signals be required?
+- Should ranking be produced by Interaction, Reading or a separate analytics pipeline?
+- What event-time, lateness, rebuild and cutover policy is required?
 
-- Should Reading cache list responses, detail responses, slug detail, search, or related articles?
-- What TTL should each route group use?
-- Should cache invalidation be event-driven, TTL-based, or both?
-- Should cache entries include projection version or freshness markers?
-- How should cache behave during projection lag or rebuild?
+### Required Preservation Rule
 
-Current V1 decision:
-
-- Cache is acceleration only.
-- Cache must not become hidden truth.
-- Cache hit must not bypass Reading projection visibility.
-- Stale cache must not expose unpublished, archived, soft-deleted, or visibility-uncertain content.
-- Cache refresh failure must not break a safe projection-backed response.
-
-Future ADR should define:
-
-- route-level cache TTLs
-- cache key structure
-- invalidation triggers
-- cache stampede protection
-- stale-while-revalidate policy if any
-- canary/cache rollout guardrails
-
-Potential invalidation inputs:
-
-- `content.article_published`
-- `content.article_updated`
-- `content.article_unpublished`
-- `content.article_archived`
-- `content.article_soft_deleted`
-- optional future SEO events such as:
-  - `seo.slug_route_changed`
-  - `seo.metadata_updated`
-- optional Media events such as:
-  - `media.article_primary_media_changed`
-- optional Interaction events such as:
-  - `interaction.article_counters_updated`
+```text
+Popularity or trending must never override public visibility rules.
+```
 
 ---
 
-## ADR-05: Counter inclusion policy
+## ADR-02: Canonical Redirect and Historical Slug Behavior
 
-Questions:
+### Status
 
-- Should list/detail responses always include counters?
-- Should missing counters be returned as `0`, `null`, omitted, or marked partial?
-- Should Reading expose `countersPartial`?
-- Should counters be absolute aggregate updates or event-based increments?
-- Should counter freshness be visible to clients?
+```text
+Partially decided; redirect behavior remains open.
+```
 
-Current V1 decision:
+### Current V1 Decision
 
-- Counters are optional derived enrichments.
-- Counters may lag.
-- Counter truth belongs to Interaction.
-- Reading must not blindly increment counters under replay.
-- Preferred update shape is set-to-known aggregate value.
+Reading exposes public article detail by slug through local async projection state:
 
-Future ADR should define:
+```text
+GET /api/v1/articles/slug/{slug}
+    -> Reading queries ArticleSeoRouteProjection
+    -> Reading loads ArticleReadModel by ArticlePublicId
+    -> Reading validates local route safety and public visibility
+    -> Response or safe 404
+```
 
-- response shape
-- freshness indicators
-- counter source of truth
-- counter rebuild/reconciliation strategy
-- bot-filtering implications
-- exactness requirements
+Accepted rules:
 
----
+```text
+SEO owns canonical routing truth.
 
-## ADR-06: Reading projection source event shape
+Reading consumes SEO route/metadata projection asynchronously.
 
-Questions:
+Reading does not call SEO synchronously in the ordinary slug hot path.
 
-- Should Content events be snapshot events or delta events?
-- Which fields must be included in `content.article_published`?
-- Which fields must be included in `content.article_updated`?
-- Should Media/Interaction events, if adopted, carry full projection fields or only ids requiring later lookup?
-- If SEO emits route/metadata events in the future, should Reading consume them for projected SEO fields or keep SEO resolve as the only routing authority?
-- What event schema versioning strategy should be used?
+Missing, inactive or RequiresResync route state fails closed locally.
 
-Current V1 decision:
+Route success does not itself grant public visibility.
+```
 
-- Reading projection apply must be idempotent and version-aware.
-- Important events should carry `MessageId`, `EventType`, `AggregateId`, `Version`, `OccurredAtUtc`, and `CorrelationId`.
-- Snapshot-like events are easier for Reading projection apply.
-- Delta-like events require stricter ordering or resync behavior.
-- Baseline V1 Reading does not depend on SEO-emitted events.
-- Slug correctness comes from explicit SEO route resolution.
+### Questions for a Future ADR
 
-Future ADR should define:
-
-- exact event payload contracts
-- snapshot vs delta trade-off
-- schema versioning
-- backward compatibility
-- resync behavior for missing fields
+- Should previous slugs redirect to the current canonical slug or return `404`?
+- What response code should canonical redirects use?
+- How long are historical routes retained?
+- How should redirect chains be prevented?
+- Should route projection include redirect targets explicitly?
+- How should route cache invalidation work after slug changes?
+- What route-lag SLO is required for newly published or deactivated routes?
 
 ---
 
-## ADR-07: Processed message tracking strategy
+## ADR-03: Search Capability
 
-Questions:
+### Status
 
-- Is `SourceVersion + LastEventMessageId` sufficient for Reading V1?
-- Do we need a durable processed-message table?
-- Do different source modules need separate freshness markers?
-- Should Reading track `ContentSourceVersion`, `SeoSourceVersion`, `MediaSourceVersion`, and `InteractionSourceVersion` separately?
+```text
+Open for implementation design.
+```
 
-Current V1 decision:
+### Current V1 Decision
 
-- `MessageId` protects against duplicate message delivery.
-- `SourceVersion` protects against stale overwrite.
-- Message-level dedupe alone is not enough.
-- Stale event rejection must be version-based, not timestamp-based.
+Search, when implemented, reads from Reading-owned public projection state only.
 
-Possible V1 implementation:
+Rules:
 
-- start with `SourceVersion` for Content article events
-- store `LastEventMessageId` for traceability
-- add durable processed-message tracking if duplicate harmful effects or multi-source replay require it
+```text
+Search must return only safely public articles.
 
-Future ADR should define:
+Search output is derived and may lag.
 
-- processed-message table need
-- source-specific version fields
-- dedupe retention
-- replay behavior
-- storage/indexing strategy
+Search must not synchronously query Content or SEO during ordinary requests.
 
----
+Stale or incomplete search state must not expose locally known non-public content.
+```
 
-## ADR-08: Version gap and resync behavior
+### Questions for a Future ADR
 
-Questions:
-
-- Should Reading require strict `IncomingVersion == CurrentSourceVersion + 1`?
-- Or should Reading allow `IncomingVersion > CurrentSourceVersion` for snapshot events?
-- What happens when Reading detects a version gap?
-- Should the consumer defer, retry, rebuild, or resync from source truth?
-
-Current V1 decision:
-
-- For snapshot-like events, `IncomingVersion > CurrentSourceVersion` may be acceptable.
-- For delta-like events, strict sequencing or resync is required.
-- Timestamp order must not be used as freshness authority.
-
-Future ADR should define:
-
-- strict vs loose version apply policy
-- gap detection threshold
-- resync workflow
-- dead-letter behavior
-- operational alerts
+- Should V1 start with SQL keyword search against Reading projection?
+- Should SQL Server full-text search be used?
+- Should an external search backend be introduced later?
+- Which filters are required: category, tag, author, date?
+- Is relevance scoring required?
+- Should search index rebuild use candidate-before-cutover?
+- What query abuse and rate-limiting controls are required?
 
 ---
 
-## ADR-09: Reading rebuild strategy
+## ADR-04: Reading Cache Policy
 
-Questions:
+### Status
+
+```text
+Cache posture decided; operational policy remains open.
+```
+
+### Current V1 Decision
+
+```text
+Cache is acceleration only.
+
+Cache stores Reading-derived serving data, not upstream truth.
+
+Cache must not bypass local route or visibility checks.
+
+Locally known deny/unsafe state wins over cached public output.
+
+Cache misses do not trigger implicit synchronous calls to source modules.
+```
+
+### Candidate Invalidation Inputs
+
+```text
+Content projection applied:
+    published / updated / unpublished / archived / soft-deleted state
+
+SEO route projection applied:
+    route activated / changed / deactivated / marked unsafe
+
+Media projection applied:
+    public cover or media presentation changed
+
+Interaction projection applied:
+    interaction.article_counters_projection_published
+```
+
+### Questions for a Future ADR
+
+- Which endpoints are cacheable: list, detail, slug detail, search or related?
+- What TTL applies to each response type?
+- Is invalidation event-driven, TTL-based or both?
+- Should cache keys include projection versions?
+- Is stale-while-revalidate allowed for optional enrichments?
+- How should cache stampede protection work?
+- Should visibility/route denial invalidate public cache entries immediately?
+
+---
+
+## ADR-05: Counter Response Contract
+
+### Status
+
+```text
+Projection source decided; response shape remains open.
+```
+
+### Current V1 Decision
+
+Interaction owns public counter truth and publishes:
+
+```text
+interaction.article_counters_projection_published
+```
+
+Reading consumes known-value snapshots containing:
+
+```text
+ArticlePublicId
+ViewCount
+LikeCount
+VisibleCommentCount
+StatsVersion
+OccurredAtUtc
+```
+
+Reading applies counters only when:
+
+```text
+IncomingStatsVersion > CurrentInteractionStatsVersion
+```
+
+Reading does not:
+
+```text
+Consume raw individual view events.
+Blindly increment counters from message delivery.
+Synchronously query Interaction in public read requests.
+Use counters as article visibility authority.
+```
+
+### Questions for a Future ADR
+
+- Should public list responses include counters?
+- Should public detail responses always include counters?
+- Before the first snapshot arrives, should counters return `0`, `null` or be omitted?
+- Should APIs expose `countersPartial`, `countersStale` or freshness metadata?
+- What publication/coalescing frequency should Interaction use for view-heavy updates?
+- What lag SLO is acceptable for displayed counters?
+
+---
+
+## ADR-06: Exact Source Projection Event Contracts
+
+### Status
+
+```text
+Direction decided; exact payload schemas remain open.
+```
+
+### Current V1 Decision
+
+Reading consumes snapshot-shaped asynchronous projection input from:
+
+| Producer | Reading projection impact |
+|---|---|
+| Content | `ArticleReadModel` core article and visibility fields |
+| SEO | `ArticleSeoRouteProjection` route and metadata fields |
+| Media | Optional public media presentation fields |
+| Interaction | Public counter snapshot fields |
+
+Interaction event type already adopted:
+
+```text
+interaction.article_counters_projection_published
+```
+
+General event rules:
+
+```text
+Messages must carry MessageId, EventType, source identity,
+source-specific version, OccurredAtUtc and CorrelationId where available.
+
+Snapshot-shaped messages are preferred.
+
+Delta-shaped messages require explicit ordering or resync policy.
+```
+
+### Questions for a Future ADR or Contract Document
+
+- What are the final Content → Reading event names and payloads?
+- What is the final SEO → Reading route projection event name and payload?
+- What is the final Media → Reading public presentation event name and payload?
+- Which schema-versioning strategy is used?
+- Which fields are required versus nullable?
+- How are backward-compatible event changes introduced?
+- How are resync-required messages represented?
+
+---
+
+## ADR-07: Reading Consumed-Message Persistence
+
+### Status
+
+```text
+Reliability requirement decided; physical persistence design remains open.
+```
+
+### Current V1 Decision
+
+Reading handlers require both:
+
+```text
+Message-level dedupe using MessageId and consumer identity.
+
+Projection-level freshness using independent source-lane versions.
+```
+
+Required version lanes:
+
+```text
+ContentSourceVersion
+SeoSourceVersion
+MediaSourceVersion
+InteractionStatsVersion
+```
+
+A single shared `SourceVersion` is not acceptable across all upstream modules.
+
+### Questions for Implementation Design
+
+- Should Reading have a durable table such as `ReadingConsumedMessage`?
+- What apply decisions should be recorded: Applied, DuplicateIgnored, StaleIgnored, ResyncRequired, Failed?
+- What retention period should consumed-message records use?
+- Should rebuild/reconciliation consumers use the same dedupe table?
+- What indexes are required for diagnostics and cleanup?
+
+---
+
+## ADR-08: Version Gap and Resync Behavior
+
+### Status
+
+```text
+Apply principle decided; operational response remains open.
+```
+
+### Current V1 Decision
+
+For known-value snapshot input:
+
+```text
+If IncomingVersion > CurrentAppliedVersion:
+    apply snapshot
+Else:
+    ignore duplicate or stale snapshot
+```
+
+Reading does not use timestamps as freshness authority.
+
+Unsafe/gapped projection state may require fail-closed behavior until repaired.
+
+### Questions for a Future ADR
+
+- Should any source lane require strict contiguous versions?
+- Which gaps are safe for snapshot replacement?
+- Which source lanes need a `RequiresResync` marker?
+- What causes automatic resync versus operator remediation?
+- How should consumer failure/DLQ behavior connect to repair?
+- What alerts should fire for persistent resync-required state?
+
+---
+
+## ADR-09: Reading Rebuild and Cutover Strategy
+
+### Status
+
+```text
+Rebuildability required; execution model remains open.
+```
+
+### Current V1 Decision
+
+Reading-owned projections must be repairable or rebuildable from source-approved inputs.
+
+Recovery sources:
+
+| Reading state | Recovery input owner |
+|---|---|
+| Article core and visibility | Content |
+| Slug route and SEO metadata | SEO |
+| Public media presentation | Media |
+| Interaction counters | Interaction |
+
+Rules:
+
+```text
+RabbitMQ is not permanent replay history.
+
+Repair updates Reading-owned derived state only.
+
+Full rebuild must not expose incomplete candidate output as complete serving state.
+```
+
+### Questions for a Future ADR
 
 - Should rebuild use direct idempotent upsert or candidate-before-cutover?
-- Should there be a `ReadingRebuildRun` table?
-- Should rebuild use generation/fencing tokens?
-- Should rebuild be full, partial, or scoped by bounded input?
-- What validation checks are required before cutover?
-
-Current V1 decision:
-
-- Reading projection is derived and rebuildable.
-- RabbitMQ is not the permanent replay source.
-- Rebuild input must be bounded.
-- Rebuild must be rerun-safe.
-- Partial candidate output must not be exposed as complete.
-
-Future ADR should define:
-
-- source input boundary
-- direct upsert vs candidate/cutover
-- rebuild ownership/fencing
-- validation checks
-- rollback behavior
-- operator controls
+- Should Reading introduce rebuild-run tables?
+- Are generation or fencing tokens needed for cutover?
+- Should rebuild be full, per-source-lane or per-article scoped?
+- What candidate validation rules apply before activation?
+- How should old projection state be retained or cleaned up?
 
 ---
 
-## ADR-10: Related articles strategy
+## ADR-10: Related Articles Strategy
 
-Questions:
+### Status
 
-- Should related articles be computed on request from projection fields?
-- Should related articles be precomputed as a derived projection?
-- Which signals should be used: category, tags, author, popularity, recency?
-- Should related output be deterministic?
-- How should related article projection be rebuilt?
+```text
+Open.
+```
 
-Current V1 decision:
+### Current V1 Decision
 
-- Related results must include only public articles.
-- Current article must be excluded.
-- Deterministic fallback is required.
-- Missing related signals should not block detail response.
+If related articles are exposed:
 
-Future ADR should define:
+```text
+Only safely public articles may appear.
 
-- on-demand vs precomputed related strategy
-- scoring formula
-- fallback order
-- cache policy
-- rebuild/reconciliation posture
+The current article must be excluded.
 
----
+Missing related state must not block article detail response.
 
-## ADR-11: Reading projection fallback policy
+A deterministic empty or fallback result is acceptable.
+```
 
-Questions:
+### Questions for a Future ADR
 
-- When may Reading fall back to source truth?
-- Which endpoints may use fallback?
-- Should fallback be allowed for list, detail, slug, search, and related?
-- Which fallback cases are distinct from the baseline SEO route resolve dependency?
-- What are the latency and dependency budgets?
-- How do we prevent fallback from becoming hidden normal ownership?
-
-Current V1 decision:
-
-- Normal list/detail-by-public-id/search/related paths should read from Reading projection.
-- Slug-based reads use SEO route resolution as part of the baseline hot path.
-- Source fallback beyond SEO route resolution is exceptional, explicit, and observable.
-- If visibility is uncertain and no safe fallback confirms it, Reading must fail closed.
-
-Future ADR should define:
-
-- allowed fallback cases
-- fallback target modules
-- timeout budgets
-- fallback metrics
-- disable/feature flag strategy
+- Should related articles be computed on request or precomputed?
+- Which signals should be used: category, tags, author, recency?
+- Should Interaction counters ever contribute after a ranking ADR exists?
+- How should deterministic tie-breaking work?
+- Should related responses be cached?
+- How should a related projection be repaired or rebuilt?
 
 ---
 
-## ADR-12: Public preview and draft access
+## ADR-11: Public Source Fallback Policy
 
-Questions:
+### Status
 
-- Should Reading ever support draft preview?
-- Should admin preview use Reading projection or Content truth?
-- How should preview URLs be authorized?
-- Should preview bypass public visibility rules?
+```text
+Normal hot-path fallback rejected for V1.
+```
 
-Current V1 decision:
+### Current V1 Decision
 
-- Public Reading endpoints do not serve drafts.
-- Draft/admin preview is out of scope for public Reading V1.
-- If preview is introduced, it must be explicitly authorized and separated from public Reading routes.
+Ordinary public reads use Reading-owned projections only:
 
-Future ADR should define:
+```text
+List / detail by id / search / related
+    -> Reading projections only.
 
-- preview API ownership
-- authorization model
-- tokenized preview URL policy
-- cache restrictions
-- audit requirements
+Detail by slug
+    -> Reading ArticleSeoRouteProjection
+    -> Reading ArticleReadModel.
+```
 
----
+Reading does not use synchronous fallback to:
 
-## ADR-13: Personalized Reading experience
+```text
+Content
+SEO
+Media
+Interaction
+```
 
-Questions:
+during normal public serving.
 
-- Should Reading support personalized recommendations?
-- Should responses vary by user identity?
-- How should privacy, consent, and authorization be handled?
-- How should personalized cache keys work?
-- What data may be used for personalization?
+Behavior when local required state is missing or unsafe:
 
-Current V1 decision:
+```text
+Missing/unsafe article visibility projection -> safe deny / 404.
 
-- Public Reading V1 remains anonymous-safe.
-- Personalized recommendations are deferred.
-- User-specific history must not be mixed into anonymous public responses without explicit policy.
+Missing/unsafe slug route projection -> safe deny / 404.
 
-Future ADR should define:
+Missing optional media/counter fields -> degrade safely.
+```
 
-- personalization ownership
-- privacy model
-- consent model
-- cache key strategy
-- interaction with Identity/Authorization
+### Future Reconsideration Hook
 
----
+A later ADR may explicitly introduce emergency or operator-controlled fallback only if it defines:
 
-## ADR-14: External search or recommendation services
-
-Questions:
-
-- Should Reading integrate with external search/recommendation services?
-- What happens when the external provider is unavailable?
-- What data can be sent externally?
-- How are indexes rebuilt?
-- How do we prevent external stale index from exposing hidden content?
-
-Current V1 decision:
-
-- No external search/recommendation dependency is required in V1.
-- If introduced, external indexes remain derived.
-- External index output must not override Reading visibility rules.
-
-Future ADR should define:
-
-- provider choice
-- privacy/data sharing policy
-- indexing/rebuild strategy
-- fallback behavior
-- stale-index safety
+- exact endpoints;
+- safety requirements;
+- dependency/time budgets;
+- observability;
+- disable controls;
+- proof that fallback does not become hidden ownership.
 
 ---
 
-## ADR-15: Projection freshness SLO
+## ADR-12: Public Preview and Draft Access
 
-Questions:
+### Status
 
-- What is the acceptable lag after publish?
-- What is the acceptable lag after unpublish/archive/soft-delete?
-- Should hide events have stricter freshness SLO than publish events?
-- What alerts should fire when projection lag exceeds threshold?
+```text
+Deferred.
+```
 
-Current V1 decision:
+### Current V1 Decision
 
-- Projection lag is expected.
-- Publish lag may temporarily hide new articles.
-- Hide/unpublish/archive lag is more sensitive because stale exposure is dangerous.
-- Visibility uncertainty must fail closed where detected.
+```text
+Public Reading routes do not serve drafts.
 
-Future ADR should define:
+Admin/editor preview is outside public Reading V1.
 
-- freshness targets
-- endpoint-specific behavior during lag
-- hide-event priority
-- alert thresholds
-- reconciliation trigger thresholds
+Preview must not be silently added to normal public visibility rules.
+```
+
+### Questions for a Future ADR
+
+- Which module owns preview query behavior?
+- Should preview read Content truth or a dedicated secured projection?
+- What authorization model is required?
+- Are signed/tokenized preview URLs permitted?
+- How is preview content excluded from public cache and search?
+- What audit rules apply?
 
 ---
 
-## Summary
+## ADR-13: Personalized Reading Experience
 
-Open questions that must be resolved before production-hardening:
+### Status
 
-1. Popularity formula and time window.
-2. Slug canonical redirect behavior and projected-slug optimization policy.
-3. Search backend and indexing strategy.
-4. Reading cache TTL and invalidation policy.
-5. Counter response and freshness policy.
-6. Exact source event payload shape.
-7. Processed-message tracking strategy.
-8. Version gap and resync behavior.
-9. Rebuild/cutover/fencing strategy.
-10. Related articles strategy.
-11. Source fallback policy beyond baseline SEO route resolution.
-12. Draft/admin preview boundary.
-13. Personalization boundary.
-14. External search/recommendation integration.
-15. Projection freshness SLO.
+```text
+Deferred.
+```
+
+### Current V1 Decision
+
+```text
+Public Reading V1 is anonymous-safe.
+
+User-specific recommendation or reading-history behavior is not included.
+```
+
+### Questions for a Future ADR
+
+- Should personalized recommendations be supported?
+- Which module owns recommendation truth/output?
+- Which Interaction signals may be used?
+- What privacy/consent model applies?
+- How do personalized responses affect caching?
+- How are anonymous and authenticated responses separated safely?
+
+---
+
+## ADR-14: External Search or Recommendation Services
+
+### Status
+
+```text
+Deferred.
+```
+
+### Current V1 Decision
+
+```text
+No external search or recommendation service is required in V1.
+
+Any later external index remains derived and subordinate
+to Reading local public visibility enforcement.
+```
+
+### Questions for a Future ADR
+
+- Which provider or technology should be used?
+- What source data may be sent externally?
+- How is external index deletion/deactivation synchronized?
+- How is hidden-content exposure prevented under stale external state?
+- What fallback applies when the provider is unavailable?
+- How is rebuild or reindex performed?
+
+---
+
+## ADR-15: Projection Freshness SLO
+
+### Status
+
+```text
+Required before production hardening.
+```
+
+### Current V1 Decision
+
+Projection propagation is asynchronous.
+
+Therefore:
+
+```text
+Newly public content may temporarily be absent from Reading.
+
+New or changed routes may temporarily be unavailable by slug.
+
+Upstream non-public or route-deactivation changes may remain unseen by Reading
+until corresponding snapshots are applied.
+
+Once local state is known non-public or unsafe, Reading must fail closed.
+
+Optional media/counter lag may degrade safely.
+```
+
+### Questions for a Future ADR
+
+- What is acceptable Content → Reading lag after publish?
+- What is acceptable Content → Reading lag after unpublish/archive/delete?
+- Should visibility-denying snapshots receive stricter priority/SLO?
+- What is acceptable SEO → Reading route activation/deactivation lag?
+- What is acceptable Interaction counter snapshot lag?
+- What metrics trigger reconciliation or operational alerts?
+- Should prolonged lag automatically mark local route/visibility state unsafe?
+
+---
+
+## ADR-16: Media Projection Adoption Boundary
+
+### Status
+
+```text
+Direction accepted; exact V1 scope to confirm.
+```
+
+### Current V1 Decision
+
+Media remains the owner of media lifecycle and article-media presentation truth.
+
+Reading may serve projected cover/media fields without synchronous Media calls.
+
+Rules:
+
+```text
+Media enrichment never determines article visibility.
+
+Missing media fields degrade safely.
+
+MediaSourceVersion is independent from Content, SEO and Interaction versions.
+```
+
+### Questions for Implementation
+
+- Is cover-only media projection required in initial Reading V1, or deferred?
+- What event name/payload does Media publish?
+- Does Reading store gallery state or cover state only initially?
+- What is the safe default when media has been removed but the new projection is delayed?
+
+---
+
+## Summary of Decisions Already Closed
+
+The following issues are no longer open for Reading V1:
+
+| Topic | Closed V1 decision |
+|---|---|
+| Public serving source | Reading-owned async projections only |
+| Slug lookup | Local `ArticleSeoRouteProjection`, not synchronous SEO resolve |
+| Interaction counters | Consume `interaction.article_counters_projection_published` |
+| Counter update behavior | Set known values by newer `StatsVersion`; no blind increments |
+| Version model | Independent version per source lane |
+| Public sync fallback | Not used in normal public hot path |
+| Popularity sort | Deferred beyond V1 |
+| Raw view analytics in Reading | Not owned by Reading V1 |
+| Core missing/unsafe local state | Fail closed locally |
+| Optional counter/media lag | Degrade safely |
+
+---
+
+## Open Items Before Production Hardening
+
+The remaining high-value decisions are:
+
+1. Final source projection event schemas for Content, SEO and Media.
+2. Reading consumed-message persistence and retention design.
+3. Version-gap and resync operational policy.
+4. Rebuild/cutover strategy.
+5. Cache TTL and invalidation policy.
+6. Counter API response/freshness exposure policy.
+7. Canonical redirect and historical slug behavior.
+8. Projection freshness SLOs, especially visibility denial and route deactivation.
+9. Search and related-content implementation strategy.
+10. Optional media projection scope for initial delivery.
