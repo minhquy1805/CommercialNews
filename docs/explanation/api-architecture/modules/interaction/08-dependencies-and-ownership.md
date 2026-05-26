@@ -42,7 +42,7 @@ Interaction V1 is responsible for:
 - local moderation action history;
 - asynchronous administrator-alert intent when a report case reaches escalation policy;
 - derived public counter snapshot publication for Reading;
-- consumer dedupe/apply state required by Interaction-owned async processing.
+- consumer dedupe/apply behavior required by Interaction-owned async processing.
 
 Interaction must remain independent from:
 
@@ -76,7 +76,6 @@ Interaction owns the following derived or processing records:
 | `ArticleInteractionTargetProjection` | Local Content-derived eligibility projection for accepting new interactions |
 | `ArticleViewCount` | Durable materialized accepted-view count state |
 | `ArticleInteractionStats` | Derived public counter snapshot state published to Reading |
-| `InteractionConsumedMessage` | Durable consumer dedupe/apply tracking state |
 
 ### 2.3 Interaction does not own
 
@@ -207,7 +206,7 @@ Interaction uses this projection to determine whether new interactions are accep
 
 Apply requirements:
 
-- dedupe inbound messages through `InteractionConsumedMessage`;
+- dedupe inbound messages through the adopted consumer dedupe policy;
 - use source version checks through `LastSourceVersion`;
 - ignore stale/duplicate messages safely;
 - fail closed when eligibility is missing or uncertain;
@@ -508,12 +507,16 @@ Interaction owns comment content and current status.
 Supported V1 statuses:
 
 ```text
-Pending
 Visible
-Rejected
 Hidden
 Deleted
+Pending
+Rejected
 ```
+
+Default V1 comment creation produces `Visible` comments immediately.
+
+`Pending` and `Rejected` are reserved for a future selective-moderation workflow.
 
 `VisibleCommentCount` is derived and may lag.
 
@@ -627,15 +630,15 @@ It is derived from:
 | `LikeCount` | Active `ArticleLike` truth |
 | `VisibleCommentCount` | `Comment.Status = Visible` truth |
 
-### 9.4 InteractionConsumedMessage
+### 9.4 Consumer Dedupe and Apply Policy
 
-Interaction owns durable consumer apply/dedupe records used by Interaction consumers.
+Interaction owns the behavior and operational correctness of consumer apply/dedupe for Interaction consumers.
 
 ```text
 Unique(ConsumerName, MessageId)
 ```
 
-This state supports processing correctness but does not become business truth for likes, comments, reports, or moderation decisions.
+The adopted implementation supports processing correctness but does not become business truth for likes, comments, reports, or moderation decisions.
 
 ---
 
@@ -658,8 +661,9 @@ Interaction-owned truth/workflow mutation
 |---|---|
 | Like article | `ArticleLike` mutation + outbox |
 | Unlike article | `ArticleLike` mutation + outbox |
-| Create comment | `Comment` + optional idempotency record + outbox |
-| Approve/reject/hide/restore comment | `Comment` transition + history + outbox |
+| Create visible comment | `Comment(Visible)` + optional idempotency record + outbox |
+| Hide/restore comment | `Comment` transition + history + outbox |
+| Future approve/reject selective-moderation command | Reserved; applies only if selective moderation is explicitly adopted |
 | Report comment | `CommentReport` + case create/join + possible alert state + outbox |
 | Dismiss report case | Case + reports + history + outbox |
 | Hide reported comment | Comment + case + reports + history + outbox |
@@ -891,7 +895,6 @@ Interaction owns retention policy for its own operational/derived records, subje
 
 - `CommentModerationActionHistory`;
 - `CommentReport` / resolved case retention;
-- `InteractionConsumedMessage` retention;
 - `ArticleInteractionStats` history/state;
 - `ArticleViewCount` operational retention.
 
@@ -988,7 +991,6 @@ Interaction owns:
     ArticleInteractionTargetProjection
     ArticleViewCount
     ArticleInteractionStats
-    InteractionConsumedMessage
 
 Content owns:
     Article lifecycle and public eligibility source truth

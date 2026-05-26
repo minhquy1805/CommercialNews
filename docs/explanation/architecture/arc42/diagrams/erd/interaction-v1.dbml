@@ -61,16 +61,6 @@ Enum ReportSeverityEnum {
   Critical
 }
 
-Enum ConsumerApplyDecisionEnum {
-  Applied
-  DuplicateIgnored
-  StaleIgnored
-  GapDetected
-  ResyncRequired
-  Failed
-}
-
-
 // -----------------------------------------------------
 // Derived article interaction eligibility projection
 // Source ownership: Content
@@ -347,44 +337,6 @@ Table ArticleInteractionStats {
 
   Note: "Derived public counter snapshot state. Interaction publishes versioned known-value snapshots to Reading; counters must never replace truth."
 }
-
-
-// -----------------------------------------------------
-// Durable Interaction consumer dedupe/apply state
-// -----------------------------------------------------
-
-Table InteractionConsumedMessage {
-  InteractionConsumedMessageId bigint [pk, increment]
-
-  ConsumerName nvarchar(100) [not null]
-  MessageId char(26) [not null]
-
-  ProducerModule nvarchar(50) [not null]
-  EventType nvarchar(150) [not null]
-
-  AggregateId nvarchar(100) [not null]
-  AggregateVersion bigint [null]
-
-  ApplyDecision ConsumerApplyDecisionEnum [not null]
-
-  CorrelationId char(26) [null]
-
-  ReceivedAtUtc datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  ProcessedAtUtc datetime2(3) [null]
-
-  FailureCode nvarchar(100) [null]
-  FailureDetail nvarchar(500) [null]
-
-  Indexes {
-    (ConsumerName, MessageId) [unique, name: "UX_InteractionConsumedMessage_ConsumerName_MessageId"]
-
-    (ConsumerName, ApplyDecision, ProcessedAtUtc) [name: "IX_InteractionConsumedMessage_ConsumerName_ApplyDecision_ProcessedAtUtc"]
-    (ProcessedAtUtc) [name: "IX_InteractionConsumedMessage_ProcessedAtUtc"]
-  }
-
-  Note: "Durable consumer processing state. Message dedupe does not replace source-version validation."
-}
-
 
 // -----------------------------------------------------
 // Cross-module stubs for ERD readability only

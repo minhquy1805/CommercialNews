@@ -71,10 +71,9 @@ Interaction also owns the following derived or processing records:
 ArticleInteractionTargetProjection
 ArticleViewCount
 ArticleInteractionStats
-InteractionConsumedMessage
 ```
 
-These records support eligibility checks, view counting, public counter publication and safe async processing.
+These records support eligibility checks, view counting and public counter publication.
 
 ### 2.3 Interaction does not own
 
@@ -120,7 +119,6 @@ In particular:
 | `ArticleInteractionTargetProjection` | Derived eligibility projection | Follows Content source state asynchronously |
 | `ArticleViewCount` | Derived durable materialized view-count state | Represents accepted views under V1 policy |
 | `ArticleInteractionStats` | Derived public counter snapshot state | Published to Reading |
-| `InteractionConsumedMessage` | Durable processing state | Supports message dedupe and apply diagnostics |
 
 ### 3.3 Derived-state rule
 
@@ -162,7 +160,6 @@ Interaction APIs and outbound events should use public identifiers rather than e
 | `ArticleInteractionTargetProjection` | `LastSourceVersion` | Prevent stale Content-derived eligibility apply |
 | `ArticleViewCount` | `ViewVersion` | Track accepted-view materialized state progress |
 | `ArticleInteractionStats` | `StatsVersion` | Order outbound public counter snapshots |
-| `InteractionConsumedMessage` | Source `AggregateVersion` metadata where provided | Apply diagnostics and replay handling |
 
 ### 4.3 Freshness authority
 
@@ -401,7 +398,7 @@ Create-comment request contracts must not accept a parent-comment identifier in 
 
 ### 8.4 Comment statuses
 
-Interaction V1 uses:
+Interaction retains the following status allowlist:
 
 ```text
 Pending
@@ -411,15 +408,20 @@ Hidden
 Deleted
 ```
 
-The existing domain enum must be extended with `Rejected` during implementation alignment.
+V1 uses post-moderation as its default comment model.
 
-| Status | Meaning | Publicly visible |
-|---|---|---:|
-| `Pending` | Submitted and awaiting moderation | No |
-| `Visible` | Approved and eligible for display when article is public | Yes |
-| `Rejected` | Rejected before being public | No |
-| `Hidden` | Removed from public display by moderator/admin | No |
-| `Deleted` | Deleted by comment author | No |
+| Status | Meaning | Default V1 runtime usage | Publicly visible |
+|---|---|---:|---:|
+| `Visible` | Valid user comment created and eligible for immediate public display while the article remains interaction-enabled/publicly exposable | Yes | Yes |
+| `Hidden` | Previously visible comment hidden by authorized moderator/admin after review or policy action | Yes | No |
+| `Deleted` | Comment deleted by its author according to deletion rules | Yes | No |
+| `Pending` | Reserved for future selective/pre-moderation workflows; not used by default V1 comment creation | No | No |
+| `Rejected` | Reserved for future rejection of comments placed in `Pending`; not used by default V1 comment creation | No | No |
+
+Contract rule:
+
+- valid comment creation in default V1 flow starts at `Visible`;
+- `Pending` and `Rejected` remain extension states only.
 
 ### 8.5 Submission contract
 
@@ -429,31 +431,52 @@ New comment creation requires:
 - interaction-enabled article;
 - valid and safe comment content;
 - `ParentCommentId = NULL`;
-- initial `Status = Pending`.
+- initial `Status = Visible` in the default V1 post-moderation flow.
+
+A successfully created valid comment is immediately eligible for public display while its associated article remains publicly interactable.
+
+V1 does not require moderator approval before a valid comment becomes visible.
+
+`Pending` creation may be introduced later only through an explicit selective-moderation policy.
 
 ### 8.6 Valid status transitions
+
+#### Default V1 runtime transitions
+
+| Current status | Action | Actor | Next status |
+|---|---|---|---|
+| New comment | Create valid comment | Authenticated user | `Visible` |
+| `Visible` | Hide | Authorized moderator/admin | `Hidden` |
+| `Hidden` | Restore | Authorized moderator/admin | `Visible` |
+| `Visible` | Delete own comment | Comment author | `Deleted` |
+| `Hidden` | Delete own comment | Comment author | `Deleted` |
+
+#### Reserved future selective-moderation transitions
+
+These transitions are retained as extension hooks but are not part of the default V1 runtime flow:
 
 | Current status | Action | Actor | Next status |
 |---|---|---|---|
 | `Pending` | Approve | Authorized moderator/admin | `Visible` |
 | `Pending` | Reject | Authorized moderator/admin | `Rejected` |
-| `Visible` | Hide | Authorized moderator/admin | `Hidden` |
-| `Hidden` | Restore | Authorized moderator/admin | `Visible` |
 | `Pending` | Delete own comment | Comment author | `Deleted` |
-| `Visible` | Delete own comment | Comment author | `Deleted` |
 | `Rejected` | Delete own comment | Comment author | `Deleted` |
-| `Hidden` | Delete own comment | Comment author | `Deleted` |
 
 ### 8.7 Invalid transitions
 
+#### Default V1 runtime restrictions
+
 | Current status | Invalid command |
 |---|---|
-| `Pending` | Hide |
-| `Visible` | Approve again |
-| `Visible` | Reject |
-| `Rejected` | Approve, Restore or Hide |
-| `Hidden` | Reject |
-| `Deleted` | Approve, Reject, Hide or Restore |
+| `Visible` | Approve or Reject as part of the default V1 flow |
+| `Hidden` | Hide again, Approve or Reject |
+| `Deleted` | Edit, Hide, Restore, Approve or Reject |
+
+Rules:
+
+- `Approve` and `Reject` must not be exposed as ordinary V1 actions unless selective moderation is explicitly activated.
+- Deleted comments cannot return to a publicly visible state in V1.
+- Report creation alone must not change comment status.
 
 ### 8.8 Public query contract
 
@@ -613,6 +636,12 @@ ClosedByAuthorDeletion
 
 ### 10.4 Case creation and joining
 
+A moderation case is created from reports against an already visible comment.
+
+The existence of an open moderation case does not automatically hide the comment.
+
+Until an authorized moderation action hides the comment, it remains publicly visible.
+
 When a valid report is created:
 
 ```text
@@ -698,7 +727,7 @@ CommentModerationActionHistory
 
 ### 11.3 Action types
 
-Recommended V1 action types:
+The allowlist retains:
 
 ```text
 Approve
@@ -710,13 +739,33 @@ HideReportedComment
 CloseCaseByAuthorDeletion
 ```
 
+Default V1 post-moderation actions:
+
+```text
+Hide
+Restore
+DismissReportedCase
+HideReportedComment
+CloseCaseByAuthorDeletion
+```
+
+Reserved selective-moderation actions, not exposed in the default V1 flow:
+
+```text
+Approve
+Reject
+```
+
 ### 11.4 History scope
 
-Required history includes:
+Required default V1 history includes:
 
-- moderator approval/rejection/hide/restore decisions;
-- moderator report-case resolutions;
-- author deletion only where it closes an open reported-comment case.
+- moderator/admin hide and restore decisions;
+- reported-comment case dismissal;
+- hiding a reported comment;
+- author deletion where it closes an open reported-comment case.
+
+Approval/rejection history applies only if a future selective-moderation workflow is explicitly adopted.
 
 Ordinary author deletion with no active moderation case does not have to produce a moderation-history row in V1.
 
@@ -799,11 +848,11 @@ When an article becomes unpublished, archived or soft-deleted:
 
 ---
 
-## 13) InteractionConsumedMessage
+## 13) Consumer Dedupe and Apply Policy
 
 ### 13.1 Purpose
 
-`InteractionConsumedMessage` is durable consumer-processing state for Interaction-owned async consumers.
+Interaction consumers must use the adopted consumer dedupe/apply policy for Interaction-owned async processing.
 
 It supports:
 
@@ -814,9 +863,9 @@ It supports:
 
 ### 13.2 Conceptual fields
 
+The exact persistence shape is implementation-owned. A durable implementation should capture equivalent processing metadata:
+
 ```text
-InteractionConsumedMessage
-- InteractionConsumedMessageId
 - ConsumerName
 - MessageId
 - ProducerModule
@@ -971,13 +1020,20 @@ VisibleCommentCount
 | Accepted view count contribution | Eventually increases | No effect | No effect |
 | Like | No effect | Eventually increases | No effect |
 | Unlike | No effect | Eventually decreases | No effect |
-| Create pending comment | No effect | No effect | No effect |
-| Approve comment: `Pending -> Visible` | No effect | No effect | Eventually increases |
-| Reject comment: `Pending -> Rejected` | No effect | No effect | No effect |
+| Create valid visible comment: `New -> Visible` | No effect | No effect | Eventually increases |
 | Hide comment: `Visible -> Hidden` | No effect | No effect | Eventually decreases |
 | Restore comment: `Hidden -> Visible` | No effect | No effect | Eventually increases |
 | Delete visible comment: `Visible -> Deleted` | No effect | No effect | Eventually decreases |
+| Delete hidden comment: `Hidden -> Deleted` | No effect | No effect | No effect |
 | Create/dismiss report | No effect | No effect | No effect |
+
+Reserved selective-moderation transitions, if introduced later:
+
+| Operation | VisibleCommentCount |
+|---|---:|
+| Create pending comment | No effect |
+| Approve comment: `Pending -> Visible` | Eventually increases |
+| Reject comment: `Pending -> Rejected` | No effect |
 
 ### 15.3 Lag contract
 
@@ -1038,15 +1094,13 @@ Interaction must:
 
 ### 17.1 Interaction business/workflow events
 
-Recommended Interaction-emitted events:
+Default V1 emitted events:
 
 ```text
 interaction.article_liked
 interaction.article_unliked
 
 interaction.comment_created
-interaction.comment_approved
-interaction.comment_rejected
 interaction.comment_hidden
 interaction.comment_restored
 interaction.comment_deleted_by_author
@@ -1054,6 +1108,15 @@ interaction.comment_deleted_by_author
 interaction.comment_reported
 interaction.comment_reports_dismissed
 interaction.comment_report_alert_triggered
+```
+
+For default V1, `interaction.comment_created` represents a comment created as `Visible`.
+
+Reserved future selective-moderation events:
+
+```text
+interaction.comment_approved
+interaction.comment_rejected
 ```
 
 ### 17.2 Reading counter projection event
@@ -1115,16 +1178,16 @@ InteractionCommentReportAlert:{CommentModerationCasePublicId}
 
 ### 17.4 Audit-facing moderation events
 
-Audit may consume moderation-relevant events including:
+Audit may consume default V1 moderation-relevant events including:
 
 ```text
-interaction.comment_approved
-interaction.comment_rejected
 interaction.comment_hidden
 interaction.comment_restored
 interaction.comment_deleted_by_author
 interaction.comment_reports_dismissed
 ```
+
+`interaction.comment_approved` and `interaction.comment_rejected` are reserved for a future selective-moderation workflow.
 
 For a reported-comment hide, `interaction.comment_hidden` should be sufficient when its payload contains:
 
@@ -1188,7 +1251,7 @@ One administrator-alert business intent per Open CommentModerationCase
 
 | Workflow | Required protection |
 |---|---|
-| Comment approve/reject/hide/restore | Current status + `Comment.Version` |
+| Comment hide/restore and reserved approve/reject | Current status + `Comment.Version` |
 | Author delete comment | Ownership + current status/version guard; idempotent deleted result |
 | Resolve moderation case | Current case status + `CommentModerationCase.Version` |
 | Trigger case alert | Open case + alert-not-already-triggered + version/atomic conditional mutation |
@@ -1284,14 +1347,20 @@ Interaction derived/processing state:
     ArticleInteractionTargetProjection
     ArticleViewCount
     ArticleInteractionStats
-    InteractionConsumedMessage
 
 Comment statuses:
-    Pending
-    Visible
-    Rejected
-    Hidden
-    Deleted
+    Visible     // default status for valid V1-created comments
+    Hidden      // hidden after moderation
+    Deleted     // deleted by author
+
+    Pending     // reserved for future selective moderation
+    Rejected    // reserved for future selective moderation
+
+Default V1 comment moderation model:
+    Post-moderation:
+        Create valid comment -> Visible immediately
+        Report does not automatically hide comment
+        Moderator may later Hide or Restore
 
 Reply compatibility:
     Comment.ParentCommentId nullable is reserved for future use.

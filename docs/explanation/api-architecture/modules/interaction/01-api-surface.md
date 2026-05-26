@@ -324,6 +324,12 @@ Moderator identity
 Internal version fields
 ```
 
+### Post-moderation clarification
+
+In default V1, a valid newly created comment begins as `Visible` and may appear in this public query immediately while the related article remains publicly eligible.
+
+`Pending` and `Rejected` remain reserved for a future selective-moderation workflow and are not produced by the default V1 comment-creation endpoint.
+
 ### V1 reply limitation
 
 ```text
@@ -337,7 +343,7 @@ Reply creation and nested-thread rendering are not supported.
 
 ### POST `/api/v1/articles/{articlePublicId}/comments`
 
-Submit a new top-level comment for moderation.
+Create a new top-level public comment under the default V1 post-moderation policy.
 
 ### Authentication
 
@@ -377,7 +383,7 @@ parentCommentId
 {
   "commentPublicId": "01J...",
   "articlePublicId": "01J...",
-  "status": "Pending",
+  "status": "Visible",
   "createdAtUtc": "2026-05-25T10:30:00Z",
   "version": 1
 }
@@ -386,30 +392,42 @@ parentCommentId
 ### Rules
 
 - Article must be locally confirmed as interaction-enabled.
-- Comment content must pass validation, length and safety rules.
-- Every V1-created comment is created with:
+- Comment content must pass validation, length, sanitization and adopted safety rules.
+- Every valid default V1-created comment is created with:
 
 ```text
-Status = Pending
+Status = Visible
 ParentCommentId = NULL
 ```
 
-- A new comment is not immediately public.
-- A new pending comment does not increase `VisibleCommentCount`.
+- A valid new comment is immediately eligible for public display while its article remains publicly eligible.
+- Moderator approval is not required before display in default V1.
+- Comment creation eventually increases `VisibleCommentCount`.
+- Counter publication to Reading happens asynchronously and must not block comment creation.
 - If `Idempotency-Key` is supported:
   - retry with the same key and same semantic payload returns the same logical created result;
   - reuse with conflicting payload returns deterministic conflict.
+
+### Reserved Future Selective-Moderation Hook
+
+The following behavior is not part of default V1:
+
+```text
+Create comment -> Pending -> Approve / Reject
+```
+
+`Pending`, `Rejected`, `Approve` and `Reject` may be introduced later only through an explicit selective-moderation policy.
 
 ### Relevant outcomes
 
 | Situation | Status |
 |---|---:|
-| Comment created | `201 Created` |
+| Comment created as visible | `201 Created` |
 | Same idempotency key and same request already committed | `200 OK` or `201 Created` with original result, according to API convention |
 | Conflicting reuse of idempotency key | `409 Conflict` |
 | Unauthenticated | `401 Unauthorized` |
 | Article not interaction-enabled | `404 Not Found` or standard unavailable-resource response |
-| Invalid content | `400 Bad Request` |
+| Invalid or unsafe content | `400 Bad Request` |
 | Rate limited | `429 Too Many Requests` |
 
 ---
@@ -438,22 +456,25 @@ No response body.
 
 - The authenticated user must be the authoritative author of the comment.
 - Admin approval is not required for author deletion.
-- Supported deletion transitions:
+- Supported default V1 deletion transitions:
 
 | Current status | Next status |
 |---|---|
-| `Pending` | `Deleted` |
 | `Visible` | `Deleted` |
-| `Rejected` | `Deleted` |
 | `Hidden` | `Deleted` |
 | `Deleted` | Idempotent no-op |
 
 - If deleting a `Visible` comment, `VisibleCommentCount` eventually decreases.
+- If deleting a `Hidden` comment, no additional visible-counter change occurs.
 - If the comment belongs to an open moderation case:
   - comment becomes `Deleted`;
   - case becomes `ClosedByAuthorDeletion`;
   - pending reports become `ClosedByAuthorDeletion`;
   - required moderation history is written atomically.
+
+### Reserved Future Selective-Moderation Hook
+
+If a future selective-moderation flow creates `Pending` or `Rejected` comments, authors may also delete their own comments from those states.
 
 ### Relevant outcomes
 
@@ -621,7 +642,7 @@ List comments for administrative moderation.
 
 | Parameter | Required | Example | Purpose |
 |---|---:|---|---|
-| `status` | No | `Pending` | Filter by comment status |
+| `status` | No | `Visible` | Filter by comment status |
 | `articlePublicId` | No | `01J...` | Filter by article |
 | `authorUserId` | No | `01J...` | Filter by author where authorized |
 | `page` | No | `1` | Paging |
@@ -640,7 +661,7 @@ List comments for administrative moderation.
       "articlePublicId": "01J...",
       "authorUserId": "01U...",
       "content": "Submitted comment",
-      "status": "Pending",
+      "status": "Visible",
       "parentCommentPublicId": null,
       "createdAtUtc": "2026-05-25T10:30:00Z",
       "version": 1
@@ -659,6 +680,9 @@ List comments for administrative moderation.
 
 - Authorized admin query may include non-public comment states.
 - V1 comments remain top-level only; `parentCommentPublicId` remains `null`.
+- Default V1 comment creation produces `Visible` comments immediately.
+- Administrators normally review visible or hidden comments through post-moderation workflows.
+- `Pending` and `Rejected` may remain queryable only as reserved future selective-moderation states if later adopted.
 
 ---
 
@@ -695,106 +719,30 @@ Interaction.Comments.Read
 
 ---
 
-### POST `/api/v1/admin/interaction/comments/{commentPublicId}/approve`
+### Deferred Endpoint Hook — Selective Pre-Moderation
 
-Approve a pending comment for public visibility.
-
-### Authorization
-
-Requires:
+The following endpoints are not supported in the default V1 post-moderation flow:
 
 ```text
-Interaction.Comments.Moderate
+POST /api/v1/admin/interaction/comments/{commentPublicId}/approve
+POST /api/v1/admin/interaction/comments/{commentPublicId}/reject
 ```
 
-### Request
-
-```json
-{
-  "expectedVersion": 1,
-  "note": "Optional note."
-}
-```
-
-### Response
-
-#### `200 OK`
-
-```json
-{
-  "commentPublicId": "01J...",
-  "status": "Visible",
-  "version": 2
-}
-```
-
-### Rules
+Default V1 behavior is:
 
 ```text
-Valid transition: Pending -> Visible
+Create valid comment -> Visible immediately
+Visible -> Hidden by authorized moderator/admin
+Hidden -> Visible through restore
 ```
 
-Success commits:
-
-```text
-Comment transition
-+ CommentModerationActionHistory: Approve
-+ interaction.comment_approved outbox intent
-```
-
-`VisibleCommentCount` changes asynchronously.
-
----
-
-### POST `/api/v1/admin/interaction/comments/{commentPublicId}/reject`
-
-Reject a pending comment before it becomes public.
-
-### Authorization
-
-Requires:
-
-```text
-Interaction.Comments.Moderate
-```
-
-### Request
-
-```json
-{
-  "expectedVersion": 1,
-  "reasonCode": "Spam",
-  "note": "Promotional content."
-}
-```
-
-### Response
-
-#### `200 OK`
-
-```json
-{
-  "commentPublicId": "01J...",
-  "status": "Rejected",
-  "version": 2
-}
-```
-
-### Rules
-
-```text
-Valid transition: Pending -> Rejected
-```
-
-- `reasonCode` is required.
-- When `reasonCode = Other`, `note` is required.
-- No visible-comment counter change occurs.
+Approve/reject endpoints may be introduced later only if an explicit selective-moderation policy creates comments in `Pending` state.
 
 ---
 
 ### POST `/api/v1/admin/interaction/comments/{commentPublicId}/hide`
 
-Hide a visible comment outside an open report-case resolution flow.
+Hide a currently visible comment through the default V1 post-moderation workflow, outside an open report-case resolution flow.
 
 ### Authorization
 
@@ -831,6 +779,14 @@ Interaction.Comments.Moderate
 ```text
 Valid transition: Visible -> Hidden
 ```
+
+This is a primary default V1 moderation operation because valid comments may already be publicly visible immediately after creation.
+
+`reasonCode` is required.
+
+When `reasonCode = Other`, `note` is required.
+
+`VisibleCommentCount` decreases asynchronously after a successful hide transition.
 
 If an open moderation case exists for this comment, admin should use the reported-comment resolution endpoint instead:
 
@@ -881,6 +837,12 @@ Interaction.Comments.Moderate
 Valid transition: Hidden -> Visible
 ```
 
+Restore reverses a previous post-moderation hide action.
+
+It does not represent initial approval of a newly submitted comment.
+
+`VisibleCommentCount` increases asynchronously after a successful restore transition.
+
 If the related article is currently non-public, the comment state may become `Visible` in Interaction but must not appear publicly until the article is public again.
 
 ---
@@ -901,6 +863,19 @@ Resolving a case by hiding its comment may additionally require:
 ```text
 Interaction.Comments.Moderate
 ```
+
+### Post-moderation posture
+
+A report case concerns a comment that may already be publicly visible.
+
+Creating or joining an open moderation case must not automatically hide the comment.
+
+The comment remains visible until:
+
+- an authorized moderator/admin hides it; or
+- its author deletes it.
+
+`CommentReport.Status = Pending` is still valid. `Pending` here is the state of the report awaiting resolution, not the visibility state of the comment.
 
 ---
 
@@ -1247,7 +1222,8 @@ PATCH /api/v1/comments/{commentPublicId}
 
 Reason:
 
-- requires re-moderation policy;
+- requires edit-after-publication policy;
+- may require re-review or automatic hide policy after substantial edits;
 - requires edit history/revision rules;
 - increases report and visibility complexity.
 
@@ -1267,6 +1243,21 @@ POST /api/v1/articles/{articlePublicId}/comments with parentCommentPublicId
 Not supported.
 
 Submitting a report never directly changes comment visibility.
+
+### Pre-moderation approve/reject endpoints
+
+Not supported in default V1:
+
+```text
+POST /api/v1/admin/interaction/comments/{commentPublicId}/approve
+POST /api/v1/admin/interaction/comments/{commentPublicId}/reject
+```
+
+Reason:
+
+- V1 uses post-moderation;
+- valid comments are created as `Visible` immediately;
+- `Pending` and `Rejected` are reserved for future selective moderation only.
 
 ### Public counter query directly from Interaction
 
@@ -1312,15 +1303,22 @@ Errors follow the host-wide standard envelope. Conceptual example:
 | `POST /articles/{id}/views` | `ArticleViewCount` atomic increment if accepted | No | Counter snapshot publication later/coalesced |
 | `POST /articles/{id}/likes` | Activate/create `ArticleLike` | No | `interaction.article_liked`; counter snapshot later |
 | `DELETE /articles/{id}/likes` | Deactivate/remove own `ArticleLike` | No | `interaction.article_unliked`; counter snapshot later |
-| `POST /articles/{id}/comments` | Create `Comment(Pending)` | No | `interaction.comment_created` |
-| `DELETE /comments/{id}` | `Comment -> Deleted`; optionally close case | Only if closes open case | `interaction.comment_deleted_by_author`; counter snapshot later if previously visible |
+| `POST /articles/{id}/comments` | Create `Comment(Visible)` | No | `interaction.comment_created`; counter snapshot later |
+| `DELETE /comments/{id}` | `Visible/Hidden -> Deleted`; optionally close open case | Only if closes open case | `interaction.comment_deleted_by_author`; counter snapshot later only if previously visible |
 | `POST /comments/{id}/reports` | Create report; create/join open case; optional alert state | No | `interaction.comment_reported`; optional `interaction.comment_report_alert_triggered` |
-| Admin approve comment | `Pending -> Visible` | `Approve` | `interaction.comment_approved`; counter snapshot later |
-| Admin reject comment | `Pending -> Rejected` | `Reject` | `interaction.comment_rejected` |
 | Admin hide comment | `Visible -> Hidden` | `Hide` | `interaction.comment_hidden`; counter snapshot later |
 | Admin restore comment | `Hidden -> Visible` | `Restore` | `interaction.comment_restored`; counter snapshot later |
-| Admin dismiss case | Case/reports dismissed; comment unchanged | `DismissReportedCase` | `interaction.comment_reports_dismissed` |
+| Admin dismiss case | Case/reports dismissed; comment remains visible | `DismissReportedCase` | `interaction.comment_reports_dismissed` |
 | Admin hide reported comment | Comment hidden; case/reports actioned | `HideReportedComment` | `interaction.comment_hidden`; counter snapshot later |
+
+### Reserved Future Selective-Moderation Effects
+
+| Future command | Interaction authoritative mutation | Local history | Async event/outbox consequence |
+|---|---|---|---|
+| Admin approve pending comment | `Pending -> Visible` | `Approve` | `interaction.comment_approved`; counter snapshot later |
+| Admin reject pending comment | `Pending -> Rejected` | `Reject` | `interaction.comment_rejected` |
+
+These future commands are not part of the default V1 API surface.
 
 ---
 
@@ -1344,6 +1342,19 @@ Reading receives:
   "projectedAtUtc": "2026-05-25T10:35:00Z"
 }
 ```
+
+For default V1 comment creation:
+
+```text
+Create valid visible comment
+    -> Interaction truth commits immediately
+    -> VisibleCommentCount is materialized asynchronously
+    -> Reading receives a later counter snapshot
+```
+
+Reading must not consume raw comment lifecycle events to compute public counters.
+
+Reading only consumes Interaction-published known-value counter snapshots.
 
 Rules:
 
@@ -1397,8 +1408,6 @@ POST   /api/v1/comments/{commentPublicId}/reports
 ```text
 GET    /api/v1/admin/interaction/comments
 GET    /api/v1/admin/interaction/comments/{commentPublicId}
-POST   /api/v1/admin/interaction/comments/{commentPublicId}/approve
-POST   /api/v1/admin/interaction/comments/{commentPublicId}/reject
 POST   /api/v1/admin/interaction/comments/{commentPublicId}/hide
 POST   /api/v1/admin/interaction/comments/{commentPublicId}/restore
 
@@ -1417,5 +1426,7 @@ GET    /api/v1/admin/interaction/articles/{articlePublicId}/stats
 PUT/PATCH /api/v1/comments/{commentPublicId}
 POST      /api/v1/comments/{commentPublicId}/replies
 POST      /api/v1/articles/{articlePublicId}/comments with parent identifier
+POST      /api/v1/admin/interaction/comments/{commentPublicId}/approve
+POST      /api/v1/admin/interaction/comments/{commentPublicId}/reject
 Public GET /api/v1/articles/{articlePublicId}/counters from Interaction
 ```

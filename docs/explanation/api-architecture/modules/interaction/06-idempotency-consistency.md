@@ -98,7 +98,6 @@ CommentModerationActionHistory
 ArticleInteractionTargetProjection
 ArticleViewCount
 ArticleInteractionStats
-InteractionConsumedMessage
 ```
 
 | State | Consistency posture |
@@ -106,7 +105,6 @@ InteractionConsumedMessage
 | `ArticleInteractionTargetProjection` | Content-derived eligibility projection; may lag; fails closed when unsafe |
 | `ArticleViewCount` | Durable accepted-view materialized count; no raw per-view rebuild in V1 |
 | `ArticleInteractionStats` | Public counter snapshot state; may lag; published to Reading |
-| `InteractionConsumedMessage` | Durable consumer processing/dedupe state |
 
 ### 2.3 Derived-state rule
 
@@ -189,15 +187,15 @@ Timestamps may be used only for:
 |---|---|
 | Article interaction eligibility | New interaction requires safe local enabled projection |
 | Active like | At most one active like per `(ArticlePublicId, UserId)` |
-| V1 comment creation | `ParentCommentId = NULL` |
+| V1 comment creation | `ParentCommentId = NULL` and valid default V1 comments begin as `Visible` |
 | Comment moderation | Legal transition plus `Comment.Version` protection |
 | Comment author deletion | Ownership plus legal/status/version handling |
 | Comment report | At most one report per `(CommentId, ReporterUserId)` |
 | Open moderation case | At most one `Open` case per comment |
 | Admin alert intent | At most one alert business intent per open case in V1 |
-| Content projection consume | Durable message dedupe plus `LastSourceVersion` apply |
+| Content projection consume | Adopted consumer dedupe policy plus `LastSourceVersion` apply |
 | Counter snapshot publication | Monotonic `ArticleInteractionStats.StatsVersion` |
-| Consumer delivery | Durable dedupe by `(ConsumerName, MessageId)` |
+| Consumer delivery | Dedupe according to the adopted consumer policy |
 | Accepted view count | Atomic increment only after policy acceptance |
 
 ---
@@ -438,8 +436,14 @@ Authenticated actor
 Interaction-enabled article
 Valid content
 ParentCommentId = NULL
-Initial Status = Pending
+Initial Status = Visible
 ```
+
+Default V1 uses post-moderation.
+
+A valid newly created comment is immediately eligible for public display while its article remains publicly eligible.
+
+Moderator approval is not required before public display.
 
 ### 8.2 Reply compatibility constraint
 
@@ -451,13 +455,17 @@ Every V1-created Comment must have ParentCommentId = NULL.
 
 V1 create-comment APIs must not accept parent-comment input.
 
+Reply creation and reply moderation are deferred beyond V1.
+
 ### 8.3 Timeout ambiguity
 
-If the client times out after create-comment request:
+If the client times out after a create-comment request:
 
 ```text
-The comment may already exist in Pending status.
+The visible comment may already have been committed.
 ```
+
+The client must not assume that timeout means the comment was not created.
 
 ### 8.4 Recommended idempotency-key posture
 
@@ -469,11 +477,28 @@ If supported:
 |---|---|
 | Same key and same semantic payload replayed | Return same logical created-comment result |
 | Same key reused with conflicting payload | Deterministic conflict |
-| First request committed but response timed out | Retry returns committed result without new comment |
+| First request committed but response timed out | Retry returns committed result without creating a second comment |
 
 ### 8.5 Counter behavior
 
-Creating a `Pending` comment does not update `VisibleCommentCount`.
+Creating a valid visible comment affects the derived public comment count asynchronously:
+
+```text
+New -> Visible
+    => VisibleCommentCount eventually increases by 1
+```
+
+Comment creation success must not wait for counter materialization or Reading projection refresh.
+
+### 8.6 Reserved future selective-moderation hook
+
+The following behavior is not part of default V1:
+
+```text
+Create comment -> Pending -> Approve / Reject
+```
+
+`Pending`, `Rejected`, `Approve` and `Reject` may be introduced later only through an explicit selective-moderation policy.
 
 ---
 
@@ -481,24 +506,51 @@ Creating a `Pending` comment does not update `VisibleCommentCount`.
 
 ### 9.1 Comment statuses
 
+Interaction retains the following status allowlist:
+
 ```text
-Pending
 Visible
-Rejected
 Hidden
 Deleted
+Pending
+Rejected
 ```
 
-### 9.2 Valid moderator transitions
+Default V1 runtime usage:
+
+| Status | Meaning | Used in default V1 flow |
+|---|---|---:|
+| `Visible` | Valid comment currently eligible for public display | Yes |
+| `Hidden` | Previously visible comment hidden through moderation | Yes |
+| `Deleted` | Comment deleted by its author | Yes |
+| `Pending` | Reserved for future selective pre-moderation | No |
+| `Rejected` | Reserved for future selective pre-moderation outcome | No |
+
+### 9.2 Valid moderator transitions in default V1
+
+| Current status | Command | Next status |
+|---|---|---|
+| `Visible` | Hide | `Hidden` |
+| `Hidden` | Restore | `Visible` |
+
+Default V1 uses post-moderation:
+
+```text
+Create valid comment -> Visible immediately
+Visible -> Hidden if moderator action is required
+Hidden -> Visible if restored
+```
+
+### 9.3 Reserved selective-moderation transitions
+
+These transitions are not part of default V1, but remain future extension hooks:
 
 | Current status | Command | Next status |
 |---|---|---|
 | `Pending` | Approve | `Visible` |
 | `Pending` | Reject | `Rejected` |
-| `Visible` | Hide | `Hidden` |
-| `Hidden` | Restore | `Visible` |
 
-### 9.3 State legality rule
+### 9.4 State legality rule
 
 A fresh version does not make an illegal transition legal.
 
@@ -509,9 +561,16 @@ Current status permits command
 AND expected/current Version permits mutation
 ```
 
-### 9.4 Moderation atomic commit
+For default V1:
 
-A successful moderation transition requiring propagation commits atomically:
+```text
+Hide requires current status = Visible.
+Restore requires current status = Hidden.
+```
+
+### 9.5 Moderation atomic commit
+
+A successful default V1 moderation transition requiring propagation commits atomically:
 
 ```text
 Comment status/version transition
@@ -519,16 +578,21 @@ Comment status/version transition
 + required OutboxMessage
 ```
 
-Examples:
+Default V1 examples:
 
 | Command | Required local history | Event intent |
 |---|---|---|
-| Approve | `Approve` | `interaction.comment_approved` |
-| Reject | `Reject` | `interaction.comment_rejected` |
 | Hide without report case | `Hide` | `interaction.comment_hidden` |
 | Restore | `Restore` | `interaction.comment_restored` |
 
-### 9.5 Stale/retry protection
+Reserved future selective-moderation examples:
+
+| Future command | Required local history | Event intent |
+|---|---|---|
+| Approve | `Approve` | `interaction.comment_approved` |
+| Reject | `Reject` | `interaction.comment_rejected` |
+
+### 9.6 Stale/retry protection
 
 If a moderator retries after timeout or acts from stale UI:
 
@@ -537,14 +601,25 @@ If a moderator retries after timeout or acts from stale UI:
 - outbox intent must not be emitted again for the same logical transition;
 - stale or illegal command must return a deterministic conflict/already-applied outcome.
 
-### 9.6 Counter behavior
+### 9.7 Counter behavior
+
+Default V1 counter effects:
 
 | Transition | Derived counter effect |
 |---|---:|
-| `Pending -> Visible` | `VisibleCommentCount` eventually `+1` |
-| `Pending -> Rejected` | No change |
+| `New -> Visible` on valid comment creation | `VisibleCommentCount` eventually `+1` |
 | `Visible -> Hidden` | `VisibleCommentCount` eventually `-1` |
 | `Hidden -> Visible` | `VisibleCommentCount` eventually `+1` |
+| `Visible -> Deleted` | `VisibleCommentCount` eventually `-1` |
+| `Hidden -> Deleted` | No change |
+
+Reserved future selective-moderation effects:
+
+| Future transition | Derived counter effect |
+|---|---:|
+| `New -> Pending` | No change |
+| `Pending -> Visible` | `VisibleCommentCount` eventually `+1` |
+| `Pending -> Rejected` | No change |
 
 ---
 
@@ -560,13 +635,20 @@ CurrentUserId == Comment.AuthorUserId
 
 ### 10.2 Allowed transitions
 
+Default V1 transitions:
+
+| Current status | Next status |
+|---|---|
+| `Visible` | `Deleted` |
+| `Hidden` | `Deleted` |
+| `Deleted` | Idempotent no-op |
+
+Reserved future selective-moderation transitions:
+
 | Current status | Next status |
 |---|---|
 | `Pending` | `Deleted` |
-| `Visible` | `Deleted` |
 | `Rejected` | `Deleted` |
-| `Hidden` | `Deleted` |
-| `Deleted` | Idempotent no-op |
 
 ### 10.3 Normal author-delete atomicity
 
@@ -828,8 +910,9 @@ Interaction-owned state mutation
 |---|---|
 | Like | `ArticleLike` truth effect + outbox |
 | Unlike | `ArticleLike` truth effect + outbox |
-| Create comment | `Comment` + optional request-idempotency marker + outbox |
-| Approve/reject/hide/restore | `Comment` transition + history + outbox |
+| Create visible comment | `Comment(Visible)` + optional request-idempotency marker + outbox |
+| Hide/restore comment | `Comment` transition + history + outbox |
+| Future approve/reject selective-moderation command | Reserved; applies only if selective moderation is explicitly adopted |
 | Report comment | `CommentReport` + case create/join + possible alert metadata + outbox |
 | Dismiss report case | Case + reports + history + outbox |
 | Hide reported comment | Comment + case + reports + history + outbox |
@@ -865,13 +948,9 @@ Notifications
 
 ## 15) Consumer Dedupe and Apply Safety
 
-### 15.1 Durable consumer state
+### 15.1 Consumer dedupe policy
 
-Interaction async consumers use durable processing state equivalent to:
-
-```text
-InteractionConsumedMessage
-```
+Interaction async consumers must use the adopted durable consumer dedupe policy for their processing purpose.
 
 ### 15.2 Dedupe key
 
@@ -1059,7 +1138,8 @@ It does not prove the mutation failed.
 | Like / Unlike | Current `ArticleLike` truth |
 | Create Comment | Idempotency record/result if supported; otherwise authoritative comment query posture |
 | Delete Own Comment | Current `Comment.Status` and ownership |
-| Approve/Reject/Hide/Restore | Current `Comment.Status` and `Version` |
+| Hide / Restore | Current `Comment.Status` and `Version` |
+| Future Approve / Reject selective-moderation command | Current `Comment.Status` and `Version`, only if later adopted |
 | Report Comment | Existing `(CommentId, ReporterUserId)` report truth |
 | Resolve Case | Current `CommentModerationCase.Status` and `Version` |
 | Alert Trigger | Durable case alert metadata and Notifications business-intent dedupe |
@@ -1164,14 +1244,17 @@ Interaction V1 idempotency and consistency are governed by the following rules:
 5. Views use `ArticleViewCount` atomic accepted-count mutation; V1 stores no raw per-view event history.
 6. Likes are protected per `(ArticlePublicId, UserId)`; concurrent likes by different users are independent.
 7. V1 comments are top-level only; `ParentCommentId` is reserved but must be `NULL` for new comments.
-8. Comment moderation is status-legal and version-protected.
-9. Comment authors may delete their own comments directly and idempotently.
-10. Reports never auto-hide comments and are unique per `(CommentId, ReporterUserId)`.
-11. At most one moderation case may be open for a comment.
-12. One open moderation case may trigger at most one administrator-alert business intent in V1.
-13. Required Interaction mutation/history/outbox state commits atomically.
-14. Async consumers dedupe by `(ConsumerName, MessageId)` and reject stale applies by version.
-15. Reading consumes only versioned known-value public counter snapshots.
-16. Counter lag is acceptable; counter state must never replace truth.
-17. Like and visible-comment totals are reconcilable from truth; view count relies on durable materialized count in V1.
-18. Timeout never proves failure; reconciliation uses Interaction truth and durable workflow state.
+8. Default V1 uses post-moderation: valid newly created comments begin as `Visible` and may appear publicly immediately while the article remains publicly eligible.
+9. `Pending`, `Rejected`, `Approve` and `Reject` are reserved for a future selective-moderation workflow and are not part of the default V1 comment path.
+10. Default moderation transitions are `Visible -> Hidden` and `Hidden -> Visible`, protected by legal-status and version checks.
+11. Comment authors may delete their own visible or hidden comments directly and idempotently.
+12. Creating a valid visible comment eventually increases `VisibleCommentCount`; hiding or deleting a visible comment eventually decreases it.
+13. Reports never auto-hide comments and are unique per `(CommentId, ReporterUserId)`.
+14. At most one moderation case may be open for a comment.
+15. One open moderation case may trigger at most one administrator-alert business intent in V1.
+16. Required Interaction mutation/history/outbox state commits atomically.
+17. Async consumers dedupe according to the adopted consumer policy and reject stale applies by version where projection ordering matters.
+18. Reading consumes only versioned known-value public counter snapshots.
+19. Counter lag is acceptable; counter state must never replace truth.
+20. Like and visible-comment totals are reconcilable from truth; view count relies on durable materialized count in V1.
+21. Timeout never proves failure; reconciliation uses Interaction truth and durable workflow state.

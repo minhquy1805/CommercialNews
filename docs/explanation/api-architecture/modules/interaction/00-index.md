@@ -118,7 +118,6 @@ Interaction also owns:
 ArticleInteractionTargetProjection
 ArticleViewCount
 ArticleInteractionStats
-InteractionConsumedMessage
 ```
 
 | Record | Purpose |
@@ -126,7 +125,6 @@ InteractionConsumedMessage
 | `ArticleInteractionTargetProjection` | Local projection of whether an article may receive new interactions |
 | `ArticleViewCount` | Durable materialized accepted-view counter |
 | `ArticleInteractionStats` | Versioned public counter snapshot state published to Reading |
-| `InteractionConsumedMessage` | Durable message dedupe/apply tracking for Interaction consumers |
 
 ### 3.3 Interaction does not own
 
