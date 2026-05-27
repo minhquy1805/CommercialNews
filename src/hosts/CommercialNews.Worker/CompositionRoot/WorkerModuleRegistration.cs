@@ -18,6 +18,7 @@ using CommercialNews.Worker.Notifications.Processing;
 using CommercialNews.Worker.Outbox;
 using CommercialNews.Worker.Outbox.Handlers.Authorization;
 using CommercialNews.Worker.Outbox.Handlers.Identity;
+using CommercialNews.Worker.Outbox.Handlers.Interaction;
 using CommercialNews.Worker.Outbox.Handlers.Notifications;
 using CommercialNews.Worker.Outbox.Publishing;
 using CommercialNews.Worker.Outbox.Handlers.Seo;
@@ -132,6 +133,17 @@ public static class WorkerModuleRegistration
         services.AddScoped<IOutboxMessageHandler, SlugRouteChangedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, SlugRouteDeactivatedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, SeoMetadataUpdatedOutboxHandler>();
+
+        services.AddScoped<IOutboxMessageHandler, InteractionArticleLikedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionArticleUnlikedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentCreatedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentHiddenOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentRestoredOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentDeletedByAuthorOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentReportedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentReportsDismissedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentReportAlertTriggeredOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionArticleCountersProjectionPublishedOutboxHandler>();
 
         services.Configure<NotificationsRabbitMqConsumerOptions>(
             configuration.GetSection(NotificationsRabbitMqConsumerOptions.SectionName));
