@@ -1,12 +1,11 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using Interaction.Application.Contracts.Comments.Requests;
-using Interaction.Application.Contracts.Comments.Responses;
+using Interaction.Application.Contracts.Comments.CreateComment;
 
 namespace Interaction.Application.UseCases.Comments.CreateComment;
 
 public interface ICreateCommentUseCase
 {
-    Task<Result<CreateCommentResponse>> ExecuteAsync(
-        CreateCommentRequest request,
+    Task<Result<CreateCommentResponseDto>> ExecuteAsync(
+        CreateCommentRequestDto request,
         CancellationToken cancellationToken = default);
 }

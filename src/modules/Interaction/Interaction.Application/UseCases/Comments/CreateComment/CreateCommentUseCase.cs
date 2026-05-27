@@ -1,13 +1,12 @@
-using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
+using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
+using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
-using CommercialNews.BuildingBlocks.SharedKernel.Time;
-using Interaction.Application.Contracts.Comments.Requests;
-using Interaction.Application.Contracts.Comments.Responses;
+using Interaction.Application.Contracts.Comments.CreateComment;
 using Interaction.Application.Errors;
-using Interaction.Application.Ports.Persistence.Transactions;
-using Interaction.Application.Ports.Persistence.Write;
-using Interaction.Domain.Entities;
-using Interaction.Domain.Exceptions;
+using Interaction.Application.Outbox.Payloads;
+using Interaction.Application.Ports.Persistence;
+using Interaction.Application.Ports.Services;
+using Interaction.Application.Validation.Comments;
 
 namespace Interaction.Application.UseCases.Comments.CreateComment;
 
@@ -15,128 +14,141 @@ public sealed class CreateCommentUseCase : ICreateCommentUseCase
 {
     private readonly ICommentRepository _commentRepository;
     private readonly IInteractionUnitOfWork _unitOfWork;
-    private readonly IDateTimeProvider _dateTimeProvider;
+    private readonly IInteractionOutboxWriter _outboxWriter;
+    private readonly ICommentContentPolicy _commentContentPolicy;
+    private readonly IRequestContext _requestContext;
+    private readonly IPublicIdGenerator _publicIdGenerator;
 
     public CreateCommentUseCase(
         ICommentRepository commentRepository,
         IInteractionUnitOfWork unitOfWork,
-        IDateTimeProvider dateTimeProvider)
+        IInteractionOutboxWriter outboxWriter,
+        ICommentContentPolicy commentContentPolicy,
+        IRequestContext requestContext,
+        IPublicIdGenerator publicIdGenerator)
     {
         _commentRepository = commentRepository
             ?? throw new ArgumentNullException(nameof(commentRepository));
+
         _unitOfWork = unitOfWork
             ?? throw new ArgumentNullException(nameof(unitOfWork));
-        _dateTimeProvider = dateTimeProvider
-            ?? throw new ArgumentNullException(nameof(dateTimeProvider));
+
+        _outboxWriter = outboxWriter
+            ?? throw new ArgumentNullException(nameof(outboxWriter));
+
+        _commentContentPolicy = commentContentPolicy
+            ?? throw new ArgumentNullException(nameof(commentContentPolicy));
+
+        _requestContext = requestContext
+            ?? throw new ArgumentNullException(nameof(requestContext));
+
+        _publicIdGenerator = publicIdGenerator
+            ?? throw new ArgumentNullException(nameof(publicIdGenerator));
     }
 
-    public async Task<Result<CreateCommentResponse>> ExecuteAsync(
-        CreateCommentRequest request,
+    public async Task<Result<CreateCommentResponseDto>> ExecuteAsync(
+        CreateCommentRequestDto request,
         CancellationToken cancellationToken = default)
     {
+        var validationError = CreateCommentValidator.Validate(request);
+
+        if (validationError is not null)
+        {
+            return Result<CreateCommentResponseDto>.Failure(validationError);
+        }
+
+        if (!_requestContext.CurrentUserId.HasValue ||
+            _requestContext.CurrentUserId.Value <= 0)
+        {
+            return Result<CreateCommentResponseDto>.Failure(
+                InteractionErrors.Comment.AuthenticationRequired);
+        }
+
+        var articlePublicId =
+            CreateCommentValidator.NormalizeArticlePublicId(
+                request.ArticlePublicId);
+
+        var content =
+            CreateCommentValidator.NormalizeContent(
+                request.Content);
+
+        var policyResult = await _commentContentPolicy.EvaluateAsync(
+            content,
+            cancellationToken);
+
+        if (!policyResult.IsAllowed)
+        {
+            return Result<CreateCommentResponseDto>.Failure(
+                InteractionErrors.Comment.ProhibitedContent);
+        }
+
+        var currentUserId = _requestContext.CurrentUserId.Value;
+        var commentPublicId = _publicIdGenerator.NewId();
+
         try
         {
-            // Validate the main input first.
-            if (request.ArticleId <= 0)
-            {
-                return Result<CreateCommentResponse>.Failure(
-                    InteractionErrors.Article.InvalidArticleId);
-            }
-
-            if (request.UserId <= 0)
-            {
-                return Result<CreateCommentResponse>.Failure(
-                    InteractionErrors.ValidationFailed);
-            }
-
-            if (request.ParentCommentId.HasValue && request.ParentCommentId.Value <= 0)
-            {
-                return Result<CreateCommentResponse>.Failure(
-                    InteractionErrors.Comment.InvalidParentCommentId);
-            }
-
-            if (string.IsNullOrWhiteSpace(request.Content))
-            {
-                return Result<CreateCommentResponse>.Failure(
-                    InteractionErrors.Comment.ContentRequired);
-            }
-
-            string content = request.Content.Trim();
-
-            if (content.Length > 2000)
-            {
-                return Result<CreateCommentResponse>.Failure(
-                    InteractionErrors.Comment.ContentTooLong);
-            }
-
-            // Create comment truth in the domain layer.
-            DateTime nowUtc = _dateTimeProvider.UtcNow;
-
-            Comment comment = Comment.Create(
-                articleId: request.ArticleId,
-                userId: request.UserId,
-                parentCommentId: request.ParentCommentId,
-                content: content,
-                nowUtc: nowUtc);
-
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-            try
-            {
-                // Persist the new comment row inside the transaction.
-                long commentId = await _commentRepository.InsertAsync(
-                    comment,
-                    cancellationToken);
+            var comment = await _commentRepository.InsertVisibleAsync(
+                publicId: commentPublicId,
+                articlePublicId: articlePublicId,
+                authorUserId: currentUserId,
+                content: content,
+                cancellationToken: cancellationToken);
 
-                await _unitOfWork.CommitAsync(cancellationToken);
-
-                return Result<CreateCommentResponse>.Success(
-                    new CreateCommentResponse
-                    {
-                        CommentId = commentId,
-                        CreatedAt = comment.CreatedAt
-                    });
-            }
-            catch
+            /*
+             * The InsertVisible procedure contract must return a freshly-created
+             * visible comment. This guard prevents publishing an invalid event
+             * if persistence mapping or SQL behavior ever drifts.
+             */
+            if (!comment.IsVisible() ||
+                comment.Version < 1)
             {
                 await _unitOfWork.RollbackAsync(cancellationToken);
-                throw;
+
+                return Result<CreateCommentResponseDto>.Failure(
+                    InteractionErrors.UnexpectedFailure);
             }
-        }
-        catch (PersistenceException exception)
-        {
-            return Result<CreateCommentResponse>.Failure(
-                MapPersistenceException(exception));
-        }
-        catch (InteractionDomainException exception)
-        {
-            return Result<CreateCommentResponse>.Failure(
-                MapDomainException(exception));
-        }
-    }
 
-    private static Error MapDomainException(InteractionDomainException exception)
-    {
-        return exception.Code switch
-        {
-            "INTERACTION.COMMENT_INVALID_ARTICLE_ID" => InteractionErrors.Article.InvalidArticleId,
-            "INTERACTION.COMMENT_INVALID_PARENT_COMMENT_ID" => InteractionErrors.Comment.InvalidParentCommentId,
-            "INTERACTION.COMMENT_CONTENT_REQUIRED" => InteractionErrors.Comment.ContentRequired,
-            "INTERACTION.COMMENT_CONTENT_TOO_LONG" => InteractionErrors.Comment.ContentTooLong,
-            "INTERACTION.COMMENT_INVALID_STATUS" => InteractionErrors.Comment.InvalidStatus,
-            _ => InteractionErrors.ValidationFailed
-        };
-    }
+            var messageId = _publicIdGenerator.NewId();
 
-    private static Error MapPersistenceException(PersistenceException exception)
-    {
-        return exception.Code switch
+            var payload = new CommentCreatedPayload(
+                CommentPublicId: comment.PublicId,
+                ArticlePublicId: comment.ArticlePublicId,
+                AuthorUserId: comment.AuthorUserId,
+                Status: comment.Status,
+                CreatedAtUtc: comment.CreatedAtUtc);
+
+            await _outboxWriter.WriteCommentCreatedAsync(
+                messageId: messageId,
+                aggregatePublicId: comment.PublicId,
+                aggregateVersion: comment.Version,
+                payload: payload,
+                correlationId: _requestContext.CorrelationId,
+                initiatorUserId: currentUserId,
+                occurredAtUtc: comment.CreatedAtUtc,
+                cancellationToken: cancellationToken);
+
+            await _unitOfWork.CommitAsync(cancellationToken);
+
+            return Result<CreateCommentResponseDto>.Success(
+                new CreateCommentResponseDto
+                {
+                    CommentPublicId = comment.PublicId,
+                    ArticlePublicId = comment.ArticlePublicId,
+                    Status = comment.Status,
+                    CreatedAtUtc = comment.CreatedAtUtc,
+                    Version = comment.Version
+                });
+        }
+        catch
         {
-            "INTERACTION.ARTICLE_NOT_FOUND" => InteractionErrors.Article.NotFound,
-            "INTERACTION.PARENT_COMMENT_NOT_FOUND" => InteractionErrors.Comment.InvalidParentCommentId,
-            "INTERACTION.COMMENT_CONTENT_REQUIRED" => InteractionErrors.Comment.ContentRequired,
-            "INTERACTION.COMMENT_INVALID_STATUS" => InteractionErrors.Comment.InvalidStatus,
-            _ => InteractionErrors.ValidationFailed
-        };
+            if (_unitOfWork.HasActiveTransaction)
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
     }
 }
