@@ -1883,6 +1883,10 @@ BEGIN
     SELECT TOP (1)
         [r].[CommentReportId],
         [r].[PublicId] AS [CommentReportPublicId],
+
+        @CommentPublicId AS [CommentPublicId],
+        @ArticlePublicId AS [ArticlePublicId],
+
         [r].[CommentId],
         [r].[CommentModerationCaseId],
         [r].[ReporterUserId],
@@ -1890,14 +1894,19 @@ BEGIN
         [r].[Description],
         [r].[Status] AS [ReportStatus],
         [r].[CreatedAtUtc],
+
         [c].[PublicId] AS [CommentModerationCasePublicId],
         [c].[Status] AS [CaseStatus],
         [c].[Priority],
         [c].[HighestSeverity],
+
+        @PendingReportCount AS [DistinctReporterCount],
+
         [c].[AlertTriggeredAtUtc],
         [c].[AlertLevel],
         [c].[AlertMessageId],
         [c].[Version] AS [CaseVersion],
+
         @AlertTriggered AS [AlertTriggered],
         @CreatedNewCase AS [CreatedNewCase]
     FROM [interaction].[CommentReport] AS [r]
@@ -2191,15 +2200,15 @@ SET QUOTED_IDENTIFIER ON;
 GO
 
 CREATE OR ALTER PROCEDURE [interaction].[Interaction_CommentModerationCase_HideComment]
-    @CasePublicId          CHAR(26),
-    @ExpectedCaseVersion   BIGINT,
+    @CasePublicId           CHAR(26),
+    @ExpectedCaseVersion    BIGINT,
     @ExpectedCommentVersion BIGINT,
-    @HistoryPublicId       CHAR(26),
-    @ActorUserId           BIGINT,
-    @ReasonCode            NVARCHAR(40),
-    @Note                  NVARCHAR(1000) = NULL,
-    @CorrelationId         CHAR(26) = NULL,
-    @ActorType             NVARCHAR(30) = N'Moderator'
+    @HistoryPublicId        CHAR(26),
+    @ActorUserId            BIGINT,
+    @ReasonCode             NVARCHAR(40),
+    @Note                   NVARCHAR(1000) = NULL,
+    @CorrelationId          CHAR(26) = NULL,
+    @ActorType              NVARCHAR(30) = N'Moderator'
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -2230,6 +2239,7 @@ BEGIN
         @CaseVersion BIGINT,
         @CommentStatus NVARCHAR(20),
         @CommentVersion BIGINT,
+        @ResolvedReportCount BIGINT = 0,
         @NowUtc DATETIME2(3) = SYSUTCDATETIME();
 
     SELECT
@@ -2294,6 +2304,8 @@ BEGIN
     WHERE [CommentModerationCaseId] = @CaseId
       AND [Status] = N'Pending';
 
+    SET @ResolvedReportCount = @@ROWCOUNT;
+
     INSERT INTO [interaction].[CommentModerationActionHistory]
     (
         [PublicId],
@@ -2329,13 +2341,18 @@ BEGIN
         [mc].[PublicId] AS [CommentModerationCasePublicId],
         [mc].[Status] AS [CaseStatus],
         [mc].[Version] AS [CaseVersion],
-        [cm].[PublicId] AS [CommentPublicId],
-        [cm].[Status] AS [CommentStatus],
-        [cm].[Version] AS [CommentVersion],
         [mc].[ResolvedAtUtc],
         [mc].[ResolvedByUserId],
         [mc].[ResolutionType],
-        [mc].[ResolutionReasonCode]
+        [mc].[ResolutionReasonCode],
+
+        [cm].[PublicId] AS [CommentPublicId],
+        [cm].[ArticlePublicId],
+        [cm].[Status] AS [CommentStatus],
+        [cm].[Version] AS [CommentVersion],
+        [cm].[UpdatedAtUtc] AS [HiddenAtUtc],
+
+        @ResolvedReportCount AS [ResolvedReportCount]
     FROM [interaction].[CommentModerationCase] AS [mc]
     INNER JOIN [interaction].[Comment] AS [cm]
         ON [cm].[CommentId] = [mc].[CommentId]
