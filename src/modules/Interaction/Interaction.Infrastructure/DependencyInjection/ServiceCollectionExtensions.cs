@@ -3,6 +3,7 @@ using Interaction.Application.Ports.Services;
 using Interaction.Infrastructure.Persistence.Exceptions;
 using Interaction.Infrastructure.Persistence.Repositories;
 using Interaction.Infrastructure.Persistence.Sql;
+using Interaction.Infrastructure.Services;
 using Interaction.Infrastructure.Services.ArticleViews;
 using Interaction.Infrastructure.Services.CommentContent;
 using Interaction.Infrastructure.Services.CommentReports;
@@ -33,6 +34,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IArticleViewAcceptancePolicy, AllowAllArticleViewAcceptancePolicy>();
         services.AddSingleton<ICommentContentPolicy, BlockedTermsCommentContentPolicy>();
         services.AddSingleton<ICommentReportPolicy, DefaultCommentReportPolicy>();
+
+        services.AddScoped<IInteractionOutboxWriter, InteractionOutboxWriter>();
 
         return services;
     }
