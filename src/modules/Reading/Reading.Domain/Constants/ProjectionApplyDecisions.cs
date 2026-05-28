@@ -4,6 +4,8 @@ public static class ProjectionApplyDecisions
 {
     public const string Applied = "Applied";
     public const string Ignored = "Ignored";
+    public const string IgnoredDuplicateOrStaleVersion =
+        "IgnoredDuplicateOrStaleVersion";
     public const string IgnoredStaleVersion = "IgnoredStaleVersion";
     public const string IgnoredStaleOrMissing = "IgnoredStaleOrMissing";
     public const string IgnoredMissingArticle = "IgnoredMissingArticle";
@@ -13,6 +15,7 @@ public static class ProjectionApplyDecisions
         {
             Applied,
             Ignored,
+            IgnoredDuplicateOrStaleVersion,
             IgnoredStaleVersion,
             IgnoredStaleOrMissing,
             IgnoredMissingArticle
@@ -42,6 +45,7 @@ public static class ProjectionApplyDecisions
         string trimmed = value.Trim();
 
         return string.Equals(trimmed, Ignored, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, IgnoredDuplicateOrStaleVersion, StringComparison.OrdinalIgnoreCase)
             || string.Equals(trimmed, IgnoredStaleVersion, StringComparison.OrdinalIgnoreCase)
             || string.Equals(trimmed, IgnoredStaleOrMissing, StringComparison.OrdinalIgnoreCase)
             || string.Equals(trimmed, IgnoredMissingArticle, StringComparison.OrdinalIgnoreCase);
