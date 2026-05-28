@@ -111,7 +111,7 @@ public sealed class LikeArticleUseCase : ILikeArticleUseCase
                 await _outboxWriter.WriteArticleLikedAsync(
                     messageId: messageId,
                     aggregatePublicId: articleLike.PublicId,
-                    aggregateVersion: articleLike.Version,
+                    aggregateVersion: checked((int)articleLike.Version),
                     payload: payload,
                     correlationId: _requestContext.CorrelationId,
                     initiatorUserId: currentUserId,

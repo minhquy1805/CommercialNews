@@ -113,7 +113,7 @@ public sealed class DeleteOwnCommentUseCase : IDeleteOwnCommentUseCase
                 await _outboxWriter.WriteCommentDeletedByAuthorAsync(
                     messageId: messageId,
                     aggregatePublicId: mutationResult.CommentPublicId,
-                    aggregateVersion: mutationResult.Version,
+                    aggregateVersion: checked((int)mutationResult.Version),
                     payload: payload,
                     correlationId: _requestContext.CorrelationId,
                     initiatorUserId: currentUserId,

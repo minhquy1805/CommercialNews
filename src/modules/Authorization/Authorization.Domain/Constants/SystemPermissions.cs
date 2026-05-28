@@ -281,6 +281,36 @@ public static class SystemPermissions
             Description: "Revoke Identity user refresh-token sessions"),
 
         new(
+            Key: PermissionKeys.Interaction.Comments.Read,
+            Module: "Interaction",
+            Action: "Read",
+            Description: "Read comments in administrative interaction workflows"),
+
+        new(
+            Key: PermissionKeys.Interaction.Comments.Moderate,
+            Module: "Interaction",
+            Action: "Moderate",
+            Description: "Hide or restore comments through moderation workflows"),
+
+        new(
+            Key: PermissionKeys.Interaction.CommentReports.Read,
+            Module: "Interaction",
+            Action: "Read",
+            Description: "Read reported-comment moderation cases and associated reports"),
+
+        new(
+            Key: PermissionKeys.Interaction.CommentReports.Resolve,
+            Module: "Interaction",
+            Action: "Resolve",
+            Description: "Resolve reported-comment moderation cases"),
+
+        new(
+            Key: PermissionKeys.Interaction.Counters.Read,
+            Module: "Interaction",
+            Action: "Read",
+            Description: "Read interaction counter snapshots for administrative diagnostics"),
+
+        new(
             Key: PermissionKeys.Authz.Permissions.Read,
             Module: "Authz",
             Action: "Read",

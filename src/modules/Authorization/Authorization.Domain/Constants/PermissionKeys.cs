@@ -120,6 +120,26 @@ public static class PermissionKeys
         }
     }
 
+    public static class Interaction
+    {
+        public static class Comments
+        {
+            public const string Read = "interaction:comments:read";
+            public const string Moderate = "interaction:comments:moderate";
+        }
+
+        public static class CommentReports
+        {
+            public const string Read = "interaction:comment-reports:read";
+            public const string Resolve = "interaction:comment-reports:resolve";
+        }
+
+        public static class Counters
+        {
+            public const string Read = "interaction:counters:read";
+        }
+    }
+
     public static class Authz
     {
         public static class Permissions

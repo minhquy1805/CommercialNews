@@ -165,6 +165,41 @@ public static class ReadingErrors
                 code: "READING.PROJECTION_APPLY_FAILED",
                 message: "Reading projection apply failed.");
 
+        public static readonly Error InteractionCounterCommandRequired =
+            Error.Validation(
+                code: "READING.INTERACTION_COUNTER.COMMAND_REQUIRED",
+                message: "Interaction counter projection command is required.");
+
+        public static readonly Error InvalidInteractionCounterArticlePublicId =
+            Error.Validation(
+                code: "READING.INTERACTION_COUNTER.ARTICLE_PUBLIC_ID_INVALID",
+                message: "Article public id must be a valid 26-character value.");
+
+        public static readonly Error InvalidInteractionCounters =
+            Error.Validation(
+                code: "READING.INTERACTION_COUNTER.COUNTERS_INVALID",
+                message: "Interaction counters must be non-negative.");
+
+        public static readonly Error InvalidInteractionStatsVersion =
+            Error.Validation(
+                code: "READING.INTERACTION_COUNTER.STATS_VERSION_INVALID",
+                message: "Interaction stats version must be greater than zero.");
+
+        public static readonly Error InvalidInteractionCounterMessageId =
+            Error.Validation(
+                code: "READING.INTERACTION_COUNTER.MESSAGE_ID_INVALID",
+                message: "Message id must be a valid 26-character value.");
+
+        public static readonly Error InteractionCounterSourceOccurredAtRequired =
+            Error.Validation(
+                code: "READING.INTERACTION_COUNTER.SOURCE_OCCURRED_AT_REQUIRED",
+                message: "Source occurred timestamp is required.");
+
+        public static readonly Error InteractionCounterProjectionApplyFailed =
+            Error.Failure(
+                code: "READING.INTERACTION_COUNTER.PROJECTION_APPLY_FAILED",
+                message: "Reading interaction counter projection apply failed.");
+
         public static readonly Error StaleProjectionEvent =
             Error.Conflict(
                 code: "READING.STALE_PROJECTION_EVENT",

@@ -122,7 +122,7 @@ public sealed class DismissReportedCommentCaseUseCase
             await _outboxWriter.WriteCommentReportsDismissedAsync(
                 messageId: messageId,
                 aggregatePublicId: dismissResult.CommentModerationCasePublicId,
-                aggregateVersion: dismissResult.CaseVersion,
+                aggregateVersion: checked((int)dismissResult.CaseVersion),
                 payload: payload,
                 correlationId: _requestContext.CorrelationId,
                 initiatorUserId: moderatorUserId,

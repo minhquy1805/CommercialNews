@@ -57,7 +57,8 @@ public sealed class ApplyArticleInteractionCounterProjectionUseCase
                 await RollbackIfNeededAsync(CancellationToken.None);
 
                 return Result<ArticleProjectionApplyResult>.Failure(
-                    ReadingErrors.Projection.ProjectionApplyFailed);
+                    ReadingErrors.Projection
+                        .InteractionCounterProjectionApplyFailed);
             }
 
             await _unitOfWork.CommitAsync(cancellationToken);
@@ -75,7 +76,7 @@ public sealed class ApplyArticleInteractionCounterProjectionUseCase
             await RollbackIfNeededAsync(CancellationToken.None);
 
             return Result<ArticleProjectionApplyResult>.Failure(
-                ReadingErrors.Projection.ProjectionApplyFailed);
+                ReadingErrors.Projection.InteractionCounterProjectionApplyFailed);
         }
         catch (ReadingDomainException)
         {

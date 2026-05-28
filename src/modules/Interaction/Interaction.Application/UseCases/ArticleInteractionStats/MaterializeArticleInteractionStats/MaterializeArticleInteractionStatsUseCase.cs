@@ -113,7 +113,7 @@ public sealed class MaterializeArticleInteractionStatsUseCase
                 await _outboxWriter.WriteArticleCountersProjectionPublishedAsync(
                     messageId: publicationMessageIdCandidate,
                     aggregatePublicId: stats.ArticlePublicId,
-                    aggregateVersion: stats.StatsVersion,
+                    aggregateVersion: checked((int)stats.StatsVersion),
                     payload: payload,
                     correlationId: null,
                     initiatorUserId: null,
