@@ -1,6 +1,7 @@
 using Audit.Application.Consumers.Authorization;
 using Audit.Application.Consumers.Content;
 using Audit.Application.Consumers.Identity;
+using Audit.Application.Consumers.Interaction;
 using Audit.Application.Consumers.Media;
 using Audit.Application.Services;
 using Audit.Application.UseCases.GetAuditLogByEventId;
@@ -42,6 +43,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<
             IMediaAuditEventIngestionService,
             MediaAuditEventIngestionService>();
+
+        services.AddScoped<
+            IInteractionAuditEventIngestionService,
+            InteractionAuditEventIngestionService>();
 
         return services;
     }
