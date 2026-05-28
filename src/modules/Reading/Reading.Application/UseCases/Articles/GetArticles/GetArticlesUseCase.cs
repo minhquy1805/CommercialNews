@@ -139,8 +139,7 @@ public sealed class GetArticlesUseCase : IGetArticlesUseCase
 
             ViewCount = item.ViewCount,
             LikeCount = item.LikeCount,
-            CommentCount = item.CommentCount,
-            PopularityScore = item.PopularityScore
+            VisibleCommentCount = item.VisibleCommentCount
         };
     }
 

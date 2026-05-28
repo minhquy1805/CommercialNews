@@ -6,7 +6,7 @@ public sealed class ArticleCountersHttpResponse
 
     public long Likes { get; init; }
 
-    public long Comments { get; init; }
+    public long VisibleCommentCount { get; init; }
 
     public bool CountersPartial { get; init; }
 }

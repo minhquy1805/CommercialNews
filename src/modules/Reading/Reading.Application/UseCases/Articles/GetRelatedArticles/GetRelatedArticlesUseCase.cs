@@ -82,8 +82,7 @@ public sealed class GetRelatedArticlesUseCase : IGetRelatedArticlesUseCase
 
             ViewCount = item.ViewCount,
             LikeCount = item.LikeCount,
-            CommentCount = item.CommentCount,
-            PopularityScore = item.PopularityScore
+            VisibleCommentCount = item.VisibleCommentCount
         };
     }
 }

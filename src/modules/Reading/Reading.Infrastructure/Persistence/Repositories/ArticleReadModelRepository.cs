@@ -28,6 +28,8 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
     private const string ApplySeoRouteProc = "[reading].[Reading_ArticleSeoRouteProjection_ApplyFromSeo]";
     private const string ApplySeoMetadataProc = "[reading].[Reading_ArticleSeoMetadataProjection_ApplyFromSeo]";
     private const string ApplyAuthorProfileProc = "[reading].[Reading_AuthorProfileProjection_ApplyFromIdentity]";
+    private const string ApplyInteractionCountersProc =
+        "[reading].[Reading_ArticleInteractionCounterProjection_ApplyFromInteraction]";
 
     private readonly ReadingUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
@@ -705,6 +707,62 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         }
     }
 
+    public async Task<ArticleProjectionApplyResult> ApplyInteractionCountersAsync(
+        ApplyArticleInteractionCounterProjectionCommand commandModel,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(commandModel);
+
+        try
+        {
+            using SqlCommand command =
+                CreateTransactionalCommand(ApplyInteractionCountersProc);
+
+            command.Parameters.AddRange(
+            [
+                new SqlParameter("@ArticlePublicId", SqlDbType.Char, 26)
+                {
+                    Value = commandModel.ArticlePublicId
+                },
+                new SqlParameter("@ViewCount", SqlDbType.BigInt)
+                {
+                    Value = commandModel.ViewCount
+                },
+                new SqlParameter("@LikeCount", SqlDbType.BigInt)
+                {
+                    Value = commandModel.LikeCount
+                },
+                new SqlParameter("@VisibleCommentCount", SqlDbType.BigInt)
+                {
+                    Value = commandModel.VisibleCommentCount
+                },
+                new SqlParameter("@InteractionStatsVersion", SqlDbType.BigInt)
+                {
+                    Value = commandModel.InteractionStatsVersion
+                },
+                new SqlParameter("@MessageId", SqlDbType.Char, 26)
+                {
+                    Value = commandModel.MessageId
+                },
+                CreateDateTime2Parameter(
+                    "@SourceOccurredAtUtc",
+                    commandModel.SourceOccurredAtUtc)
+            ]);
+
+            using SqlDataReader reader =
+                await command.ExecuteReaderAsync(cancellationToken);
+
+            return await ReadInteractionCounterProjectionApplyResultAsync(
+                reader,
+                commandModel.InteractionStatsVersion,
+                cancellationToken);
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+    }
+
     public async Task<ArticleProjectionApplyResult> UpsertMediaAttachmentAsync(
         UpsertArticleMediaProjectionCommand commandModel,
         CancellationToken cancellationToken = default)
@@ -985,8 +1043,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
             ViewCount = GetInt64OrDefault(reader, "ViewCount"),
             LikeCount = GetInt64OrDefault(reader, "LikeCount"),
-            CommentCount = GetInt64OrDefault(reader, "CommentCount"),
-            PopularityScore = GetNullableDouble(reader, "PopularityScore")
+            VisibleCommentCount = GetInt64OrDefault(reader, "VisibleCommentCount")
         };
     }
 
@@ -1016,8 +1073,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
             ViewCount = GetInt64OrDefault(reader, "ViewCount"),
             LikeCount = GetInt64OrDefault(reader, "LikeCount"),
-            CommentCount = GetInt64OrDefault(reader, "CommentCount"),
-            PopularityScore = GetNullableDouble(reader, "PopularityScore")
+            VisibleCommentCount = GetInt64OrDefault(reader, "VisibleCommentCount")
         };
     }
 
@@ -1131,6 +1187,57 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         };
     }
 
+    private static async Task<ArticleProjectionApplyResult>
+        ReadInteractionCounterProjectionApplyResultAsync(
+            SqlDataReader reader,
+            long incomingInteractionStatsVersion,
+            CancellationToken cancellationToken)
+    {
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "Reading interaction counter projection apply procedure did not return an apply result row.");
+        }
+
+        int appliedOrdinal = TryGetOrdinal(reader, "Applied");
+        int decisionOrdinal = TryGetOrdinal(reader, "Decision");
+        int previousInteractionStatsVersionOrdinal =
+            TryGetOrdinal(reader, "PreviousInteractionStatsVersion");
+        int incomingInteractionStatsVersionOrdinal =
+            TryGetOrdinal(reader, "IncomingInteractionStatsVersion");
+
+        string decision = decisionOrdinal >= 0 && !reader.IsDBNull(decisionOrdinal)
+            ? reader.GetString(decisionOrdinal)
+            : ProjectionApplyDecisions.Ignored;
+
+        if (!ProjectionApplyDecisions.IsValid(decision))
+        {
+            throw new InvalidOperationException(
+                $"Reading interaction counter projection apply procedure returned an unknown decision '{decision}'.");
+        }
+
+        return new ArticleProjectionApplyResult
+        {
+            Applied = appliedOrdinal >= 0
+                      && !reader.IsDBNull(appliedOrdinal)
+                      && reader.GetBoolean(appliedOrdinal),
+
+            Decision = decision,
+
+            PreviousSourceVersion =
+                previousInteractionStatsVersionOrdinal >= 0
+                && !reader.IsDBNull(previousInteractionStatsVersionOrdinal)
+                    ? reader.GetInt64(previousInteractionStatsVersionOrdinal)
+                    : null,
+
+            IncomingSourceVersion =
+                incomingInteractionStatsVersionOrdinal >= 0
+                && !reader.IsDBNull(incomingInteractionStatsVersionOrdinal)
+                    ? reader.GetInt64(incomingInteractionStatsVersionOrdinal)
+                    : incomingInteractionStatsVersion
+        };
+    }
+
     private static string? GetNullableString(SqlDataReader reader, string columnName)
     {
         int ordinal = TryGetOrdinal(reader, columnName);
@@ -1232,24 +1339,6 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
     }
 
-    private static double? GetNullableDouble(SqlDataReader reader, string columnName)
-    {
-        int ordinal = TryGetOrdinal(reader, columnName);
-        if (ordinal < 0)
-        {
-            return null;
-        }
-
-        if (reader.IsDBNull(ordinal))
-        {
-            return null;
-        }
-
-        object value = reader.GetValue(ordinal);
-
-        return Convert.ToDouble(value);
-    }
-
     private static bool GetBooleanOrDefault(
         SqlDataReader reader,
         string columnName)
@@ -1327,8 +1416,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
             ViewCount = core.ViewCount,
             LikeCount = core.LikeCount,
-            CommentCount = core.CommentCount,
-            PopularityScore = core.PopularityScore,
+            VisibleCommentCount = core.VisibleCommentCount,
 
             Tags = tags,
             Media = media
@@ -1397,8 +1485,6 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
         public long LikeCount { get; init; }
 
-        public long CommentCount { get; init; }
-
-        public double? PopularityScore { get; init; }
+        public long VisibleCommentCount { get; init; }
     }
 }

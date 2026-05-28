@@ -27,8 +27,8 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 "Schema reading does not exist.",
                 exception),
 
-            56103 or 56104 or 56105 or 56106 or 56107 or 56108 or 56109
-                or 58203 or 58204 or 58205 or 58206 or 58207 or 58208 or 58209 => Reading(
+            56103 or 56104 or 56105 or 56106 or 56107 or 56108 or 56109 or 56110
+                or 58200 or 58203 or 58204 or 58205 or 58206 or 58207 or 58208 or 58209 => Reading(
                 "READING.PROJECTION_STORE_NOT_FOUND",
                 "A required Reading projection table does not exist.",
                 exception),
@@ -267,6 +267,37 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
 
             /*
               =========================================================
+              Interaction counter projection validation
+              =========================================================
+            */
+
+            58400 => Reading(
+                "READING.INVALID_INTERACTION_COUNTER_ARTICLE_PUBLIC_ID",
+                "Interaction counter article public id must be a valid 26-character public id.",
+                exception),
+
+            58401 => Reading(
+                "READING.INVALID_INTERACTION_COUNTERS",
+                "Interaction counters must be non-null and non-negative.",
+                exception),
+
+            58402 => Reading(
+                "READING.INVALID_INTERACTION_STATS_VERSION",
+                "Interaction stats version must be greater than zero.",
+                exception),
+
+            58403 => Reading(
+                "READING.INVALID_INTERACTION_COUNTER_MESSAGE_ID",
+                "Interaction counter message id must be a valid 26-character value.",
+                exception),
+
+            58404 => Reading(
+                "READING.INVALID_INTERACTION_COUNTER_SOURCE_OCCURRED_AT_UTC",
+                "Interaction counter source occurred timestamp is required.",
+                exception),
+
+            /*
+              =========================================================
               SQL Server constraints
               =========================================================
             */
@@ -383,6 +414,16 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
             return Reading(
                 "READING.AUTHOR_PROFILE_PUBLIC_ID_ALREADY_EXISTS",
                 "Author user public id already exists in the Reading projection.",
+                exception);
+        }
+
+        if (message.Contains(
+                "PK_ArticleInteractionCounterProjection",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INTERACTION_COUNTER_PROJECTION_ALREADY_EXISTS",
+                "Article interaction counter projection already exists.",
                 exception);
         }
 
@@ -902,6 +943,52 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
             return Reading(
                 "READING.OBSOLETE_AUTHOR_PROFILE_TIMESTAMP_CONSTRAINT",
                 "Reading author profile projection has obsolete timestamp constraints. Re-run the Reading table migration script.",
+                exception);
+        }
+
+        /*
+          =========================================================
+          ArticleInteractionCounterProjection constraints
+          =========================================================
+        */
+
+        if (message.Contains(
+                "CK_ArticleInteractionCounterProjection_ArticlePublicId_Length",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_INTERACTION_COUNTER_ARTICLE_PUBLIC_ID",
+                "Interaction counter article public id must be a valid 26-character public id.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_ArticleInteractionCounterProjection_Counters_NonNegative",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_INTERACTION_COUNTERS",
+                "Interaction counters must not be negative.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_ArticleInteractionCounterProjection_StatsVersion_Positive",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_INTERACTION_STATS_VERSION",
+                "Interaction stats version must be greater than zero.",
+                exception);
+        }
+
+        if (message.Contains(
+                "CK_ArticleInteractionCounterProjection_LastEventMessageId_Length",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Reading(
+                "READING.INVALID_INTERACTION_COUNTER_MESSAGE_ID",
+                "Interaction counter message id must be a valid 26-character value.",
                 exception);
         }
 
