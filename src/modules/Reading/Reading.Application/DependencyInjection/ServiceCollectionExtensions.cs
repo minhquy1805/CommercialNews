@@ -11,6 +11,7 @@ using Reading.Application.UseCases.Articles.SearchArticles;
 using Reading.Application.UseCases.Projections.ApplyContentArticleProjection;
 using Reading.Application.UseCases.Projections.ApplyAuthorProfileProjection;
 using Reading.Application.UseCases.Projections.ApplyArticleMediaProjection;
+using Reading.Application.UseCases.Projections.ApplyArticleInteractionCounterProjection;
 using Reading.Application.UseCases.Projections.ApplyArticleSeoMetadataProjection;
 using Reading.Application.UseCases.Projections.ApplyArticleSeoRouteProjection;
 using Reading.Application.UseCases.Projections.MarkArticleProjectionNotPublic;
@@ -31,6 +32,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IApplyContentArticleProjectionUseCase, ApplyContentArticleProjectionUseCase>();
         services.AddScoped<IApplyArticleMediaProjectionUseCase, ApplyArticleMediaProjectionUseCase>();
+        services.AddScoped<IApplyArticleInteractionCounterProjectionUseCase, ApplyArticleInteractionCounterProjectionUseCase>();
         services.AddScoped<IApplyArticleSeoRouteProjectionUseCase, ApplyArticleSeoRouteProjectionUseCase>();
         services.AddScoped<IApplyArticleSeoMetadataProjectionUseCase, ApplyArticleSeoMetadataProjectionUseCase>();
         services.AddScoped<IApplyAuthorProfileProjectionUseCase, ApplyAuthorProfileProjectionUseCase>();

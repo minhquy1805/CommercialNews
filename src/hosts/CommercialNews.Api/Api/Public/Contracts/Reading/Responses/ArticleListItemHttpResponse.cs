@@ -29,6 +29,4 @@ public sealed class ArticleListItemHttpResponse
     public DateTime UpdatedAtUtc { get; init; }
 
     public ArticleCountersHttpResponse Counters { get; init; } = new();
-
-    public double? PopularityScore { get; init; }
 }

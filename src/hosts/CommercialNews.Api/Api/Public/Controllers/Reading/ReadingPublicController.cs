@@ -265,11 +265,9 @@ public sealed class ReadingPublicController : ControllerBase
             {
                 Views = source.ViewCount,
                 Likes = source.LikeCount,
-                Comments = source.CommentCount,
+                VisibleCommentCount = source.VisibleCommentCount,
                 CountersPartial = false
             },
-
-            PopularityScore = source.PopularityScore,
 
             Tags = source.Tags
                 .Select(MapArticleTag)
@@ -309,11 +307,9 @@ public sealed class ReadingPublicController : ControllerBase
             {
                 Views = source.ViewCount,
                 Likes = source.LikeCount,
-                Comments = source.CommentCount,
+                VisibleCommentCount = source.VisibleCommentCount,
                 CountersPartial = false
-            },
-
-            PopularityScore = source.PopularityScore
+            }
         };
     }
 
