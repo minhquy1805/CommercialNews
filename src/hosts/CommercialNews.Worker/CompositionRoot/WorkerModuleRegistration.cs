@@ -11,6 +11,9 @@ using CommercialNews.Worker.Audit.Handlers;
 using CommercialNews.Worker.Audit.Handlers.Authorization;
 using CommercialNews.Worker.Audit.Handlers.Identity;
 using CommercialNews.Worker.Configuration;
+using CommercialNews.Worker.Interaction.Consumers;
+using CommercialNews.Worker.Interaction.Handlers;
+using CommercialNews.Worker.Interaction.Handlers.Content;
 using CommercialNews.Worker.Notifications.Consumers;
 using CommercialNews.Worker.Notifications.Handlers;
 using CommercialNews.Worker.Notifications.Handlers.Identity;
@@ -41,6 +44,8 @@ using CommercialNews.Worker.Reading.Handlers.Content;
 using CommercialNews.Worker.Reading.Handlers.Identity;
 using CommercialNews.Worker.Reading.Handlers.Media;
 using CommercialNews.Worker.Reading.Handlers.Seo;
+using Interaction.Application.DependencyInjection;
+using Interaction.Infrastructure.DependencyInjection;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -69,6 +74,9 @@ public static class WorkerModuleRegistration
 
         services.AddReadingApplication();
         services.AddReadingInfrastructure();
+
+        services.AddInteractionApplication();
+        services.AddInteractionInfrastructure();
 
         services.AddOptions<OutboxWorkerOptions>()
             .Bind(configuration.GetSection("Workers:Outbox"));
@@ -171,6 +179,9 @@ public static class WorkerModuleRegistration
         services.Configure<ReadingRabbitMqConsumerOptions>(
             configuration.GetSection(ReadingRabbitMqConsumerOptions.SectionName));
 
+        services.Configure<InteractionRabbitMqConsumerOptions>(
+            configuration.GetSection(InteractionRabbitMqConsumerOptions.SectionName));
+
         services.AddScoped<AuditIntegrationEventDispatcher>();
 
         services.AddScoped<IAuditIntegrationEventHandler, AuthorizationUserRoleAssignedAuditHandler>();
@@ -242,6 +253,13 @@ public static class WorkerModuleRegistration
         services.AddScoped<IReadingIntegrationEventHandler, IdentityUserRegisteredReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, IdentityUserPublicProfileUpdatedReadingHandler>();
 
+        services.AddScoped<InteractionIntegrationEventDispatcher>();
+
+        services.AddScoped<IInteractionIntegrationEventHandler, ContentArticlePublishedInteractionHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleUnpublishedInteractionHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleArchivedInteractionHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleSoftDeletedInteractionHandler>();
+
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));
 
@@ -251,6 +269,7 @@ public static class WorkerModuleRegistration
         services.AddHostedService<AuditRabbitMqConsumerService>();
         services.AddHostedService<SeoRabbitMqConsumerService>();
         services.AddHostedService<ReadingRabbitMqConsumerService>();
+        services.AddHostedService<InteractionRabbitMqConsumerService>();
         services.AddHostedService<EmailDeliveryProcessingWorker>();
 
         return services;
