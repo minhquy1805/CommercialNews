@@ -43,6 +43,7 @@ using CommercialNews.Worker.Reading.Consumers;
 using CommercialNews.Worker.Reading.Handlers;
 using CommercialNews.Worker.Reading.Handlers.Content;
 using CommercialNews.Worker.Reading.Handlers.Identity;
+using CommercialNews.Worker.Reading.Handlers.Interaction;
 using CommercialNews.Worker.Reading.Handlers.Media;
 using CommercialNews.Worker.Reading.Handlers.Seo;
 using Interaction.Application.DependencyInjection;
@@ -256,6 +257,7 @@ public static class WorkerModuleRegistration
         services.AddScoped<IReadingIntegrationEventHandler, SeoMetadataUpdatedReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, IdentityUserRegisteredReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, IdentityUserPublicProfileUpdatedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, InteractionArticleCountersProjectionPublishedReadingHandler>();
 
         services.AddScoped<InteractionIntegrationEventDispatcher>();
 
