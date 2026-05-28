@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Reading.Application.Consumers.Content;
 using Reading.Application.Consumers.Identity;
+using Reading.Application.Consumers.Interaction;
 using Reading.Application.Consumers.Media;
 using Reading.Application.Consumers.Seo;
 using Reading.Application.UseCases.Articles.GetArticleByPublicId;
@@ -40,6 +41,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IContentReadingEventIngestionService, ContentReadingEventIngestionService>();
         services.AddScoped<IIdentityReadingEventIngestionService, IdentityReadingEventIngestionService>();
+        services.AddScoped<IInteractionReadingEventIngestionService, InteractionReadingEventIngestionService>();
         services.AddScoped<IMediaReadingEventIngestionService, MediaReadingEventIngestionService>();
         services.AddScoped<ISeoReadingEventIngestionService, SeoReadingEventIngestionService>();
 
