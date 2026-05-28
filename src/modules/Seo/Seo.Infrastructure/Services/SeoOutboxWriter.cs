@@ -178,7 +178,7 @@ public sealed class SeoOutboxWriter : ISeoOutboxWriter
         string aggregateType,
         string aggregateId,
         string? aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         TPayload payload,
         DateTime occurredAtUtc,
         byte priority,
@@ -209,7 +209,7 @@ public sealed class SeoOutboxWriter : ISeoOutboxWriter
             occurredAt: occurredAtUtc,
             priority: priority,
             aggregatePublicId: NormalizeOptional(aggregatePublicId),
-            aggregateVersion: ToAggregateVersion(aggregateVersion),
+            aggregateVersion: aggregateVersion,
             headers: null,
             correlationId: NormalizeOptional(correlationId),
             initiatorUserId: initiatorUserId);
@@ -274,18 +274,6 @@ public sealed class SeoOutboxWriter : ISeoOutboxWriter
                $"{metadata.ResourcePublicId.Trim()}:updated:v{metadata.Version}";
     }
 
-    private static int ToAggregateVersion(long version)
-    {
-        if (version > int.MaxValue)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(version),
-                "Aggregate version exceeds Int32 range.");
-        }
-
-        return (int)version;
-    }
-
     private static void ValidatePublicId(string? value, string parameterName)
     {
         ValidateRequired(value, parameterName);
@@ -309,7 +297,7 @@ public sealed class SeoOutboxWriter : ISeoOutboxWriter
     }
 
     private static void ValidatePositiveVersion(
-        long value,
+        int value,
         string parameterName)
     {
         if (value <= 0)

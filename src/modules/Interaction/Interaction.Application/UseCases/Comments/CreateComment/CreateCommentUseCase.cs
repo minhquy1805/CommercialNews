@@ -122,7 +122,7 @@ public sealed class CreateCommentUseCase : ICreateCommentUseCase
             await _outboxWriter.WriteCommentCreatedAsync(
                 messageId: messageId,
                 aggregatePublicId: comment.PublicId,
-                aggregateVersion: comment.Version,
+                aggregateVersion: checked((int)comment.Version),
                 payload: payload,
                 correlationId: _requestContext.CorrelationId,
                 initiatorUserId: currentUserId,

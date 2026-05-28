@@ -81,4 +81,16 @@ public static class AuthorizationPolicies
     public const string IdentityUsersManageSecurity = "Permission:identity:users:manage-security";
     public const string IdentityUsersVerifyEmail = "Permission:identity:users:verify-email";
     public const string IdentityUsersRevokeSessions = "Permission:identity:users:revoke-sessions";
+
+    public const string InteractionCommentsRead = "Permission:interaction:comments:read";
+
+    public const string InteractionCommentsModerate = "Permission:interaction:comments:moderate";
+
+    public const string InteractionCommentReportsRead = "Permission:interaction:comment-reports:read";
+
+    public const string InteractionCommentReportsResolve = "Permission:interaction:comment-reports:resolve";
+
+    public const string InteractionCommentReportsHideComment = "Permission:interaction:comment-reports:hide-comment";
+
+    public const string InteractionCountersRead = "Permission:interaction:counters:read";
 }

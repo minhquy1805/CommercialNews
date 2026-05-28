@@ -186,7 +186,7 @@ public sealed class CreateCommentReportUseCase : ICreateCommentReportUseCase
                 await _outboxWriter.WriteCommentReportAlertTriggeredAsync(
                     messageId: alertMessageIdCandidate,
                     aggregatePublicId: mutationResult.CommentModerationCasePublicId,
-                    aggregateVersion: mutationResult.CaseVersion,
+                    aggregateVersion: checked((int)mutationResult.CaseVersion),
                     payload: alertPayload,
                     correlationId: _requestContext.CorrelationId,
                     initiatorUserId: reporterUserId,

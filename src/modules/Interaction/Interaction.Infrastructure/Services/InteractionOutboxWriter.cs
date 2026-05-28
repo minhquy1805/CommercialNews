@@ -30,7 +30,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteArticleLikedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         ArticleLikedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -56,7 +56,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteArticleUnlikedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         ArticleUnlikedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -82,7 +82,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteCommentCreatedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentCreatedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -108,7 +108,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteCommentHiddenAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentHiddenPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -134,7 +134,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteCommentRestoredAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentRestoredPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -160,7 +160,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteCommentDeletedByAuthorAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentDeletedByAuthorPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -186,7 +186,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteCommentReportedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentReportedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -212,7 +212,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteCommentReportsDismissedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentReportsDismissedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -238,7 +238,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteCommentReportAlertTriggeredAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentReportAlertTriggeredPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -264,7 +264,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     public Task WriteArticleCountersProjectionPublishedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         ArticleCountersProjectionPublishedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -292,7 +292,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
         string eventType,
         string aggregateType,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         TPayload payload,
         DateTime occurredAtUtc,
         byte priority,
@@ -328,7 +328,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
             occurredAt: occurredAtUtc,
             priority: priority,
             aggregatePublicId: normalizedAggregatePublicId,
-            aggregateVersion: ToAggregateVersion(aggregateVersion),
+            aggregateVersion: aggregateVersion,
             headers: null,
             correlationId: NormalizeOptional(correlationId),
             initiatorUserId: initiatorUserId);
@@ -337,18 +337,6 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
             _unitOfWork,
             outboxMessage,
             cancellationToken);
-    }
-
-    private static int ToAggregateVersion(long version)
-    {
-        if (version > int.MaxValue)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(version),
-                "Aggregate version exceeds Int32 range.");
-        }
-
-        return (int)version;
     }
 
     private static void ValidatePublicId(
@@ -378,7 +366,7 @@ public sealed class InteractionOutboxWriter : IInteractionOutboxWriter
     }
 
     private static void ValidatePositiveVersion(
-        long value,
+        int value,
         string parameterName)
     {
         if (value <= 0)

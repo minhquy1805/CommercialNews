@@ -109,7 +109,7 @@ public sealed class RestoreCommentUseCase : IRestoreCommentUseCase
             await _outboxWriter.WriteCommentRestoredAsync(
                 messageId: messageId,
                 aggregatePublicId: moderationResult.CommentPublicId,
-                aggregateVersion: moderationResult.Version,
+                aggregateVersion: checked((int)moderationResult.Version),
                 payload: payload,
                 correlationId: _requestContext.CorrelationId,
                 initiatorUserId: actorUserId,

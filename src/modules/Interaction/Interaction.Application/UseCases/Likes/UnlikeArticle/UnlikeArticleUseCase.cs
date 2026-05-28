@@ -104,7 +104,7 @@ public sealed class UnlikeArticleUseCase : IUnlikeArticleUseCase
                 await _outboxWriter.WriteArticleUnlikedAsync(
                     messageId: messageId,
                     aggregatePublicId: articleLike.PublicId,
-                    aggregateVersion: articleLike.Version,
+                    aggregateVersion: checked((int)articleLike.Version),
                     payload: payload,
                     correlationId: _requestContext.CorrelationId,
                     initiatorUserId: currentUserId,

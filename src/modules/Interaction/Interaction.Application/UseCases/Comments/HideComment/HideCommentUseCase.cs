@@ -119,7 +119,7 @@ public sealed class HideCommentUseCase : IHideCommentUseCase
             await _outboxWriter.WriteCommentHiddenAsync(
                 messageId: messageId,
                 aggregatePublicId: moderationResult.CommentPublicId,
-                aggregateVersion: moderationResult.Version,
+                aggregateVersion: checked((int)moderationResult.Version),
                 payload: payload,
                 correlationId: _requestContext.CorrelationId,
                 initiatorUserId: actorUserId,

@@ -139,7 +139,7 @@ public sealed class HideReportedCommentUseCase
             await _outboxWriter.WriteCommentHiddenAsync(
                 messageId: messageId,
                 aggregatePublicId: hideResult.CommentPublicId,
-                aggregateVersion: hideResult.CommentVersion,
+                aggregateVersion: checked((int)hideResult.CommentVersion),
                 payload: payload,
                 correlationId: _requestContext.CorrelationId,
                 initiatorUserId: moderatorUserId,

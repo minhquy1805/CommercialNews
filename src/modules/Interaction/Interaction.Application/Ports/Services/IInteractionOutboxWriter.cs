@@ -7,7 +7,7 @@ public interface IInteractionOutboxWriter
     Task WriteArticleLikedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         ArticleLikedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -17,7 +17,7 @@ public interface IInteractionOutboxWriter
     Task WriteArticleUnlikedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         ArticleUnlikedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -27,7 +27,7 @@ public interface IInteractionOutboxWriter
     Task WriteCommentCreatedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentCreatedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -37,7 +37,7 @@ public interface IInteractionOutboxWriter
     Task WriteCommentHiddenAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentHiddenPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -47,7 +47,7 @@ public interface IInteractionOutboxWriter
     Task WriteCommentRestoredAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentRestoredPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -57,7 +57,7 @@ public interface IInteractionOutboxWriter
     Task WriteCommentDeletedByAuthorAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentDeletedByAuthorPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -67,7 +67,7 @@ public interface IInteractionOutboxWriter
     Task WriteCommentReportedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentReportedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -77,7 +77,7 @@ public interface IInteractionOutboxWriter
     Task WriteCommentReportsDismissedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentReportsDismissedPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -87,7 +87,7 @@ public interface IInteractionOutboxWriter
     Task WriteCommentReportAlertTriggeredAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         CommentReportAlertTriggeredPayload payload,
         string? correlationId,
         long? initiatorUserId,
@@ -97,7 +97,7 @@ public interface IInteractionOutboxWriter
     Task WriteArticleCountersProjectionPublishedAsync(
         string messageId,
         string aggregatePublicId,
-        long aggregateVersion,
+        int aggregateVersion,
         ArticleCountersProjectionPublishedPayload payload,
         string? correlationId,
         long? initiatorUserId,

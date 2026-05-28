@@ -328,6 +328,48 @@ public static class AuthorizationPolicyRegistrationExtensions
                 policy => policy.Requirements.Add(
                     new PermissionRequirement(PermissionKeys.Identity.Users.RevokeSessions)));
 
+                        options.AddPolicy(
+                AuthorizationPolicies.InteractionCommentsRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(
+                        PermissionKeys.Interaction.Comments.Read)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.InteractionCommentsModerate,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(
+                        PermissionKeys.Interaction.Comments.Moderate)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.InteractionCommentReportsRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(
+                        PermissionKeys.Interaction.CommentReports.Read)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.InteractionCommentReportsResolve,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(
+                        PermissionKeys.Interaction.CommentReports.Resolve)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.InteractionCommentReportsHideComment,
+                policy =>
+                {
+                    policy.Requirements.Add(
+                        new PermissionRequirement(
+                            PermissionKeys.Interaction.CommentReports.Resolve));
+
+                    policy.Requirements.Add(
+                        new PermissionRequirement(
+                            PermissionKeys.Interaction.Comments.Moderate));
+                });
+
+            options.AddPolicy(
+                AuthorizationPolicies.InteractionCountersRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(
+                        PermissionKeys.Interaction.Counters.Read)));
         });
 
         return services;

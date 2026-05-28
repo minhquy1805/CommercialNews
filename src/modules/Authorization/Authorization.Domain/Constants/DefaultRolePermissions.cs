@@ -66,6 +66,12 @@ public static class DefaultRolePermissions
                 PermissionKeys.Identity.Users.VerifyEmail,
                 PermissionKeys.Identity.Users.RevokeSessions,
 
+                PermissionKeys.Interaction.Comments.Read,
+                PermissionKeys.Interaction.Comments.Moderate,
+                PermissionKeys.Interaction.CommentReports.Read,
+                PermissionKeys.Interaction.CommentReports.Resolve,
+                PermissionKeys.Interaction.Counters.Read,
+
                 PermissionKeys.Authz.Permissions.Read,
                 PermissionKeys.Authz.Permissions.Create,
                 PermissionKeys.Authz.Permissions.Update,
@@ -113,7 +119,13 @@ public static class DefaultRolePermissions
                 PermissionKeys.Media.ArticleMedia.Reorder,
 
                 PermissionKeys.Seo.ArticleSettings.Read,
-                PermissionKeys.Seo.SlugRoutes.Read
+                PermissionKeys.Seo.SlugRoutes.Read,
+
+                PermissionKeys.Interaction.Comments.Read,
+                PermissionKeys.Interaction.Comments.Moderate,
+
+                PermissionKeys.Interaction.CommentReports.Read,
+                PermissionKeys.Interaction.CommentReports.Resolve
             },
 
             [SystemRoles.Author] = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
