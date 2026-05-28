@@ -10,6 +10,7 @@ using CommercialNews.Worker.Audit.Consumers;
 using CommercialNews.Worker.Audit.Handlers;
 using CommercialNews.Worker.Audit.Handlers.Authorization;
 using CommercialNews.Worker.Audit.Handlers.Identity;
+using CommercialNews.Worker.Audit.Handlers.Interaction;
 using CommercialNews.Worker.Configuration;
 using CommercialNews.Worker.Interaction.Consumers;
 using CommercialNews.Worker.Interaction.Handlers;
@@ -231,6 +232,11 @@ public static class WorkerModuleRegistration
         services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaDetachedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaReorderedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ArticlePrimaryMediaSetAuditHandler>();
+
+        services.AddScoped<IAuditIntegrationEventHandler, CommentHiddenAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, CommentRestoredAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, CommentDeletedByAuthorAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, CommentReportsDismissedAuditHandler>();
 
         services.AddScoped<SeoIntegrationEventDispatcher>();
 
