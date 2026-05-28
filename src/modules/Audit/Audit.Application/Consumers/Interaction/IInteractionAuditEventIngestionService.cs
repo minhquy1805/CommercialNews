@@ -6,11 +6,6 @@ namespace Audit.Application.Consumers.Interaction;
 
 public interface IInteractionAuditEventIngestionService
 {
-    Task<Result<AuditIngestionResult>> IngestCommentReportedAsync(
-        InteractionAuditEnvelopeContext context,
-        CommentReportedAuditPayload payload,
-        CancellationToken cancellationToken = default);
-
     Task<Result<AuditIngestionResult>> IngestCommentHiddenAsync(
         InteractionAuditEnvelopeContext context,
         CommentHiddenAuditPayload payload,
@@ -19,6 +14,11 @@ public interface IInteractionAuditEventIngestionService
     Task<Result<AuditIngestionResult>> IngestCommentRestoredAsync(
         InteractionAuditEnvelopeContext context,
         CommentRestoredAuditPayload payload,
+        CancellationToken cancellationToken = default);
+
+    Task<Result<AuditIngestionResult>> IngestCommentDeletedByAuthorAsync(
+        InteractionAuditEnvelopeContext context,
+        CommentDeletedByAuthorAuditPayload payload,
         CancellationToken cancellationToken = default);
 
     Task<Result<AuditIngestionResult>> IngestCommentReportsDismissedAsync(

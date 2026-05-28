@@ -23,34 +23,6 @@ public sealed class InteractionAuditEventIngestionService
             ?? throw new ArgumentNullException(nameof(auditIngestionService));
     }
 
-    public Task<Result<AuditIngestionResult>> IngestCommentReportedAsync(
-        InteractionAuditEnvelopeContext context,
-        CommentReportedAuditPayload payload,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(payload);
-
-        return _auditIngestionService.IngestAsync(
-            new AuditIngestionRequest
-            {
-                MessageId = context.MessageId,
-                Action = "CommentReported",
-                ResourceType = context.AggregateType,
-                ResourceId = context.AggregateId,
-                ActorUserId = context.InitiatorUserId ?? payload.ReporterUserId,
-                Outcome = "Success",
-                Summary =
-                    $"Comment '{payload.CommentPublicId}' was reported with reason '{payload.ReasonCode}'.",
-                Reason = payload.ReasonCode,
-                OccurredAtUtc = context.OccurredAtUtc,
-                CorrelationId = context.CorrelationId,
-                NewValuesJson = SerializePayload(payload),
-                MetadataJson = BuildMetadataJson(context)
-            },
-            cancellationToken);
-    }
-
     public Task<Result<AuditIngestionResult>> IngestCommentHiddenAsync(
         InteractionAuditEnvelopeContext context,
         CommentHiddenAuditPayload payload,
@@ -98,6 +70,34 @@ public sealed class InteractionAuditEventIngestionService
                 Outcome = "Success",
                 Summary =
                     $"Comment '{payload.CommentPublicId}' was restored to public visibility.",
+                Reason = null,
+                OccurredAtUtc = context.OccurredAtUtc,
+                CorrelationId = context.CorrelationId,
+                NewValuesJson = SerializePayload(payload),
+                MetadataJson = BuildMetadataJson(context)
+            },
+            cancellationToken);
+    }
+
+    public Task<Result<AuditIngestionResult>> IngestCommentDeletedByAuthorAsync(
+        InteractionAuditEnvelopeContext context,
+        CommentDeletedByAuthorAuditPayload payload,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(payload);
+
+        return _auditIngestionService.IngestAsync(
+            new AuditIngestionRequest
+            {
+                MessageId = context.MessageId,
+                Action = "CommentDeletedByAuthor",
+                ResourceType = context.AggregateType,
+                ResourceId = context.AggregateId,
+                ActorUserId = context.InitiatorUserId ?? payload.AuthorUserId,
+                Outcome = "Success",
+                Summary =
+                    $"Comment '{payload.CommentPublicId}' was deleted by its author.",
                 Reason = null,
                 OccurredAtUtc = context.OccurredAtUtc,
                 CorrelationId = context.CorrelationId,
