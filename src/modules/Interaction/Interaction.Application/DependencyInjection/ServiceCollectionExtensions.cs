@@ -1,4 +1,5 @@
 using Interaction.Application.Consumers.Content;
+using Interaction.Application.Consumers.Stats;
 using Interaction.Application.UseCases.ArticleInteractionStats.GetArticleInteractionStats;
 using Interaction.Application.UseCases.ArticleInteractionStats.MaterializeArticleInteractionStats;
 using Interaction.Application.UseCases.ArticleInteractionTargets.ApplyArticleInteractionTargetProjection;
@@ -34,6 +35,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IGetArticleInteractionStatsUseCase, GetArticleInteractionStatsUseCase>();
         services.AddScoped<IMaterializeArticleInteractionStatsUseCase, MaterializeArticleInteractionStatsUseCase>();
+        services.AddScoped<IInteractionStatsEventIngestionService, InteractionStatsEventIngestionService>();
 
         services.AddScoped<ITrackArticleViewUseCase, TrackArticleViewUseCase>();
 

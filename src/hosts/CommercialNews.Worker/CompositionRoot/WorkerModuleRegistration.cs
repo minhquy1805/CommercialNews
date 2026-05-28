@@ -14,6 +14,7 @@ using CommercialNews.Worker.Configuration;
 using CommercialNews.Worker.Interaction.Consumers;
 using CommercialNews.Worker.Interaction.Handlers;
 using CommercialNews.Worker.Interaction.Handlers.Content;
+using CommercialNews.Worker.Interaction.Handlers.Stats;
 using CommercialNews.Worker.Notifications.Consumers;
 using CommercialNews.Worker.Notifications.Handlers;
 using CommercialNews.Worker.Notifications.Handlers.Identity;
@@ -182,6 +183,9 @@ public static class WorkerModuleRegistration
         services.Configure<InteractionRabbitMqConsumerOptions>(
             configuration.GetSection(InteractionRabbitMqConsumerOptions.SectionName));
 
+        services.Configure<InteractionStatsRabbitMqConsumerOptions>(
+            configuration.GetSection(InteractionStatsRabbitMqConsumerOptions.SectionName));
+
         services.AddScoped<AuditIntegrationEventDispatcher>();
 
         services.AddScoped<IAuditIntegrationEventHandler, AuthorizationUserRoleAssignedAuditHandler>();
@@ -259,6 +263,12 @@ public static class WorkerModuleRegistration
         services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleUnpublishedInteractionHandler>();
         services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleArchivedInteractionHandler>();
         services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleSoftDeletedInteractionHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionArticleLikedStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionArticleUnlikedStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionCommentCreatedStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionCommentHiddenStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionCommentRestoredStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionCommentDeletedByAuthorStatsHandler>();
 
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));
@@ -270,6 +280,7 @@ public static class WorkerModuleRegistration
         services.AddHostedService<SeoRabbitMqConsumerService>();
         services.AddHostedService<ReadingRabbitMqConsumerService>();
         services.AddHostedService<InteractionRabbitMqConsumerService>();
+        services.AddHostedService<InteractionStatsRabbitMqConsumerService>();
         services.AddHostedService<EmailDeliveryProcessingWorker>();
 
         return services;
