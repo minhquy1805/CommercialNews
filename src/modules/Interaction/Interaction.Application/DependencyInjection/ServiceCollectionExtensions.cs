@@ -1,3 +1,4 @@
+using Interaction.Application.Consumers.Content;
 using Interaction.Application.UseCases.ArticleInteractionStats.GetArticleInteractionStats;
 using Interaction.Application.UseCases.ArticleInteractionStats.MaterializeArticleInteractionStats;
 using Interaction.Application.UseCases.ArticleInteractionTargets.ApplyArticleInteractionTargetProjection;
@@ -29,6 +30,7 @@ public static class ServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<IApplyArticleInteractionTargetProjectionUseCase, ApplyArticleInteractionTargetProjectionUseCase>();
+        services.AddScoped<IContentInteractionEventIngestionService, ContentInteractionEventIngestionService>();
 
         services.AddScoped<IGetArticleInteractionStatsUseCase, GetArticleInteractionStatsUseCase>();
         services.AddScoped<IMaterializeArticleInteractionStatsUseCase, MaterializeArticleInteractionStatsUseCase>();
