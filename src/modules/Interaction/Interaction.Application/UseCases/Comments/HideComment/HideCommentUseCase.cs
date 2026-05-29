@@ -90,6 +90,7 @@ public sealed class HideCommentUseCase : IHideCommentUseCase
                 actorUserId: actorUserId,
                 reasonCode: reasonCode,
                 note: note,
+                correlationId: _requestContext.CorrelationId,
                 actorType: ModeratorActorType,
                 cancellationToken: cancellationToken);
 

@@ -1043,7 +1043,8 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
             ViewCount = GetInt64OrDefault(reader, "ViewCount"),
             LikeCount = GetInt64OrDefault(reader, "LikeCount"),
-            VisibleCommentCount = GetInt64OrDefault(reader, "VisibleCommentCount")
+            VisibleCommentCount = GetInt64OrDefault(reader, "VisibleCommentCount"),
+            CountersPartial = GetBooleanOrDefault(reader, "CountersPartial")
         };
     }
 
@@ -1073,7 +1074,8 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
 
             ViewCount = GetInt64OrDefault(reader, "ViewCount"),
             LikeCount = GetInt64OrDefault(reader, "LikeCount"),
-            VisibleCommentCount = GetInt64OrDefault(reader, "VisibleCommentCount")
+            VisibleCommentCount = GetInt64OrDefault(reader, "VisibleCommentCount"),
+            CountersPartial = GetBooleanOrDefault(reader, "CountersPartial")
         };
     }
 
@@ -1417,6 +1419,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
             ViewCount = core.ViewCount,
             LikeCount = core.LikeCount,
             VisibleCommentCount = core.VisibleCommentCount,
+            CountersPartial = core.CountersPartial,
 
             Tags = tags,
             Media = media
@@ -1486,5 +1489,7 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
         public long LikeCount { get; init; }
 
         public long VisibleCommentCount { get; init; }
+
+        public bool CountersPartial { get; init; }
     }
 }

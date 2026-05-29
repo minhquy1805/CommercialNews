@@ -1231,7 +1231,8 @@ CREATE OR ALTER PROCEDURE [interaction].[Interaction_Comment_Hide]
     @ActorUserId     BIGINT,
     @ReasonCode      NVARCHAR(40),
     @Note            NVARCHAR(1000) = NULL,
-    @ActorType       NVARCHAR(30) = N'Moderator'
+    @ActorType       NVARCHAR(30) = N'Moderator',
+    @CorrelationId   CHAR(26) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1323,7 +1324,7 @@ BEGIN
         @ReasonCode,
         @Note,
         @NowUtc,
-        NULL
+        @CorrelationId
     );
 
     SELECT TOP (1)
@@ -1350,7 +1351,8 @@ CREATE OR ALTER PROCEDURE [interaction].[Interaction_Comment_Restore]
     @HistoryPublicId CHAR(26),
     @ActorUserId     BIGINT,
     @Note            NVARCHAR(1000) = NULL,
-    @ActorType       NVARCHAR(30) = N'Moderator'
+    @ActorType       NVARCHAR(30) = N'Moderator',
+    @CorrelationId   CHAR(26) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1430,7 +1432,7 @@ BEGIN
         NULL,
         @Note,
         @NowUtc,
-        NULL
+        @CorrelationId
     );
 
     SELECT TOP (1)
@@ -2393,7 +2395,7 @@ BEGIN
     (
         SELECT
             [h].[CommentModerationActionHistoryId],
-            [h].[PublicId],
+            [h].[PublicId] AS [HistoryPublicId],
             [c].[PublicId] AS [CommentPublicId],
             [mc].[PublicId] AS [CommentModerationCasePublicId],
             [h].[ActionType],

@@ -1,3 +1,4 @@
+using CommercialNews.Api.Api.Common.Headers;
 using CommercialNews.BuildingBlocks.SharedKernel.RequestContext;
 using System.Security.Claims;
 
@@ -48,7 +49,35 @@ namespace CommercialNews.Api.Api.Common.RequestContext
         public string? UserAgent =>
             _httpContextAccessor.HttpContext?.Request?.Headers["User-Agent"].ToString();
 
-        public string? CorrelationId =>
-            _httpContextAccessor.HttpContext?.TraceIdentifier;
+        public string? CorrelationId
+        {
+            get
+            {
+                HttpContext? httpContext = _httpContextAccessor.HttpContext;
+                if (httpContext is null)
+                {
+                    return null;
+                }
+
+                if (httpContext.Items.TryGetValue(
+                        HeaderNames.CorrelationId,
+                        out object? value) &&
+                    value is string correlationId &&
+                    !string.IsNullOrWhiteSpace(correlationId))
+                {
+                    return correlationId.Trim();
+                }
+
+                string? headerValue =
+                    httpContext.Request.Headers[HeaderNames.CorrelationId].ToString();
+
+                if (!string.IsNullOrWhiteSpace(headerValue))
+                {
+                    return headerValue.Trim();
+                }
+
+                return httpContext.TraceIdentifier;
+            }
+        }
     }
 }

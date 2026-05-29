@@ -93,7 +93,8 @@ public sealed class SearchArticlesUseCase : ISearchArticlesUseCase
 
             ViewCount = item.ViewCount,
             LikeCount = item.LikeCount,
-            VisibleCommentCount = item.VisibleCommentCount
+            VisibleCommentCount = item.VisibleCommentCount,
+            CountersPartial = item.CountersPartial
         };
     }
 

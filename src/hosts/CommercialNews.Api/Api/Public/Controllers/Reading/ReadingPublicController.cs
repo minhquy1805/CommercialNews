@@ -266,7 +266,7 @@ public sealed class ReadingPublicController : ControllerBase
                 Views = source.ViewCount,
                 Likes = source.LikeCount,
                 VisibleCommentCount = source.VisibleCommentCount,
-                CountersPartial = false
+                CountersPartial = source.CountersPartial
             },
 
             Tags = source.Tags
@@ -308,7 +308,7 @@ public sealed class ReadingPublicController : ControllerBase
                 Views = source.ViewCount,
                 Likes = source.LikeCount,
                 VisibleCommentCount = source.VisibleCommentCount,
-                CountersPartial = false
+                CountersPartial = source.CountersPartial
             }
         };
     }

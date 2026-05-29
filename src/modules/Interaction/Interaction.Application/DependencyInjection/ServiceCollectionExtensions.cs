@@ -27,7 +27,7 @@ namespace Interaction.Application.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddInteractionWorkerApplication(
+    public static IServiceCollection AddInteractionConsumerApplication(
         this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -50,7 +50,15 @@ public static class ServiceCollectionExtensions
             IInteractionStatsEventIngestionService,
             InteractionStatsEventIngestionService>();
 
-        // View accumulated counts -> scheduled batch stats materialization
+        return services;
+    }
+
+    public static IServiceCollection AddInteractionBatchProcessingApplication(
+        this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // Accumulated article views -> scheduled batch stats materialization
         services.AddScoped<
             IProcessPendingViewStatsMaterializationUseCase,
             ProcessPendingViewStatsMaterializationUseCase>();
@@ -63,29 +71,77 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddScoped<IGetArticleInteractionStatsUseCase, GetArticleInteractionStatsUseCase>();
+        services.AddScoped<
+            IGetArticleInteractionStatsUseCase,
+            GetArticleInteractionStatsUseCase>();
 
-        services.AddScoped<ITrackArticleViewUseCase, TrackArticleViewUseCase>();
+        services.AddScoped<
+            ITrackArticleViewUseCase,
+            TrackArticleViewUseCase>();
 
-        services.AddScoped<IGetMyArticleLikeUseCase, GetMyArticleLikeUseCase>();
-        services.AddScoped<ILikeArticleUseCase, LikeArticleUseCase>();
-        services.AddScoped<IUnlikeArticleUseCase, UnlikeArticleUseCase>();
+        services.AddScoped<
+            IGetMyArticleLikeUseCase,
+            GetMyArticleLikeUseCase>();
 
-        services.AddScoped<ICreateCommentUseCase, CreateCommentUseCase>();
-        services.AddScoped<IDeleteOwnCommentUseCase, DeleteOwnCommentUseCase>();
-        services.AddScoped<IGetAdminCommentByPublicIdUseCase, GetAdminCommentByPublicIdUseCase>();
-        services.AddScoped<IGetAdminCommentsUseCase, GetAdminCommentsUseCase>();
-        services.AddScoped<IGetCommentModerationHistoryUseCase, GetCommentModerationHistoryUseCase>();
-        services.AddScoped<IGetPublicCommentsUseCase, GetPublicCommentsUseCase>();
-        services.AddScoped<IHideCommentUseCase, HideCommentUseCase>();
-        services.AddScoped<IRestoreCommentUseCase, RestoreCommentUseCase>();
+        services.AddScoped<
+            ILikeArticleUseCase,
+            LikeArticleUseCase>();
 
-        services.AddScoped<ICreateCommentReportUseCase, CreateCommentReportUseCase>();
+        services.AddScoped<
+            IUnlikeArticleUseCase,
+            UnlikeArticleUseCase>();
 
-        services.AddScoped<IGetModerationCasesUseCase, GetModerationCasesUseCase>();
-        services.AddScoped<IGetModerationCaseByPublicIdUseCase, GetModerationCaseByPublicIdUseCase>();
-        services.AddScoped<IDismissReportedCommentCaseUseCase, DismissReportedCommentCaseUseCase>();
-        services.AddScoped<IHideReportedCommentUseCase, HideReportedCommentUseCase>();
+        services.AddScoped<
+            ICreateCommentUseCase,
+            CreateCommentUseCase>();
+
+        services.AddScoped<
+            IDeleteOwnCommentUseCase,
+            DeleteOwnCommentUseCase>();
+
+        services.AddScoped<
+            IGetAdminCommentByPublicIdUseCase,
+            GetAdminCommentByPublicIdUseCase>();
+
+        services.AddScoped<
+            IGetAdminCommentsUseCase,
+            GetAdminCommentsUseCase>();
+
+        services.AddScoped<
+            IGetCommentModerationHistoryUseCase,
+            GetCommentModerationHistoryUseCase>();
+
+        services.AddScoped<
+            IGetPublicCommentsUseCase,
+            GetPublicCommentsUseCase>();
+
+        services.AddScoped<
+            IHideCommentUseCase,
+            HideCommentUseCase>();
+
+        services.AddScoped<
+            IRestoreCommentUseCase,
+            RestoreCommentUseCase>();
+
+        services.AddScoped<
+            ICreateCommentReportUseCase,
+            CreateCommentReportUseCase>();
+
+        services.AddScoped<
+            IGetModerationCasesUseCase,
+            GetModerationCasesUseCase>();
+
+        services.AddScoped<
+            IGetModerationCaseByPublicIdUseCase,
+            GetModerationCaseByPublicIdUseCase>();
+
+        services.AddScoped<
+            IDismissReportedCommentCaseUseCase,
+            DismissReportedCommentCaseUseCase>();
+
+        services.AddScoped<
+            IHideReportedCommentUseCase,
+            HideReportedCommentUseCase>();
 
         return services;
     }
@@ -95,7 +151,8 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddInteractionWorkerApplication();
+        services.AddInteractionConsumerApplication();
+        services.AddInteractionBatchProcessingApplication();
         services.AddInteractionApiApplication();
 
         return services;
