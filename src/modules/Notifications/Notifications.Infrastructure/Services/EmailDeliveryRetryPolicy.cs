@@ -4,7 +4,7 @@ using Notifications.Application.Contracts.Services;
 using Notifications.Application.Ports.Services;
 using Notifications.Domain.Enums;
 
-namespace Notifications.Application.Services;
+namespace Notifications.Infrastructure.Services;
 
 public sealed class EmailDeliveryRetryPolicy : IEmailDeliveryRetryPolicy
 {

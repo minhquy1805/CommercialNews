@@ -4,7 +4,6 @@ using CommercialNews.BuildingBlocks.SharedKernel.Paging;
 using Microsoft.Data.SqlClient;
 using Notifications.Application.Models.QueryModels;
 using Notifications.Application.Ports.Persistence;
-using Notifications.Application.Ports.Transactions;
 using Notifications.Infrastructure.Persistence.Exceptions;
 
 namespace Notifications.Infrastructure.Persistence.Repositories;

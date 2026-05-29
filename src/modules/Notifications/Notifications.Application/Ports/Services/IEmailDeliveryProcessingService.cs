@@ -1,6 +1,6 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 
-namespace Notifications.Application.Services;
+namespace Notifications.Application.Ports.Services;
 
 public interface IEmailDeliveryProcessingService
 {

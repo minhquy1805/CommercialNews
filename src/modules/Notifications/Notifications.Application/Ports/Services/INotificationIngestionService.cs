@@ -1,7 +1,7 @@
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Notifications.Application.Contracts.Ingestion;
 
-namespace Notifications.Application.Services;
+namespace Notifications.Application.Ports.Services;
 
 public interface INotificationIngestionService
 {

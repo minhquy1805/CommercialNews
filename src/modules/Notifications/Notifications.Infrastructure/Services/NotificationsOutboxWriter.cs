@@ -5,7 +5,7 @@ using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
 using Notifications.Application.Outbox;
 using Notifications.Application.Outbox.Payloads;
 using Notifications.Application.Ports.Services;
-using Notifications.Application.Ports.Transactions;
+using Notifications.Application.Ports.Persistence;
 
 namespace Notifications.Infrastructure.Services;
 

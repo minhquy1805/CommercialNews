@@ -4,7 +4,7 @@ using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Notifications.Application.Contracts.Ingestion;
 using Notifications.Application.Errors;
 using Notifications.Application.Ports.Persistence;
-using Notifications.Application.Ports.Transactions;
+using Notifications.Application.Ports.Services;
 using Notifications.Domain.Entities;
 using Notifications.Domain.Exceptions;
 
