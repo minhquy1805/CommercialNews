@@ -8,17 +8,20 @@
       * public detail lookup by public id
       * public detail lookup by slug
       * category/tag filtering
-      * popularity sorting
       * related article lookup
       * SEO route lookup and SEO projection freshness diagnostics
+      * media projection lookup and freshness diagnostics
+      * Interaction counter snapshot lookup and freshness diagnostics
       * author profile enrichment from Identity events
       * projection freshness diagnostics
-      * async projection apply diagnostics
   - Idempotent: safe to re-run.
 
   Notes:
   - Reading projection tables are derived state.
   - Source truth remains in Content / SEO / Media / Identity / Interaction.
+  - Interaction counter values are projected independently through
+    [reading].[ArticleInteractionCounterProjection].
+  - Popularity / trending is deferred beyond V1.
   - Table creation belongs in 001_tables.sql.
   - Stored procedures belong in 020_procs.sql.
   - Keep indexes focused on known V1 access patterns; avoid speculative over-indexing.
@@ -89,6 +92,12 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'[reading].[ArticleInteractionCounterProjection]', N'U') IS NULL
+BEGIN
+    THROW 56110, 'Table [reading].[ArticleInteractionCounterProjection] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
    1) [reading].[ArticleReadModel]
    ========================================================= */
@@ -110,94 +119,8 @@ BEGIN
 END
 GO
 
-/* Public article listing: newest first */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = N'IX_ArticleReadModel_Public_PublishedAt'
-      AND object_id = OBJECT_ID(N'[reading].[ArticleReadModel]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_ArticleReadModel_Public_PublishedAt]
-    ON [reading].[ArticleReadModel]
-    (
-        [PublishedAtUtc] DESC,
-        [ArticleId] DESC
-    )
-    INCLUDE
-    (
-        [ArticlePublicId],
-        [Slug],
-        [Title],
-        [Summary],
-        [CategoryId],
-        [CategoryName],
-        [AuthorUserId],
-        [AuthorDisplayName],
-        [CoverMediaId],
-        [CoverMediaUrl],
-        [CoverAlt],
-        [ViewCount],
-        [LikeCount],
-        [CommentCount],
-        [PopularityScore]
-    )
-    WHERE [IsPublic] = 1;
-
-    PRINT N'Created index: [IX_ArticleReadModel_Public_PublishedAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_ArticleReadModel_Public_PublishedAt]';
-END
-GO
-
-/* Public category feed */
-IF NOT EXISTS
-(
-    SELECT 1
-    FROM sys.indexes
-    WHERE name = N'IX_ArticleReadModel_Public_Category_PublishedAt'
-      AND object_id = OBJECT_ID(N'[reading].[ArticleReadModel]')
-)
-BEGIN
-    CREATE NONCLUSTERED INDEX [IX_ArticleReadModel_Public_Category_PublishedAt]
-    ON [reading].[ArticleReadModel]
-    (
-        [CategoryId] ASC,
-        [PublishedAtUtc] DESC,
-        [ArticleId] DESC
-    )
-    INCLUDE
-    (
-        [ArticlePublicId],
-        [Slug],
-        [Title],
-        [Summary],
-        [CategoryName],
-        [AuthorUserId],
-        [AuthorDisplayName],
-        [CoverMediaId],
-        [CoverMediaUrl],
-        [CoverAlt],
-        [ViewCount],
-        [LikeCount],
-        [CommentCount],
-        [PopularityScore]
-    )
-    WHERE [IsPublic] = 1;
-
-    PRINT N'Created index: [IX_ArticleReadModel_Public_Category_PublishedAt]';
-END
-ELSE
-BEGIN
-    PRINT N'Index exists: [IX_ArticleReadModel_Public_Category_PublishedAt]';
-END
-GO
-
-/* Public popularity sort */
-IF NOT EXISTS
+/* Popularity / trending is deferred beyond V1. */
+IF EXISTS
 (
     SELECT 1
     FROM sys.indexes
@@ -205,37 +128,95 @@ IF NOT EXISTS
       AND object_id = OBJECT_ID(N'[reading].[ArticleReadModel]')
 )
 BEGIN
-    CREATE NONCLUSTERED INDEX [IX_ArticleReadModel_Public_Popularity]
-    ON [reading].[ArticleReadModel]
-    (
-        [PopularityScore] DESC,
-        [PublishedAtUtc] DESC,
-        [ArticleId] DESC
-    )
-    INCLUDE
-    (
-        [ArticlePublicId],
-        [Slug],
-        [Title],
-        [Summary],
-        [CategoryId],
-        [CategoryName],
-        [CoverMediaId],
-        [CoverMediaUrl],
-        [CoverAlt],
-        [ViewCount],
-        [LikeCount],
-        [CommentCount]
-    )
-    WHERE [IsPublic] = 1
-      AND [PopularityScore] IS NOT NULL;
+    DROP INDEX [IX_ArticleReadModel_Public_Popularity]
+        ON [reading].[ArticleReadModel];
 
-    PRINT N'Created index: [IX_ArticleReadModel_Public_Popularity]';
+    PRINT N'Dropped obsolete index: [IX_ArticleReadModel_Public_Popularity]';
 END
-ELSE
+GO
+
+/* Public article listing: newest first.
+   Counter fields are joined from ArticleInteractionCounterProjection. */
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleReadModel_Public_PublishedAt'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleReadModel]')
+)
 BEGIN
-    PRINT N'Index exists: [IX_ArticleReadModel_Public_Popularity]';
+    DROP INDEX [IX_ArticleReadModel_Public_PublishedAt]
+        ON [reading].[ArticleReadModel];
+
+    PRINT N'Dropped index for rebuild: [IX_ArticleReadModel_Public_PublishedAt]';
 END
+GO
+
+CREATE NONCLUSTERED INDEX [IX_ArticleReadModel_Public_PublishedAt]
+ON [reading].[ArticleReadModel]
+(
+    [PublishedAtUtc] DESC,
+    [ArticleId] DESC
+)
+INCLUDE
+(
+    [ArticlePublicId],
+    [Slug],
+    [Title],
+    [Summary],
+    [CategoryId],
+    [CategoryName],
+    [AuthorUserId],
+    [AuthorDisplayName],
+    [CoverMediaId],
+    [CoverMediaUrl],
+    [CoverAlt]
+)
+WHERE [IsPublic] = 1;
+
+PRINT N'Created index: [IX_ArticleReadModel_Public_PublishedAt]';
+GO
+
+/* Public category feed.
+   Counter fields are joined from ArticleInteractionCounterProjection. */
+IF EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleReadModel_Public_Category_PublishedAt'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleReadModel]')
+)
+BEGIN
+    DROP INDEX [IX_ArticleReadModel_Public_Category_PublishedAt]
+        ON [reading].[ArticleReadModel];
+
+    PRINT N'Dropped index for rebuild: [IX_ArticleReadModel_Public_Category_PublishedAt]';
+END
+GO
+
+CREATE NONCLUSTERED INDEX [IX_ArticleReadModel_Public_Category_PublishedAt]
+ON [reading].[ArticleReadModel]
+(
+    [CategoryId] ASC,
+    [PublishedAtUtc] DESC,
+    [ArticleId] DESC
+)
+INCLUDE
+(
+    [ArticlePublicId],
+    [Slug],
+    [Title],
+    [Summary],
+    [CategoryName],
+    [AuthorUserId],
+    [AuthorDisplayName],
+    [CoverMediaId],
+    [CoverMediaUrl],
+    [CoverAlt]
+)
+WHERE [IsPublic] = 1;
+
+PRINT N'Created index: [IX_ArticleReadModel_Public_Category_PublishedAt]';
 GO
 
 /* Projection apply / freshness diagnostics */
@@ -552,7 +533,56 @@ END
 GO
 
 /* =========================================================
-   5) [reading].[ArticleSeoRouteProjection]
+   5) [reading].[ArticleInteractionCounterProjection]
+   ========================================================= */
+
+/*
+   Note:
+   - [PK_ArticleInteractionCounterProjection] on [ArticlePublicId]
+     already supports local response composition join:
+         ArticleReadModel
+             LEFT JOIN ArticleInteractionCounterProjection
+                 ON ArticlePublicId.
+   - No popularity/trending index is created in V1.
+   - No FK to ArticleReadModel is required because Interaction snapshots
+     may arrive before Content article projections.
+*/
+
+/* Counter snapshot freshness scan / reconciliation diagnostics */
+IF NOT EXISTS
+(
+    SELECT 1
+    FROM sys.indexes
+    WHERE name = N'IX_ArticleInteractionCounterProjection_LastSyncedAtUtc'
+      AND object_id = OBJECT_ID(N'[reading].[ArticleInteractionCounterProjection]')
+)
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_ArticleInteractionCounterProjection_LastSyncedAtUtc]
+    ON [reading].[ArticleInteractionCounterProjection]
+    (
+        [LastSyncedAtUtc] ASC,
+        [ArticlePublicId] ASC
+    )
+    INCLUDE
+    (
+        [ViewCount],
+        [LikeCount],
+        [VisibleCommentCount],
+        [InteractionStatsVersion],
+        [LastEventMessageId],
+        [LastSourceOccurredAtUtc]
+    );
+
+    PRINT N'Created index: [IX_ArticleInteractionCounterProjection_LastSyncedAtUtc]';
+END
+ELSE
+BEGIN
+    PRINT N'Index exists: [IX_ArticleInteractionCounterProjection_LastSyncedAtUtc]';
+END
+GO
+
+/* =========================================================
+   6) [reading].[ArticleSeoRouteProjection]
    ========================================================= */
 
 /* Remove an earlier over-strict unique projection index, if present. */
@@ -642,7 +672,7 @@ END
 GO
 
 /* =========================================================
-   6) [reading].[ArticleSeoMetadataProjection]
+   7) [reading].[ArticleSeoMetadataProjection]
    ========================================================= */
 
 /* SEO metadata projection freshness scan / reconciliation */
@@ -679,7 +709,7 @@ END
 GO
 
 /* =========================================================
-   7) [reading].[AuthorProfileProjection]
+   8) [reading].[AuthorProfileProjection]
    ========================================================= */
 
 /* Identity author profile projection freshness scan / reconciliation */

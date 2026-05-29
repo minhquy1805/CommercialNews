@@ -2,6 +2,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Notifications.Application.Configuration;
 using Notifications.Application.Consumers.Identity;
+using Notifications.Application.Consumers.Interaction;
+using Notifications.Application.Ports.Services;
 using Notifications.Application.Services;
 using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveries;
 using Notifications.Application.UseCases.EmailDeliveries.GetEmailDeliveryAttempts;
@@ -23,6 +25,9 @@ public static class ServiceCollectionExtensions
         services.Configure<EmailDeliveryOptions>(
             configuration.GetSection(EmailDeliveryOptions.SectionName));
 
+        services.Configure<InteractionAlertEmailOptions>(
+            configuration.GetSection(InteractionAlertEmailOptions.SectionName));
+
         // Email delivery read / admin operational use cases
         services.AddScoped<IGetEmailDeliveriesUseCase, GetEmailDeliveriesUseCase>();
         services.AddScoped<IGetEmailDeliveryByIdUseCase, GetEmailDeliveryByIdUseCase>();
@@ -32,6 +37,9 @@ public static class ServiceCollectionExtensions
 
         // Notifications consumers / ingestion workflows
         services.AddScoped<IIdentityEmailEventIngestionService, IdentityEmailEventIngestionService>();
+        services.AddScoped<
+            IInteractionNotificationEventIngestionService,
+            InteractionNotificationEventIngestionService>();
 
         // Email delivery processing workflow
         services.AddScoped<IEmailDeliveryProcessingService, EmailDeliveryProcessingService>();

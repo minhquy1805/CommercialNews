@@ -32,7 +32,7 @@ public sealed class ArticleListItemResponse
 
     public long LikeCount { get; init; }
 
-    public long CommentCount { get; init; }
+    public long VisibleCommentCount { get; init; }
 
-    public double? PopularityScore { get; init; }
+    public bool CountersPartial { get; init; }
 }

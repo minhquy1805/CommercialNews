@@ -1,169 +1,210 @@
-namespace Interaction.Domain.Entities;
-
 using Interaction.Domain.Exceptions;
+
+namespace Interaction.Domain.Entities;
 
 public sealed class ArticleInteractionStats
 {
-    public long ArticleId { get; private set; }
+    public long ArticleInteractionStatsId { get; private set; }
 
-    public long ViewsTotal { get; private set; }
-    public long LikesTotal { get; private set; }
-    public long CommentsTotal { get; private set; }
+    public string ArticlePublicId { get; private set; } = string.Empty;
 
-    public decimal PopularityScore { get; private set; }
+    public long ViewCount { get; private set; }
+    public long LikeCount { get; private set; }
+    public long VisibleCommentCount { get; private set; }
 
-    public DateTime CreatedAt { get; private set; }
-    public DateTime? UpdatedAt { get; private set; }
-    public DateTime? LastAggregatedAt { get; private set; }
+    public long StatsVersion { get; private set; }
+
+    public DateTime? LastMaterializedAtUtc { get; private set; }
+
+    public string? LastPublishedMessageId { get; private set; }
+    public DateTime? LastPublishedAtUtc { get; private set; }
+
+    public DateTime CreatedAtUtc { get; private set; }
+    public DateTime? UpdatedAtUtc { get; private set; }
 
     private ArticleInteractionStats()
     {
     }
 
-    public static ArticleInteractionStats Create(
-        long articleId,
-        long viewsTotal,
-        long likesTotal,
-        long commentsTotal,
-        decimal popularityScore,
-        DateTime nowUtc)
-    {
-        ValidateArticleId(articleId);
-        ValidateViewsTotal(viewsTotal);
-        ValidateLikesTotal(likesTotal);
-        ValidateCommentsTotal(commentsTotal);
-        ValidatePopularityScore(popularityScore);
-
-        return new ArticleInteractionStats
-        {
-            ArticleId = articleId,
-            ViewsTotal = viewsTotal,
-            LikesTotal = likesTotal,
-            CommentsTotal = commentsTotal,
-            PopularityScore = popularityScore,
-            CreatedAt = nowUtc,
-            UpdatedAt = null,
-            LastAggregatedAt = null
-        };
-    }
-
+    /// <summary>
+    /// Rehydrates a persisted public counter snapshot owned by Interaction.
+    /// Snapshot creation and updates are performed by the authoritative
+    /// materialization procedure, not by application-side mutation.
+    /// </summary>
     public static ArticleInteractionStats Rehydrate(
-        long articleId,
-        long viewsTotal,
-        long likesTotal,
-        long commentsTotal,
-        decimal popularityScore,
-        DateTime createdAt,
-        DateTime? updatedAt,
-        DateTime? lastAggregatedAt)
+        long articleInteractionStatsId,
+        string articlePublicId,
+        long viewCount,
+        long likeCount,
+        long visibleCommentCount,
+        long statsVersion,
+        DateTime? lastMaterializedAtUtc,
+        string? lastPublishedMessageId,
+        DateTime? lastPublishedAtUtc,
+        DateTime createdAtUtc,
+        DateTime? updatedAtUtc)
     {
-        ValidateArticleId(articleId);
-        ValidateViewsTotal(viewsTotal);
-        ValidateLikesTotal(likesTotal);
-        ValidateCommentsTotal(commentsTotal);
-        ValidatePopularityScore(popularityScore);
+        ValidateId(articleInteractionStatsId);
+        ValidateArticlePublicId(articlePublicId);
+        ValidateViewCount(viewCount);
+        ValidateLikeCount(likeCount);
+        ValidateVisibleCommentCount(visibleCommentCount);
+        ValidateStatsVersion(statsVersion);
 
-        if (createdAt == default)
-        {
-            throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_CREATED_AT",
-                "CreatedAt must be a valid UTC datetime.");
-        }
+        ValidateTimestampState(
+            lastMaterializedAtUtc,
+            lastPublishedAtUtc,
+            createdAtUtc,
+            updatedAtUtc);
 
-        if (updatedAt.HasValue && updatedAt.Value < createdAt)
-        {
-            throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_UPDATED_AT_ORDER",
-                "UpdatedAt must be greater than or equal to CreatedAt.");
-        }
-
-        if (lastAggregatedAt.HasValue && lastAggregatedAt.Value < createdAt)
-        {
-            throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_LAST_AGGREGATED_AT_ORDER",
-                "LastAggregatedAt must be greater than or equal to CreatedAt.");
-        }
+        ValidatePublicationState(
+            lastPublishedMessageId,
+            lastPublishedAtUtc);
 
         return new ArticleInteractionStats
         {
-            ArticleId = articleId,
-            ViewsTotal = viewsTotal,
-            LikesTotal = likesTotal,
-            CommentsTotal = commentsTotal,
-            PopularityScore = popularityScore,
-            CreatedAt = createdAt,
-            UpdatedAt = updatedAt,
-            LastAggregatedAt = lastAggregatedAt
+            ArticleInteractionStatsId = articleInteractionStatsId,
+            ArticlePublicId = NormalizeRequired(articlePublicId),
+            ViewCount = viewCount,
+            LikeCount = likeCount,
+            VisibleCommentCount = visibleCommentCount,
+            StatsVersion = statsVersion,
+            LastMaterializedAtUtc = lastMaterializedAtUtc,
+            LastPublishedMessageId = NormalizeOptional(lastPublishedMessageId),
+            LastPublishedAtUtc = lastPublishedAtUtc,
+            CreatedAtUtc = createdAtUtc,
+            UpdatedAtUtc = updatedAtUtc
         };
     }
 
-    public void UpdateTotals(
-        long viewsTotal,
-        long likesTotal,
-        long commentsTotal,
-        decimal popularityScore,
-        DateTime nowUtc)
+    public bool HasPublishedSnapshot()
     {
-        ValidateViewsTotal(viewsTotal);
-        ValidateLikesTotal(likesTotal);
-        ValidateCommentsTotal(commentsTotal);
-        ValidatePopularityScore(popularityScore);
-
-        ViewsTotal = viewsTotal;
-        LikesTotal = likesTotal;
-        CommentsTotal = commentsTotal;
-        PopularityScore = popularityScore;
-        UpdatedAt = nowUtc;
-        LastAggregatedAt = nowUtc;
+        return !string.IsNullOrWhiteSpace(LastPublishedMessageId)
+               && LastPublishedAtUtc.HasValue;
     }
 
-    private static void ValidateArticleId(long articleId)
+    private static void ValidateId(long articleInteractionStatsId)
     {
-        if (articleId <= 0)
+        if (articleInteractionStatsId <= 0)
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_ARTICLE_ID",
-                "Article id must be greater than zero.");
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_ID",
+                "Article interaction stats id must be greater than zero.");
         }
     }
 
-    private static void ValidateViewsTotal(long viewsTotal)
+    private static void ValidateArticlePublicId(string articlePublicId)
     {
-        if (viewsTotal < 0)
+        if (string.IsNullOrWhiteSpace(articlePublicId))
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_VIEWS_TOTAL",
-                "ViewsTotal must be greater than or equal to zero.");
+                "INTERACTION.ARTICLE_INTERACTION_STATS_ARTICLE_PUBLIC_ID_REQUIRED",
+                "Article public id is required.");
         }
     }
 
-    private static void ValidateLikesTotal(long likesTotal)
+    private static void ValidateViewCount(long viewCount)
     {
-        if (likesTotal < 0)
+        if (viewCount < 0)
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_LIKES_TOTAL",
-                "LikesTotal must be greater than or equal to zero.");
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_VIEW_COUNT",
+                "View count must be greater than or equal to zero.");
         }
     }
 
-    private static void ValidateCommentsTotal(long commentsTotal)
+    private static void ValidateLikeCount(long likeCount)
     {
-        if (commentsTotal < 0)
+        if (likeCount < 0)
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_COMMENTS_TOTAL",
-                "CommentsTotal must be greater than or equal to zero.");
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_LIKE_COUNT",
+                "Like count must be greater than or equal to zero.");
         }
     }
 
-    private static void ValidatePopularityScore(decimal popularityScore)
+    private static void ValidateVisibleCommentCount(long visibleCommentCount)
     {
-        if (popularityScore < 0)
+        if (visibleCommentCount < 0)
         {
             throw new InteractionDomainException(
-                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_POPULARITY_SCORE",
-                "PopularityScore must be greater than or equal to zero.");
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_VISIBLE_COMMENT_COUNT",
+                "Visible comment count must be greater than or equal to zero.");
         }
+    }
+
+    private static void ValidateStatsVersion(long statsVersion)
+    {
+        if (statsVersion < 0)
+        {
+            throw new InteractionDomainException(
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_STATS_VERSION",
+                "Stats version must be greater than or equal to zero.");
+        }
+    }
+
+    private static void ValidateTimestampState(
+        DateTime? lastMaterializedAtUtc,
+        DateTime? lastPublishedAtUtc,
+        DateTime createdAtUtc,
+        DateTime? updatedAtUtc)
+    {
+        if (createdAtUtc == default)
+        {
+            throw new InteractionDomainException(
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_CREATED_AT_UTC",
+                "CreatedAtUtc must be a valid datetime.");
+        }
+
+        if (lastMaterializedAtUtc.HasValue &&
+            lastMaterializedAtUtc.Value < createdAtUtc)
+        {
+            throw new InteractionDomainException(
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_LAST_MATERIALIZED_AT_UTC_ORDER",
+                "LastMaterializedAtUtc must be greater than or equal to CreatedAtUtc.");
+        }
+
+        if (lastPublishedAtUtc.HasValue &&
+            lastPublishedAtUtc.Value < createdAtUtc)
+        {
+            throw new InteractionDomainException(
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_LAST_PUBLISHED_AT_UTC_ORDER",
+                "LastPublishedAtUtc must be greater than or equal to CreatedAtUtc.");
+        }
+
+        if (updatedAtUtc.HasValue &&
+            updatedAtUtc.Value < createdAtUtc)
+        {
+            throw new InteractionDomainException(
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_UPDATED_AT_UTC_ORDER",
+                "UpdatedAtUtc must be greater than or equal to CreatedAtUtc.");
+        }
+    }
+
+    private static void ValidatePublicationState(
+        string? lastPublishedMessageId,
+        DateTime? lastPublishedAtUtc)
+    {
+        var hasMessageId = !string.IsNullOrWhiteSpace(lastPublishedMessageId);
+        var hasPublishedAt = lastPublishedAtUtc.HasValue;
+
+        if (hasMessageId != hasPublishedAt)
+        {
+            throw new InteractionDomainException(
+                "INTERACTION.ARTICLE_INTERACTION_STATS_INVALID_PUBLICATION_STATE",
+                "LastPublishedMessageId and LastPublishedAtUtc must both be provided or both be null.");
+        }
+    }
+
+    private static string NormalizeRequired(string value)
+    {
+        return value.Trim();
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
     }
 }

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Reading.Application.Consumers.Content;
 using Reading.Application.Consumers.Identity;
+using Reading.Application.Consumers.Interaction;
 using Reading.Application.Consumers.Media;
 using Reading.Application.Consumers.Seo;
 using Reading.Application.UseCases.Articles.GetArticleByPublicId;
@@ -11,6 +12,7 @@ using Reading.Application.UseCases.Articles.SearchArticles;
 using Reading.Application.UseCases.Projections.ApplyContentArticleProjection;
 using Reading.Application.UseCases.Projections.ApplyAuthorProfileProjection;
 using Reading.Application.UseCases.Projections.ApplyArticleMediaProjection;
+using Reading.Application.UseCases.Projections.ApplyArticleInteractionCounterProjection;
 using Reading.Application.UseCases.Projections.ApplyArticleSeoMetadataProjection;
 using Reading.Application.UseCases.Projections.ApplyArticleSeoRouteProjection;
 using Reading.Application.UseCases.Projections.MarkArticleProjectionNotPublic;
@@ -31,6 +33,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IApplyContentArticleProjectionUseCase, ApplyContentArticleProjectionUseCase>();
         services.AddScoped<IApplyArticleMediaProjectionUseCase, ApplyArticleMediaProjectionUseCase>();
+        services.AddScoped<IApplyArticleInteractionCounterProjectionUseCase, ApplyArticleInteractionCounterProjectionUseCase>();
         services.AddScoped<IApplyArticleSeoRouteProjectionUseCase, ApplyArticleSeoRouteProjectionUseCase>();
         services.AddScoped<IApplyArticleSeoMetadataProjectionUseCase, ApplyArticleSeoMetadataProjectionUseCase>();
         services.AddScoped<IApplyAuthorProfileProjectionUseCase, ApplyAuthorProfileProjectionUseCase>();
@@ -38,6 +41,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IContentReadingEventIngestionService, ContentReadingEventIngestionService>();
         services.AddScoped<IIdentityReadingEventIngestionService, IdentityReadingEventIngestionService>();
+        services.AddScoped<IInteractionReadingEventIngestionService, InteractionReadingEventIngestionService>();
         services.AddScoped<IMediaReadingEventIngestionService, MediaReadingEventIngestionService>();
         services.AddScoped<ISeoReadingEventIngestionService, SeoReadingEventIngestionService>();
 

@@ -328,6 +328,8 @@ public sealed class SeoMetadataAdminController : ControllerBase
             SourceAggregateVersion = source.SourceAggregateVersion,
             LastAppliedMessageId = source.LastAppliedMessageId,
             LastSyncedAtUtc = source.LastSyncedAtUtc,
+            SlugRouteVersion = source.SlugRouteVersion,
+            SeoMetadataVersion = source.SeoMetadataVersion,
             Version = source.Version
         };
     }

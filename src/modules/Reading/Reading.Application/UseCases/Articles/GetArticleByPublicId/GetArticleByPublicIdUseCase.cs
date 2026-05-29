@@ -96,8 +96,8 @@ public sealed class GetArticleByPublicIdUseCase : IGetArticleByPublicIdUseCase
 
             ViewCount = article.ViewCount,
             LikeCount = article.LikeCount,
-            CommentCount = article.CommentCount,
-            PopularityScore = article.PopularityScore,
+            VisibleCommentCount = article.VisibleCommentCount,
+            CountersPartial = article.CountersPartial,
 
             Tags = article.Tags
                 .Select(MapToResponse)

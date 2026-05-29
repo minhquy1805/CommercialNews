@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 using Notifications.Application.Configuration;
 using Notifications.Application.Consumers.Identity.Payloads;
 using Notifications.Application.Contracts.Ingestion;
-using Notifications.Application.Services;
+using Notifications.Application.Ports.Services;
 using Notifications.Domain.Enums;
 
 namespace Notifications.Application.Consumers.Identity;
