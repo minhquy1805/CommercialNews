@@ -2605,3 +2605,41 @@ BEGIN
     WHERE [ArticlePublicId] = @ArticlePublicId;
 END
 GO
+
+/*
+    Procedure: [interaction].[Interaction_ArticleViewCount_SelectPendingStatsMaterializationBatch]
+    Purpose:
+    - Select a bounded batch of articles whose accumulated accepted view count
+      has not yet been reflected in the materialized public interaction stats snapshot.
+    - Used by Interaction View Stats Materialization background processing.
+
+    Notes:
+    - [interaction].[ArticleViewCount] stores durable accepted-view accumulation state.
+    - [interaction].[ArticleInteractionStats] stores the materialized public counter snapshot.
+    - This procedure only selects pending article public ids.
+    - It does not update stats and does not write outbox messages.
+    - Materialization must re-read the latest counter state before publishing a snapshot.
+*/
+CREATE OR ALTER PROCEDURE [interaction].[Interaction_ArticleViewCount_SelectPendingStatsMaterializationBatch]
+    @BatchSize INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @BatchSize < 1 OR @BatchSize > 500
+    BEGIN
+        THROW 58211, 'BatchSize must be between 1 and 500.', 1;
+    END;
+
+    SELECT TOP (@BatchSize)
+        [v].[ArticlePublicId]
+    FROM [interaction].[ArticleViewCount] AS [v]
+    LEFT JOIN [interaction].[ArticleInteractionStats] AS [s]
+        ON [s].[ArticlePublicId] = [v].[ArticlePublicId]
+    WHERE [s].[ArticleInteractionStatsId] IS NULL
+       OR [s].[ViewCount] <> [v].[ViewCount]
+    ORDER BY
+        [v].[UpdatedAtUtc] ASC,
+        [v].[ArticleViewCountId] ASC;
+END
+GO

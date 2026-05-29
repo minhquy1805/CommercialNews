@@ -372,5 +372,10 @@ public static class InteractionErrors
             Error.Failure(
                 code: "INTERACTION.STATS_MATERIALIZATION_FAILED",
                 message: "Interaction statistics could not be materialized.");
+
+        public static readonly Error InvalidViewStatsMaterializationBatchSize =
+            Error.Validation(
+                code: "INTERACTION.COUNTER.INVALID_VIEW_STATS_MATERIALIZATION_BATCH_SIZE",
+                message: "View stats materialization batch size must be between 1 and 500.");
     }
 }
