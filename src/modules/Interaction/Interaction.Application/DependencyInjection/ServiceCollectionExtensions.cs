@@ -2,6 +2,7 @@ using Interaction.Application.Consumers.Content;
 using Interaction.Application.Consumers.Stats;
 using Interaction.Application.UseCases.ArticleInteractionStats.GetArticleInteractionStats;
 using Interaction.Application.UseCases.ArticleInteractionStats.MaterializeArticleInteractionStats;
+using Interaction.Application.UseCases.ArticleInteractionStats.ProcessPendingViewStatsMaterialization;
 using Interaction.Application.UseCases.ArticleInteractionTargets.ApplyArticleInteractionTargetProjection;
 using Interaction.Application.UseCases.CommentModerationCases.DismissReportedCommentCase;
 using Interaction.Application.UseCases.CommentModerationCases.GetModerationCaseByPublicId;
@@ -26,16 +27,33 @@ namespace Interaction.Application.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddInteractionConsumerApplication(
+    public static IServiceCollection AddInteractionWorkerApplication(
         this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddScoped<IApplyArticleInteractionTargetProjectionUseCase, ApplyArticleInteractionTargetProjectionUseCase>();
-        services.AddScoped<IContentInteractionEventIngestionService, ContentInteractionEventIngestionService>();
+        // Content lifecycle events -> Interaction eligibility projection
+        services.AddScoped<
+            IApplyArticleInteractionTargetProjectionUseCase,
+            ApplyArticleInteractionTargetProjectionUseCase>();
 
-        services.AddScoped<IMaterializeArticleInteractionStatsUseCase, MaterializeArticleInteractionStatsUseCase>();
-        services.AddScoped<IInteractionStatsEventIngestionService, InteractionStatsEventIngestionService>();
+        services.AddScoped<
+            IContentInteractionEventIngestionService,
+            ContentInteractionEventIngestionService>();
+
+        // Interaction lifecycle events -> counter snapshot materialization
+        services.AddScoped<
+            IMaterializeArticleInteractionStatsUseCase,
+            MaterializeArticleInteractionStatsUseCase>();
+
+        services.AddScoped<
+            IInteractionStatsEventIngestionService,
+            InteractionStatsEventIngestionService>();
+
+        // View accumulated counts -> scheduled batch stats materialization
+        services.AddScoped<
+            IProcessPendingViewStatsMaterializationUseCase,
+            ProcessPendingViewStatsMaterializationUseCase>();
 
         return services;
     }
@@ -77,7 +95,7 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddInteractionConsumerApplication();
+        services.AddInteractionWorkerApplication();
         services.AddInteractionApiApplication();
 
         return services;
