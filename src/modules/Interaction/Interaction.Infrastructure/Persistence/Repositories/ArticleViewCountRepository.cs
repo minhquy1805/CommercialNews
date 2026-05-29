@@ -1,5 +1,6 @@
 using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
+using Interaction.Application.Models.Results;
 using Interaction.Application.Ports.Persistence;
 using Interaction.Domain.Entities;
 using Interaction.Infrastructure.Persistence.Exceptions;
@@ -14,6 +15,9 @@ public sealed class ArticleViewCountRepository : IArticleViewCountRepository
 
     private const string IncrementAcceptedProc =
         "[interaction].[Interaction_ArticleViewCount_IncrementAccepted]";
+
+    private const string SelectPendingStatsMaterializationBatchProc =
+        "[interaction].[Interaction_ArticleViewCount_SelectPendingStatsMaterializationBatch]";
 
     private readonly IInteractionUnitOfWork _unitOfWork;
     private readonly ISqlConnectionFactory _sqlConnectionFactory;
@@ -123,6 +127,60 @@ public sealed class ArticleViewCountRepository : IArticleViewCountRepository
                 }
 
                 return MapArticleViewCount(reader);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<IReadOnlyList<PendingViewStatsMaterializationItemResult>>
+        GetPendingStatsMaterializationBatchAsync(
+            int batchSize,
+            CancellationToken cancellationToken = default)
+    {
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(
+                    SelectPendingStatsMaterializationBatchProc,
+                    cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@BatchSize", SqlDbType.Int)
+                    {
+                        Value = batchSize
+                    });
+
+                using SqlDataReader reader =
+                    await command.ExecuteReaderAsync(cancellationToken);
+
+                var pendingItems =
+                    new List<PendingViewStatsMaterializationItemResult>();
+
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    pendingItems.Add(
+                        new PendingViewStatsMaterializationItemResult(
+                            ArticlePublicId: reader.GetString(
+                                reader.GetOrdinal("ArticlePublicId"))));
+                }
+
+                return pendingItems;
             }
         }
         catch (SqlException exception)
