@@ -1,416 +1,521 @@
-# System Data Model — Reading Experience (V1)
+# System Data Model — Reading (V1 Async Projections)
 
-> **Recommended file:** `explanation/architecture/arc42/system-data/system-data-reading-v1.md`  
-> **Module:** Reading Experience  
-> **Purpose:** Define the **read composition contracts** for listing, detail, and search — optimized for **read-path performance and availability**.  
-> **Note:** Reading (V1) is primarily **query orchestration**. It does not own core tables; it composes data from other modules using `ArticleId`.
-
----
-
-## 0) Data System fit (V1)
-
-Reading is the **public hot path** (DDIA Ch1/3):
-- **Goal:** fast, predictable list/detail under burst traffic (P95/P99 focus).
-- **Rule:** do not couple reads to non-critical subsystems (interaction tracking, email, audit).
-- **Stores used:** OLTP truth (Content), sidecars (SEO/Media/Interaction stats), and Redis caches.
-
-**Degradation policy**
-- Missing stats → show `0` or hide counters
-- Missing media → fallback image/placeholder
-- Comments are paged and may be loaded separately
+> **Module:** Reading  
+> **Purpose:** Define Reading-owned public serving projections for article list/detail/slug/search/related queries.  
+> **V1 posture:** Reading serves ordinary public requests from local asynchronous projections only.
 
 ---
 
-## 1) Capability → data sources mapping
+## 1. Ownership
 
-### 1.1 Article listing (feed)
-**Data sources**
-- **Content**: `Article` (truth for publication state + time sort)
-- **Content**: `Category` (category filtering)
-- **Content**: `ArticleTag` + `Tag` (tag filtering)
-- **Interaction**: `ArticleInteractionStats` (popularity sort)
-- **Media**: `ArticleMedia` + `MediaAsset` (cover/thumbnail)
-- **SEO** (optional for listing routes): slug lookup if needed for links
+Reading owns derived public-serving state:
 
-**V1 caching**
-- Redis feed cache (short TTL) is recommended for burst protection.
+```text
+ArticleReadModel
+ArticleSeoRouteProjection
+ReadingConsumedMessage / consumer apply state
+Optional cache derived from safe Reading projection state
+```
 
-**V2 hooks**
-- Trending window scores (24h/7d)
-- Read-model projections for extreme traffic
+Reading does not own source truth:
 
----
+| Concern | Source owner |
+|---|---|
+| Article lifecycle, editorial fields and public visibility truth | Content |
+| Canonical slug, route and SEO metadata truth | SEO |
+| Media asset and public presentation truth | Media |
+| Views, likes, comments, moderation and counter truth | Interaction |
 
-### 1.2 Article details (detail page)
-**Data sources**
-- Content: `Article` + Category + Tags
-- SEO: `SlugRegistry` (routing) + `SeoMetadata` (optional)
-- Media: attachments + asset metadata (primary + ordered list)
-- Interaction: `ArticleInteractionStats` + `Comment` (paged)
+Rules:
 
-**V1 tactic**
-- Split loading is allowed:
-  - detail first
-  - comments as a separate paged call
+```text
+Projected data remains derived.
+Copied data does not transfer source ownership.
+Reading must not synchronously query source modules in ordinary public serving.
+```
 
 ---
 
-### 1.3 Search
-**V1 options**
-- Basic (small scope): `LIKE` on Title/Summary/Body
-- Preferred on SQL Server: **Full-Text Search** on `(Title, Summary, Body)`
+## 2. V1 Runtime Dataflow
 
-**V2**
-- External search engine (Meilisearch/Elastic) + sync pipeline via outbox/worker
+### Article content and visibility
 
----
+```text
+Content truth + outbox
+    -> Content projection message
+    -> Reading consumer
+    -> reading.ArticleReadModel
+```
 
-## 2) Read composition contracts (V1)
+### Slug route and SEO metadata
 
-> Reading defines how modules are composed, not who owns data.
+```text
+SEO truth + outbox
+    -> SEO route projection message
+    -> Reading consumer
+    -> reading.ArticleSeoRouteProjection
+```
 
-### 2.1 Listing composition
-`Article (Published)`  
-→ optional `Category` (filter)  
-→ optional `ArticleTag/Tag` (filter)  
-→ optional `ArticleInteractionStats` (popularity)  
-→ optional `Media primary` (thumbnail)
+### Media presentation
 
-### 2.2 Details composition
-- `SlugRegistry (Scope,Slug) → ArticleId`
-- `ArticleId → Content.Article (+Category +Tags)`
-- `ArticleId → SEO.SeoMetadata` (optional)
-- `ArticleId → Media.ArticleMedia/MediaAsset` (primary + ordered)
-- `ArticleId → Interaction.ArticleInteractionStats` (optional)
-- `ArticleId → Interaction.Comment` (paged; Visible only)
+```text
+Media truth + outbox
+    -> Media public presentation message
+    -> Reading consumer
+    -> media fields in reading.ArticleReadModel
+```
 
----
+### Interaction counters
 
-## 3) Read-path invariants (V1 rules)
+```text
+Interaction counter materialization + outbox
+    -> interaction.article_counters_projection_published
+    -> Reading consumer
+    -> counter fields in reading.ArticleReadModel
+```
 
-### 3.1 Correctness & visibility
-1. **Public only sees Published**
-- Listing/detail/search must enforce:
-  - `Article.Status = 'Published'`
-  - `IsDeleted = 0` (if soft delete is used)
+### Public read paths
 
-2. **Slug routing must not leak non-public**
-- After resolving slug → ArticleId, Reading must still validate publication state in Content.
-- If slug exists but article is not public → safe 404.
+```text
+GET by public id:
+    ArticleReadModel
+        -> local visibility check
+        -> response or safe 404
 
-### 3.2 Sorting & filtering semantics
-1. **Time sort**
-- Feed sort key = `PublishedAt DESC` (not CreatedAt).
-
-2. **Popularity sort**
-- Source: `Interaction.ArticleInteractionStats.PopularityScore` (blended all-time in V1)
-- If stats missing → treat score as `0` (graceful)
-
-3. **Deterministic filters**
-- Category/tag filtering must be consistent across endpoints.
-
-### 3.3 Related (deterministic fallback)
-- Rule 1: same category, exclude self, published only
-- Rule 2: shared tags (optional)
-- Fallback: newest published
-
-### 3.4 Graceful degradation
-- Missing stats → 0 / hide counters
-- Missing cover → placeholder
-- Comments slow → separate call + paging
-- Interaction tracking failures must not impact reads
+GET by slug:
+    ArticleSeoRouteProjection
+        -> ArticleReadModel
+        -> local route + visibility checks
+        -> response or safe 404
+```
 
 ---
 
-## 4) Redis caching policy (Reading V1)
+## 3. V1 Tables
 
-> Redis is derived; it protects P95/P99 under bursts.
+## 3.1. `reading.ArticleReadModel`
 
-### 4.1 Feed caches (short TTL)
-- `cn:feed:published:{page}:{size}:{filtersHash}` TTL 30–120s
-- `cn:feed:cat:{categoryId}:{page}:{size}` TTL 30–120s
-- `cn:feed:tag:{tagId}:{page}:{size}` TTL 30–120s
-- Optional: negative cache for empty results (very short TTL)
+Primary public article serving projection.
 
-### 4.2 Slug routing cache (SEO)
-- `cn:slug:{scope}:{slug}` → `articleId` TTL 10–60m
-- Invalidate on slug change or deactivation
+### Purpose
 
-### 4.3 Detail cache (moderate TTL + invalidate on write)
-- `cn:article:{articleId}:detail` TTL 5–30m
-- Invalidate on:
-  - publish/unpublish/archive
-  - content edits that affect public detail
-  - media primary change/reorder (if rendered in detail)
-  - SEO metadata changes (policy)
+Supports:
 
-**Staleness policy**
-- Feed cache uses short TTL to avoid complex invalidation.
-- Detail cache should be explicitly invalidated on publish/unpublish.
+```text
+Public list
+Public detail by ArticlePublicId
+Basic search
+Related-article query inputs
+Optional media display
+Optional counter display
+```
 
----
+### Logical Fields
 
-## 5) Owned entities (Reading V1)
+| Field | Purpose |
+|---|---|
+| `ArticleReadModelId` | Reading-local surrogate primary key |
+| `ArticlePublicId` | Stable public article identity; unique |
+| `Title` | Projected public title |
+| `Summary` | Projected public summary |
+| `Body` | Projected public body |
+| `CategoryPublicId` | Projected category identity, nullable |
+| `CategoryName` | Projected category name, nullable |
+| `AuthorUserId` | Projected author identity where retained |
+| `AuthorDisplayName` | Public author display name, nullable |
+| `Status` | Content-derived state |
+| `IsPublic` | Local public serving flag derived from Content |
+| `VisibilityRequiresResync` | Unsafe/gapped visibility marker |
+| `PublishedAtUtc` | Public publish timestamp |
+| `ArticleUpdatedAtUtc` | Content update timestamp |
+| `SearchText` | Searchable denormalized public text, nullable |
+| `CoverMediaPublicId` | Projected cover identity, nullable |
+| `CoverMediaUrl` | Projected public cover URL, nullable |
+| `CoverAlt` | Projected cover alt text, nullable |
+| `ViewCount` | Displayed projected view count; default `0` |
+| `LikeCount` | Displayed projected active-like count; default `0` |
+| `VisibleCommentCount` | Displayed projected visible-comment count; default `0` |
+| `ContentSourceVersion` | Latest applied Content snapshot version |
+| `MediaSourceVersion` | Latest applied Media snapshot version, nullable |
+| `InteractionStatsVersion` | Latest applied Interaction counter snapshot version, nullable |
+| `ContentLastMessageId` | Last applied Content message id |
+| `MediaLastMessageId` | Last applied Media message id, nullable |
+| `InteractionLastMessageId` | Last applied Interaction message id, nullable |
+| `LastContentAppliedAtUtc` | Content apply timestamp |
+| `LastMediaAppliedAtUtc` | Media apply timestamp, nullable |
+| `LastInteractionAppliedAtUtc` | Interaction apply timestamp, nullable |
+| `CreatedAtUtc` | Reading row creation timestamp |
+| `UpdatedAtUtc` | Reading row update timestamp |
 
-### V1 must-have
-- **No new tables are required** by default.
+### Invariants
 
-### V1 optional (early optimization only)
-- `ArticleRelatedSnapshot(ArticleId, RelatedArticleId, Rank, GeneratedAt)`
-- `ArticleSearchIndex(ArticleId, SearchText, UpdatedAt)` *(only if SQL Full-Text is not used)*
+```text
+ArticlePublicId is unique.
 
-### V2 hooks
-- Trending window stats (24h/7d)
-- External `SearchDocument`
-- Dedicated read-model cache tables/services
+Public responses may serve a row only when:
+    Status = Published
+    AND IsPublic = true
+    AND VisibilityRequiresResync = false.
 
----
+ViewCount >= 0.
+LikeCount >= 0.
+VisibleCommentCount >= 0.
 
-## 6) Index requirements for hot queries (V1)
-
-> Constraints are enforced by owning modules. Reading documents the **required indexes** for public performance.
-
-### 6.1 Listing by time (Content)
-- `IX_Article_Status_PublishedAt (Status, PublishedAt DESC)`
-- `IX_Article_Category_Status_PublishedAt (CategoryId, Status, PublishedAt DESC)`
-- `IX_ArticleTag_TagId_ArticleId (TagId, ArticleId)`
-
-### 6.2 Listing by popularity (Interaction)
-- `IX_Stats_PopularityScore (PopularityScore DESC, ArticleId)`
-
-**Query shapes**
-- Popular global: `Article (Published)` → join `Stats` order by score desc
-- Popular by category: filter Article by Category+Published → join Stats → order by score desc
-
-**Scaling note (V2)**
-If “popular by category” becomes slow:
-- cached snapshots per category
-- enrich stats projection (category-scoped aggregates)
-
-### 6.3 Details hot path (supporting modules)
-- Media: `IX_ArticleMedia_ArticleId_SortOrder`
-- SEO: `UQ/IX_SlugRegistry_Scope_Slug` and `IX_SeoMetadata_ArticleId`
-- Comments: `IX_Comment_ArticleId_Status_CreatedAt`
-
-### 6.4 Search (V1)
-**Option A: SQL Server Full-Text (preferred)**
-- Full-text index on `Article(Title, Summary, Body)`
-- Always filter by `Status='Published'` (and `IsDeleted=0` if used)
-
-**Option B: LIKE-based (temporary)**
-- `LIKE '%term%'` scales poorly; acceptable only for small scope or limited V1 usage.
-- Move to Full-Text early if search becomes important.
+Interaction counters are enrichment only.
+They must not determine public visibility.
+```
 
 ---
 
-## 7) Dataflow notes (V1) — non-blocking side effects
+## 3.2. `reading.ArticleSeoRouteProjection`
 
-- View tracking is async/non-blocking (Interaction module)
-- Audit/notifications/SEO updates can lag but must not break reads
-- CorrelationId should propagate across list/detail calls for tracing
+Local slug-route serving projection consumed asynchronously from SEO.
 
----
+### Purpose
 
-## 8) V2 hooks (Reading)
-- Trending: add `PopularityScore24h/7d` + indexes
-- Related snapshot: precompute & cache
-- External search: sync search docs via outbox/worker
-- Dedicated projections/read models for extreme traffic
+Supports:
 
----
+```text
+GET /api/v1/articles/slug/{slug}
+Projected SEO metadata for public detail responses
+Local fail-closed route serving
+```
 
-## 9) Decisions locked for V1
-- Popularity source: `Interaction.ArticleInteractionStats.PopularityScore`
-- Search V1: SQL Full-Text if enabled; otherwise LIKE with limited scope
-- Related: deterministic rule (category-first, tag-second, fallback newest)
-- Reads enforce Content visibility regardless of SEO slug existence
+### Logical Fields
 
----
+| Field | Purpose |
+|---|---|
+| `ArticleSeoRouteProjectionId` | Reading-local surrogate primary key |
+| `Scope` | Route scope, normally `public` |
+| `Slug` | Public route slug |
+| `ArticlePublicId` | Target article identity |
+| `CanonicalUrl` | Projected canonical URL, nullable |
+| `MetaTitle` | Projected SEO title, nullable |
+| `MetaDescription` | Projected SEO description, nullable |
+| `IsActive` | Whether the route may be served locally |
+| `RequiresResync` | Unsafe/gapped route marker |
+| `SeoSourceVersion` | Latest applied SEO route snapshot version |
+| `LastSourceMessageId` | Last applied SEO message id |
+| `LastSourceOccurredAtUtc` | Source event time for diagnostics |
+| `LastAppliedAtUtc` | Local apply timestamp |
+| `CreatedAtUtc` | Local creation timestamp |
+| `UpdatedAtUtc` | Local update timestamp |
 
-## 10) Partitioning Readiness (V1/V2)
+### Invariants
 
-> This section captures **partitioning and read-path scale readiness** for Reading Experience.
-> V1 remains **non-sharded by default**; priority is protected public read latency/availability and safe fallback behavior.
+```text
+Scope + Slug identifies a local route projection.
 
-### 10.1 Why Reading is a partitioning-risk module
+A slug request may proceed only when:
+    Scope = public
+    AND IsActive = true
+    AND RequiresResync = false.
 
-Reading is the **public hot path** and the main latency/SLO surface:
-
-* burst traffic concentrates on listing and a few hot articles
-* reads compose multiple modules (Content/SEO/Media/Interaction)
-* sidecar lag/failure must not break user-visible reads
-
-**V1 principle:** optimize **query shape + caching + graceful degradation** before introducing shard complexity.
-
----
-
-### 10.2 Primary access patterns (V1)
-
-**Hot paths**
-
-* feed/listing (Published content, paging/filter/sort)
-* detail by slug (SEO route -> Content truth -> optional sidecars)
-* detail by `ArticleId` (if internal/public policy supports)
-
-**Read composition pattern**
-
-* Content truth is the visibility authority
-* SEO/Media/Interaction stats are sidecars
-* missing sidecar data must degrade safely (not fail the read)
-
-**Search (V1)**
-
-* SQL Full-Text preferred (or bounded LIKE fallback)
-* always enforce Published visibility in Content
+A valid route does not make an article public.
+The target ArticleReadModel must also pass public visibility checks.
+```
 
 ---
 
-### 10.3 Secondary-index-heavy queries (present and future)
+## 3.3. `reading.ReadingConsumedMessage`
 
-Reading is not write-heavy, but it is **query-shape sensitive**.
+Durable consumer idempotency/apply tracking table.
 
-**V1**
+### Purpose
 
-* feed by `PublishedAt DESC`
-* feed by category/tag + time
-* feed by popularity via `ArticleInteractionStats.PopularityScore`
-* comments paging by `(ArticleId, Status, CreatedAt)`
-* slug resolution by `(Scope, Slug)` (SEO sidecar)
+Supports:
 
-**V2+**
+```text
+At-least-once message delivery
+Duplicate detection
+Apply diagnostics
+Replay and repair investigation
+```
 
-* trending windows (24h/7d)
-* richer related-content ranking
-* external search queries / read-model projections
+### Logical Fields
 
-**Implication**
-Reading scale problems often appear first as **query/index/caching issues**, not immediate DB sharding issues.
+| Field | Purpose |
+|---|---|
+| `ReadingConsumedMessageId` | Reading-local primary key |
+| `ConsumerName` | Handler/consumer identity |
+| `MessageId` | Delivered message identity |
+| `EventType` | Source event type |
+| `SourceLane` | `Content`, `Seo`, `Media`, or `Interaction` |
+| `AggregatePublicId` | Target public aggregate identity, nullable |
+| `IncomingVersion` | Incoming source-lane version, nullable |
+| `ApplyDecision` | `Applied`, `DuplicateIgnored`, `StaleIgnored`, `RequiresResync`, `Failed` |
+| `CorrelationId` | Trace correlation id, nullable |
+| `OccurredAtUtc` | Source occurrence timestamp |
+| `ReceivedAtUtc` | Consumer receive timestamp |
+| `ProcessedAtUtc` | Consumer processing completion timestamp, nullable |
+| `FailureCode` | Internal failure code, nullable |
 
----
+### Invariants
 
-### 10.4 Candidate partitioning strategy (future)
+```text
+ConsumerName + MessageId is unique.
 
-Reading V1 owns no truth tables, so partitioning readiness is mostly about **query isolation** and **read-model evolution**.
+Message-level dedupe does not replace source-specific version checks.
 
-#### A) V1 (preferred)
-
-* bounded queries + required indexes in owner modules
-* Redis feed/detail/slug caches
-* split loading (detail first, comments separately)
-* graceful fallback for sidecars
-
-#### B) V2+ read-model/projection path (most likely first scale step)
-
-Introduce dedicated read projections when:
-
-* burst traffic or query complexity exceeds OLTP join/caching capacity
-* popularity/category combinations become expensive
-* search becomes a dominant workload
-
-This aligns with the Query Facade -> Read Model evolution path.
-
-#### C) Data partitioning (later, component-specific)
-
-If read-model/projection stores become large/hot, partitioning may apply to those derived stores (not necessarily to Content truth first).
+ApplyDecision is internal-only and must not be exposed in public APIs.
+```
 
 ---
 
-### 10.5 Hotspot and skew risks (V1)
+## 4. Source-Specific Version Rules
 
-#### A) Hot article skew
+Reading receives independent projection lanes.
 
-* repeated detail reads for a few articleIds/slugs
-* repeated stats/media/SEO lookups for the same article
+| Source lane | Projection state affected | Version field |
+|---|---|---|
+| Content | Article content and visibility | `ContentSourceVersion` |
+| SEO | Route and SEO metadata | `SeoSourceVersion` |
+| Media | Cover/media presentation | `MediaSourceVersion` |
+| Interaction | Displayed counters | `InteractionStatsVersion` |
 
-#### B) Feed burst skew
+Apply rule:
 
-* same feed pages/filters repeatedly requested during spikes (page 1, top category)
+```text
+If IncomingVersion > CurrentAppliedVersion:
+    apply known-value snapshot
+Else:
+    ignore as duplicate or stale
+```
 
-#### C) Cross-module fan-out cost
+Rules:
 
-* read composition can amplify latency if sidecar lookups are slow or uncached
+```text
+Versions from different source lanes are not comparable.
 
----
+Timestamps are for diagnostics and lag measurement only.
 
-### 10.6 V1 mitigations (no sharding yet)
+A stale Content snapshot must not re-expose locally hidden content.
 
-CommercialNews V1 already has the correct baseline mitigations for Reading:
+A stale SEO snapshot must not reactivate a locally inactive route.
 
-* **Redis feed/detail caches** (short TTL / explicit invalidation where needed)
-* **SEO slug cache** + SQL fallback
-* **Visibility enforcement in Content truth** (never trust SEO alone for visibility)
-* **Graceful degradation** for missing stats/media/comments delays
-* **Split loading** (detail first, comments paged separately)
-* **Required indexes documented in owner modules**
-
-These are preferred before introducing shard complexity.
-
----
-
-### 10.7 V2+ scale options (selective)
-
-Introduce stronger partitioning/read-model strategies only when sustained signals justify it.
-
-#### Option A — Read-model/projection for hot listings (recommended first)
-
-* precomputed feed slices / category snapshots / trending windows
-* category-scoped popularity projections
-* cache-friendly read shapes with explicit freshness policy
-
-#### Option B — External search engine
-
-* move search workload out of OLTP joins / LIKE queries
-* sync via outbox/worker pipeline
-* accept eventual consistency with measurable freshness and fallback behavior
-
-#### Option C — Derived-store partitioning
-
-If projections/search docs become the bottleneck, partition those derived stores before touching core truth stores.
+A stale Interaction snapshot must not overwrite newer counters.
+```
 
 ---
 
-### 10.8 Rebalancing and routing readiness (future)
+## 5. Public Read Invariants
 
-Reading itself is mostly an API/query composition module, but future scale may require:
+### 5.1. Article visibility
 
-* routing to read-model partitions/projection shards
-* cache key distribution and hotspot controls
-* worker-owned projection rebuild lanes (via Background Worker)
+Reading may publicly expose an article only when local state confirms:
 
-**Guardrail**
-Any scale/rebalance change must preserve public read P95/P99 and visibility correctness.
+```text
+Status = Published
+AND IsPublic = true
+AND VisibilityRequiresResync = false
+```
+
+Otherwise:
+
+```text
+Detail request -> safe 404.
+List/search/related -> omit row.
+```
+
+### 5.2. Slug route safety
+
+Slug detail requires:
+
+```text
+ArticleSeoRouteProjection exists
+AND Scope = public
+AND IsActive = true
+AND RequiresResync = false
+AND target ArticleReadModel is locally public.
+```
+
+### 5.3. Optional enrichment
+
+```text
+Missing media fields -> null or omitted fields.
+
+Missing Interaction snapshot -> zero/default counters.
+
+Delayed Interaction snapshot -> last-known counters.
+
+Optional enrichment must not make visibility permissive.
+```
+
+### 5.4. Async lag
+
+```text
+New publication or route activation may temporarily be absent.
+
+Upstream unpublish/delete/route-deactivate changes may remain unseen locally
+until newer snapshots are applied.
+
+V1 accepts bounded propagation lag and requires observability/repair posture.
+```
 
 ---
 
-### 10.9 Partition-readiness observability signals (Reading)
+## 6. Index Guidance
 
-Use existing V1 measurement signals to decide when stronger partitioning/read-model strategies are needed:
+## 6.1. `ArticleReadModel`
 
-* list/detail P95/P99 latency
-* list/detail error rate (5xx/timeouts)
-* TTFB for key read endpoints
-* cache hit ratio for feed/detail (if measured)
-* SEO slug cache hit ratio / DB fallback rate
-* sidecar fallback/degradation rates (stats/media/SEO)
-* query latency for popularity/category combinations (if measured)
+Required hot-path indexes:
 
-**Scale trigger (policy-level)**
-Consider stronger read-model/projection partitioning when sustained pressure causes:
+```text
+UQ_ArticleReadModel_ArticlePublicId
 
-* protected read path latency degradation despite current cache/index/query tactics
-* repeated expensive join/query shapes under burst traffic
-* fallback/degradation becoming frequent enough to impact UX or SLOs
+IX_ArticleReadModel_Public_PublishedAt
+    (IsPublic, Status, VisibilityRequiresResync, PublishedAtUtc DESC, ArticlePublicId DESC)
+
+IX_ArticleReadModel_Category_Public_PublishedAt
+    (CategoryPublicId, IsPublic, Status, VisibilityRequiresResync, PublishedAtUtc DESC, ArticlePublicId DESC)
+```
+
+Optional when implemented:
+
+```text
+SearchText / full-text support for public search.
+
+Tag-related projection/index support if tag filtering or related-by-tag
+is included in the concrete schema.
+```
+
+## 6.2. `ArticleSeoRouteProjection`
+
+Required hot-path indexes:
+
+```text
+UQ_ArticleSeoRouteProjection_Scope_Slug
+    (Scope, Slug)
+
+IX_ArticleSeoRouteProjection_ArticlePublicId
+    (ArticlePublicId)
+```
+
+## 6.3. `ReadingConsumedMessage`
+
+Required reliability/cleanup indexes:
+
+```text
+UQ_ReadingConsumedMessage_ConsumerName_MessageId
+    (ConsumerName, MessageId)
+
+IX_ReadingConsumedMessage_SourceLane_ProcessedAtUtc
+    (SourceLane, ProcessedAtUtc)
+
+IX_ReadingConsumedMessage_ApplyDecision_ProcessedAtUtc
+    (ApplyDecision, ProcessedAtUtc)
+```
 
 ---
 
-## 11) ERD (dbdiagram.io)
+## 7. Cache Posture
 
-See: `../diagrams/erd/reading-composition-v1.dbml`
+Cache is optional acceleration over Reading-owned projection state.
 
-How to render:
+Possible public cache keys:
 
-1. Open dbdiagram.io
-2. Copy DBML content from the file above
-3. Paste into dbdiagram.io to view/export
+```text
+cn:reading:article:{articlePublicId}
+cn:reading:slug:{scope}:{slug}
+cn:reading:feed:{page}:{pageSize}:{filtersHash}
+```
 
-> Note: This is a composition view (Reading owns no tables in V1).
+Rules:
+
+```text
+Cache must contain public-safe Reading-derived data only.
+
+Cache must not synchronously query upstream source modules on miss.
+
+Locally known article or route denial/unsafe state wins over cached output.
+
+Cache invalidation may respond to locally applied Content, SEO, Media
+or Interaction projection updates.
+
+Cache TTL and invalidation policy remain a separate operational decision.
+```
+
+---
+
+## 8. Repair and Rebuild Posture
+
+Reading projections are derived and must be repairable or rebuildable.
+
+| Reading state | Approved input owner |
+|---|---|
+| Article content and visibility | Content |
+| Slug route and SEO metadata | SEO |
+| Media presentation | Media |
+| Displayed counters | Interaction |
+
+Rules:
+
+```text
+Repair updates Reading-owned state only.
+
+Repair must not mutate upstream truth.
+
+RabbitMQ is transport, not permanent replay history.
+
+Broad rebuilds should use candidate validation before cutover.
+
+Partial or unsafe rebuilt state must not become active public-serving state.
+```
+
+---
+
+## 9. V1 Decisions Locked
+
+| Topic | V1 decision |
+|---|---|
+| Public serving model | Reading-owned async projections |
+| Required serving tables | `ArticleReadModel`, `ArticleSeoRouteProjection` |
+| Consumer idempotency state | `ReadingConsumedMessage` recommended for durable apply safety |
+| Detail by public id | Local `ArticleReadModel` |
+| Detail by slug | Local `ArticleSeoRouteProjection` then `ArticleReadModel` |
+| Synchronous source composition | Not used in ordinary public reads |
+| Article visibility owner | Content |
+| Canonical route owner | SEO |
+| Media | Optional projected presentation enrichment |
+| Counters | Interaction snapshot projected into Reading |
+| Counter event | `interaction.article_counters_projection_published` |
+| Counter application | Set known values by newer `StatsVersion` |
+| Popularity/trending | Deferred beyond V1 |
+| Source freshness | Independent version per source lane |
+| Missing/unsafe core local state | Fail closed |
+| Optional media/counter lag | Degrade safely |
+| Async propagation lag | Bounded lag accepted and monitored |
+
+---
+
+## 10. Deferred Decisions
+
+Deferred beyond baseline V1:
+
+```text
+Canonical redirect and historical slug behavior
+Exact Content / SEO / Media projection event schemas
+Tag projection shape for filtering and related results
+Search implementation and full-text strategy
+Related-article precomputation
+Cache TTL/invalidation details
+Consumed-message retention policy
+Version-gap/resync operational policy
+Rebuild/cutover implementation
+Media projection initial field scope
+Projection freshness SLO thresholds
+Popularity/trending pipeline
+Personalization and preview capabilities
+```
+
+---
+
+## 11. ERD
+
+See:
+
+```text
+../diagrams/erd/reading-composition-v1.dbml
+```
+
+The ERD must now represent Reading-owned projection tables rather than a synchronous composition view over source-module truth.

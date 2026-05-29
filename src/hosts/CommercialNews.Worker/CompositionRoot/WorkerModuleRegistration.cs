@@ -10,14 +10,21 @@ using CommercialNews.Worker.Audit.Consumers;
 using CommercialNews.Worker.Audit.Handlers;
 using CommercialNews.Worker.Audit.Handlers.Authorization;
 using CommercialNews.Worker.Audit.Handlers.Identity;
+using CommercialNews.Worker.Audit.Handlers.Interaction;
 using CommercialNews.Worker.Configuration;
+using CommercialNews.Worker.Interaction.Consumers;
+using CommercialNews.Worker.Interaction.Handlers;
+using CommercialNews.Worker.Interaction.Handlers.Content;
+using CommercialNews.Worker.Interaction.Handlers.Stats;
 using CommercialNews.Worker.Notifications.Consumers;
 using CommercialNews.Worker.Notifications.Handlers;
 using CommercialNews.Worker.Notifications.Handlers.Identity;
+using CommercialNews.Worker.Notifications.Handlers.Interaction;
 using CommercialNews.Worker.Notifications.Processing;
 using CommercialNews.Worker.Outbox;
 using CommercialNews.Worker.Outbox.Handlers.Authorization;
 using CommercialNews.Worker.Outbox.Handlers.Identity;
+using CommercialNews.Worker.Outbox.Handlers.Interaction;
 using CommercialNews.Worker.Outbox.Handlers.Notifications;
 using CommercialNews.Worker.Outbox.Publishing;
 using CommercialNews.Worker.Outbox.Handlers.Seo;
@@ -38,8 +45,12 @@ using CommercialNews.Worker.Reading.Consumers;
 using CommercialNews.Worker.Reading.Handlers;
 using CommercialNews.Worker.Reading.Handlers.Content;
 using CommercialNews.Worker.Reading.Handlers.Identity;
+using CommercialNews.Worker.Reading.Handlers.Interaction;
 using CommercialNews.Worker.Reading.Handlers.Media;
 using CommercialNews.Worker.Reading.Handlers.Seo;
+using Interaction.Application.DependencyInjection;
+using Interaction.Infrastructure.DependencyInjection;
+using CommercialNews.Worker.Interaction.BatchProcessing.ViewStatsMaterialization;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -68,6 +79,10 @@ public static class WorkerModuleRegistration
 
         services.AddReadingApplication();
         services.AddReadingInfrastructure();
+
+        services.AddInteractionConsumerApplication();
+        services.AddInteractionBatchProcessingApplication();
+        services.AddInteractionInfrastructure();
 
         services.AddOptions<OutboxWorkerOptions>()
             .Bind(configuration.GetSection("Workers:Outbox"));
@@ -133,6 +148,17 @@ public static class WorkerModuleRegistration
         services.AddScoped<IOutboxMessageHandler, SlugRouteDeactivatedOutboxHandler>();
         services.AddScoped<IOutboxMessageHandler, SeoMetadataUpdatedOutboxHandler>();
 
+        services.AddScoped<IOutboxMessageHandler, InteractionArticleLikedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionArticleUnlikedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentCreatedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentHiddenOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentRestoredOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentDeletedByAuthorOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentReportedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentReportsDismissedOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionCommentReportAlertTriggeredOutboxHandler>();
+        services.AddScoped<IOutboxMessageHandler, InteractionArticleCountersProjectionPublishedOutboxHandler>();
+
         services.Configure<NotificationsRabbitMqConsumerOptions>(
             configuration.GetSection(NotificationsRabbitMqConsumerOptions.SectionName));
 
@@ -142,6 +168,7 @@ public static class WorkerModuleRegistration
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityPasswordResetRequestedIntegrationEventHandler>();
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityPasswordChangedIntegrationEventHandler>();
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityEmailVerifiedIntegrationEventHandler>();
+        services.AddScoped<INotificationsIntegrationEventHandler, CommentReportAlertTriggeredIntegrationEventHandler>();
 
         services.Configure<AuthorizationRabbitMqConsumerOptions>(
             configuration.GetSection(AuthorizationRabbitMqConsumerOptions.SectionName));
@@ -158,6 +185,34 @@ public static class WorkerModuleRegistration
 
         services.Configure<ReadingRabbitMqConsumerOptions>(
             configuration.GetSection(ReadingRabbitMqConsumerOptions.SectionName));
+
+        services.Configure<InteractionRabbitMqConsumerOptions>(
+            configuration.GetSection(InteractionRabbitMqConsumerOptions.SectionName));
+
+        services.Configure<InteractionStatsRabbitMqConsumerOptions>(
+            configuration.GetSection(InteractionStatsRabbitMqConsumerOptions.SectionName));
+
+        services.AddOptions<InteractionViewStatsMaterializationBatchOptions>()
+            .Bind(
+                configuration.GetSection(
+                    InteractionViewStatsMaterializationBatchOptions.SectionName))
+            .Validate(
+                options => !options.IsEnabled ||
+                        options.BatchSize is >= 1 and <= 500,
+                "Interaction view stats materialization batch BatchSize must be between 1 and 500 when enabled.")
+            .Validate(
+                options => !options.IsEnabled ||
+                        options.PollIntervalSeconds > 0,
+                "Interaction view stats materialization batch PollIntervalSeconds must be greater than zero when enabled.")
+            .Validate(
+                options => !options.IsEnabled ||
+                        options.BusyDelaySeconds >= 0,
+                "Interaction view stats materialization batch BusyDelaySeconds must not be negative when enabled.")
+            .Validate(
+                options => !options.IsEnabled ||
+                        options.ErrorDelaySeconds > 0,
+                "Interaction view stats materialization batch ErrorDelaySeconds must be greater than zero when enabled.")
+            .ValidateOnStart();
 
         services.AddScoped<AuditIntegrationEventDispatcher>();
 
@@ -204,6 +259,11 @@ public static class WorkerModuleRegistration
         services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaReorderedAuditHandler>();
         services.AddScoped<IAuditIntegrationEventHandler, ArticlePrimaryMediaSetAuditHandler>();
 
+        services.AddScoped<IAuditIntegrationEventHandler, CommentHiddenAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, CommentRestoredAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, CommentDeletedByAuthorAuditHandler>();
+        services.AddScoped<IAuditIntegrationEventHandler, CommentReportsDismissedAuditHandler>();
+
         services.AddScoped<SeoIntegrationEventDispatcher>();
 
         services.AddScoped<ISeoIntegrationEventHandler, ContentArticleCreatedSeoHandler>();
@@ -229,6 +289,20 @@ public static class WorkerModuleRegistration
         services.AddScoped<IReadingIntegrationEventHandler, SeoMetadataUpdatedReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, IdentityUserRegisteredReadingHandler>();
         services.AddScoped<IReadingIntegrationEventHandler, IdentityUserPublicProfileUpdatedReadingHandler>();
+        services.AddScoped<IReadingIntegrationEventHandler, InteractionArticleCountersProjectionPublishedReadingHandler>();
+
+        services.AddScoped<InteractionIntegrationEventDispatcher>();
+
+        services.AddScoped<IInteractionIntegrationEventHandler, ContentArticlePublishedInteractionHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleUnpublishedInteractionHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleArchivedInteractionHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, ContentArticleSoftDeletedInteractionHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionArticleLikedStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionArticleUnlikedStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionCommentCreatedStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionCommentHiddenStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionCommentRestoredStatsHandler>();
+        services.AddScoped<IInteractionIntegrationEventHandler, InteractionCommentDeletedByAuthorStatsHandler>();
 
         services.Configure<EmailDeliveryProcessingWorkerOptions>(
             configuration.GetSection(EmailDeliveryProcessingWorkerOptions.SectionName));
@@ -239,6 +313,9 @@ public static class WorkerModuleRegistration
         services.AddHostedService<AuditRabbitMqConsumerService>();
         services.AddHostedService<SeoRabbitMqConsumerService>();
         services.AddHostedService<ReadingRabbitMqConsumerService>();
+        services.AddHostedService<InteractionRabbitMqConsumerService>();
+        services.AddHostedService<InteractionStatsRabbitMqConsumerService>();
+        services.AddHostedService<InteractionViewStatsMaterializationBatchWorker>();
         services.AddHostedService<EmailDeliveryProcessingWorker>();
 
         return services;

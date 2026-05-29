@@ -73,6 +73,16 @@ public interface IArticleReadModelRepository
 
     /*
       =========================================================
+      Interaction projection writes
+      =========================================================
+    */
+
+    Task<ArticleProjectionApplyResult> ApplyInteractionCountersAsync(
+        ApplyArticleInteractionCounterProjectionCommand command,
+        CancellationToken cancellationToken = default);
+
+    /*
+      =========================================================
       Media projection writes
       =========================================================
     */

@@ -1,8 +1,6 @@
 namespace CommercialNews.Api.Api.Public.Contracts.Interaction.Comments.Requests;
 
-public sealed class CreateCommentHttpRequest
+public sealed class CreateCommentRequest
 {
-    public long? ParentCommentId { get; init; }
-
     public string Content { get; init; } = string.Empty;
 }

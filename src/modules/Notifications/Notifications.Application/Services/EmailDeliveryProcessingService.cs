@@ -6,7 +6,6 @@ using Notifications.Application.Contracts.Services;
 using Notifications.Application.Errors;
 using Notifications.Application.Ports.Persistence;
 using Notifications.Application.Ports.Services;
-using Notifications.Application.Ports.Transactions;
 using Notifications.Domain.Entities;
 using Notifications.Domain.Enums;
 using Notifications.Domain.Exceptions;

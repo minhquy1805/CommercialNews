@@ -1,6 +1,10 @@
 namespace CommercialNews.Api.Api.Public.Contracts.Interaction.Likes.Responses;
 
-public sealed class UnlikeArticleHttpResponse
+public sealed class UnlikeArticleResponse
 {
+    public string ArticlePublicId { get; init; } = string.Empty;
+
     public bool Liked { get; init; }
+
+    public long? Version { get; init; }
 }

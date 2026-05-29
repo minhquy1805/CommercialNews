@@ -1,37 +1,110 @@
 # Interaction — API Surface (V1)
 
-Base path (Public): `/api/v1`
+This document defines the public, authenticated, and administrator API surface for Interaction V1.
+It focuses on request/response contracts, status semantics, moderation APIs, and async response boundaries.
 
-> Interaction endpoints must be designed to be **fast**, **retry-safe**, and **non-blocking** relative to Reading.
-> Where possible, writes should be lightweight and/or async-buffered.
-> Interaction write success is defined by **interaction truth commit** or **accepted async ingestion**, not by downstream counter or trending freshness.
+Related:
+
+- `02-domain-contracts.md`
+- `03-runtime-flows.md`
+- `04-errors-status-codes.md`
+- `05-security-abuse-controls.md`
+- `06-idempotency-consistency.md`
+- `07-observability-slos.md`
+- `08-dependencies-and-ownership.md`
+- `09-open-questions.md`
+- `10-business-rules.md`
 
 ---
 
-## 1) Views
+## Base Paths
 
-### POST `/articles/{articleId}/views`
+### Public and authenticated user-facing endpoints
 
-Record a view for an article (V1 simple counter/log policy).
-
-**Auth**
-
-* Optional (anonymous allowed). If authenticated, include user context.
-
-**Headers**
-
-* `Idempotency-Key` (optional; recommended if client retries aggressively and a dedupe policy exists)
-* `X-Correlation-Id` (optional)
-
-**Request (optional body)**
-
-```json
-{
-  "visitorKey": "optional-string"
-}
+```text
+/api/v1
 ```
 
-**Response (202 preferred)**
+### Administrator/moderator endpoints
+
+```text
+/api/v1/admin/interaction
+```
+
+## API Posture
+
+Interaction endpoints must be:
+
+- fast;
+- retry-safe where commands may be repeated;
+- explicit about authoritative state versus derived counters;
+- non-blocking relative to downstream Reading, Audit and Notifications processing.
+
+For commands with asynchronous consequences:
+
+```text
+API success means Interaction-owned state and required Outbox intent committed.
+
+API success does not mean:
+- Reading already applied new counters;
+- Audit already stored canonical evidence;
+- Notifications already sent administrator email.
+```
+
+## Identifier Convention
+
+All API routes use public identifiers:
+
+```text
+articlePublicId
+commentPublicId
+commentReportPublicId
+commentModerationCasePublicId
+```
+
+Internal persistence identifiers must not be exposed in public/admin API contracts.
+
+---
+
+## 1) Article Views
+
+### POST `/api/v1/articles/{articlePublicId}/views`
+
+Submit a page-view contribution for an article.
+
+This endpoint is called independently after or alongside successful public article rendering. Article rendering must not depend on this request succeeding.
+
+### Authentication
+
+Optional.
+
+- Anonymous readers may submit view contributions.
+- Authenticated readers may submit view contributions using trusted server-side actor context.
+- Client-provided user identity must not be accepted as authority.
+
+### Headers
+
+| Header | Required | Purpose |
+|---|---:|---|
+| `X-Correlation-Id` | No | Request tracing |
+| `Idempotency-Key` | No | Not a strict per-view idempotency contract in V1 |
+
+### Request
+
+No request body is required in V1.
+
+The client must not provide authoritative values such as:
+
+```text
+UserId
+ViewCount
+OccurredAtUtc used for ordering
+Article visibility state
+```
+
+### Response
+
+#### `202 Accepted`
 
 ```json
 {
@@ -39,230 +112,1321 @@ Record a view for an article (V1 simple counter/log policy).
 }
 ```
 
-**Rules**
+`accepted = true` means the request was accepted by the endpoint contract. It does not promise immediate counter visibility in Reading.
 
-* Must not block article reads.
-* If the system is under load, it may drop, sample, or buffer views by policy (must be observable).
-* V1 does not guarantee uniqueness; counts may be approximate.
-* An accepted response does not guarantee immediate counter update.
-* Duplicate submissions and replay are acceptable in V1 unless a stricter dedupe policy is explicitly introduced.
+### Rules
+
+- A view contributes to `ArticleViewCount` only when the article is locally confirmed as interaction-enabled.
+- The request is subject to anti-abuse and repeat-view suppression policy.
+- Interaction may avoid revealing detailed suppression decisions to clients.
+- Accepted count mutation must use atomic increment semantics.
+- Interaction does not store one permanent raw row for each page view in V1.
+- Interaction does not publish one Reading event for each view.
+- Reading eventually receives public counter snapshots through:
+
+```text
+interaction.article_counters_projection_published
+```
+
+### Relevant outcomes
+
+| Situation | Response posture |
+|---|---|
+| Valid request for eligible article | `202 Accepted` |
+| Article is not publicly interaction-enabled | `404 Not Found` or standard unavailable-resource response according to API policy |
+| Malformed request | `400 Bad Request` |
+| Rate limited | `429 Too Many Requests` |
+| Unexpected server failure | `500 Internal Server Error` |
 
 ---
 
-## 2) Likes
+## 2) Article Likes
 
-### POST `/articles/{articleId}/likes`
+### POST `/api/v1/articles/{articlePublicId}/likes`
 
-Like an article (idempotent).
+Like an article.
 
-**Auth**
+### Authentication
 
-* Required (must identify user)
+Required.
 
-**Headers**
+### Headers
 
-* `Idempotency-Key` (optional)
-* `X-Correlation-Id` (optional)
+| Header | Required | Purpose |
+|---|---:|---|
+| `X-Correlation-Id` | No | Request tracing |
 
-**Response (200)**
+A separate idempotency key is not required for normal like semantics because the resource relationship itself is idempotent.
+
+### Response
+
+#### `200 OK`
 
 ```json
 {
+  "articlePublicId": "01J...",
   "liked": true
 }
 ```
 
-**Rules**
+### Rules
 
-* Like truth is authoritative; aggregate like totals are derived.
-* Repeated like requests must converge deterministically.
-* Timeout or retry ambiguity must be reconciled from Interaction truth, not from counters.
+- New likes require an interaction-enabled article.
+- The current authenticated actor comes from trusted request context.
+- A user may have at most one active like for the same article.
+- Repeated like requests converge to `liked = true`.
+- Two different users may like the same article concurrently without conflicting merely because the article is the same.
+- `LikeCount` is derived and may update asynchronously after this response.
 
-### DELETE `/articles/{articleId}/likes`
+### Authoritative invariant
 
-Unlike an article (idempotent).
+```text
+At most one active ArticleLike per (ArticlePublicId, UserId).
+```
 
-**Auth**
+### Relevant outcomes
 
-* Required
+| Situation | Status |
+|---|---:|
+| Like created or already active under idempotent semantics | `200 OK` |
+| Unauthenticated | `401 Unauthorized` |
+| Article not interaction-enabled | `404 Not Found` or standard unavailable-resource response |
+| Rate limited | `429 Too Many Requests` |
+| Unexpected failure | `500 Internal Server Error` |
 
-**Headers**
+---
 
-* `Idempotency-Key` (optional)
-* `X-Correlation-Id` (optional)
+### DELETE `/api/v1/articles/{articlePublicId}/likes`
 
-**Response (200)**
+Remove the authenticated user's active like from an article.
+
+### Authentication
+
+Required.
+
+### Response
+
+#### `200 OK`
 
 ```json
 {
+  "articlePublicId": "01J...",
   "liked": false
 }
 ```
 
-**Rules**
+### Rules
 
-* Like and unlike must be idempotent:
-
-  * liking twice returns `liked = true`
-  * unliking twice returns `liked = false`
-* Current like state is truth; totals may lag because they are aggregated asynchronously.
-* Concurrent or retried like/unlike requests must converge to deterministic truth state.
-
----
-
-## 3) Comments
-
-### GET `/articles/{articleId}/comments`
-
-List comments for an article (public).
-
-**Query**
-
-* `page`
-* `pageSize`
-* `sort` allowlist (default `-createdAt`)
-
-**Response (200)**
-
-Standard list envelope.
-
-**Rules**
-
-* Returned comments must follow current comment truth and visibility/moderation policy.
-* Comment counts shown elsewhere may lag independently from comment truth.
-
-### POST `/articles/{articleId}/comments`
-
-Create a comment.
-
-**Auth**
-
-* Required (recommended baseline to reduce abuse; policy can allow anonymous later)
-
-**Headers**
-
-* `Idempotency-Key` (recommended if duplicate comments under retry are unacceptable)
-* `X-Correlation-Id` (optional)
-
-**Request**
-
-```json
-{
-  "content": "string"
-}
-```
-
-**Response (201)**
-
-```json
-{
-  "commentId": "string",
-  "createdAt": "2026-03-02T10:30:00Z"
-}
-```
-
-**Rules**
-
-* If `Idempotency-Key` is supported, repeated equivalent create attempts must converge to one logical comment result.
-* Comment truth is authoritative; comment counters and summaries are derived.
-* Downstream moderation, reporting, and audit hooks must remain post-commit and non-blocking.
-
-### PUT `/comments/{commentId}`
-
-Edit a comment.
-
-**Auth**
-
-* Required
-
-**Headers**
-
-* `If-Match` or version-based concurrency header (recommended, if adopted by API policy)
-* `X-Correlation-Id` (optional)
-
-**Request**
-
-```json
-{
-  "content": "string"
-}
-```
-
-**Response (200)**
-
-```json
-{
-  "updated": true
-}
-```
-
-**Rules**
-
-* Only the author can edit by default (object-level auth).
-* V2 may add moderation states and edit windows.
-* If stale-edit protection is adopted, stale updates must return deterministic conflict behavior instead of silently overwriting newer truth.
-* Retry of the same semantic edit should remain safe.
-
-### DELETE `/comments/{commentId}`
-
-Delete a comment.
-
-**Auth**
-
-* Required
-
-**Headers**
-
-* `X-Correlation-Id` (optional)
-
-**Response (200)**
-
-```json
-{
-  "deleted": true
-}
-```
-
-**Rules**
-
-* The author can delete their own comment; admins or moderators can remove abusive comments (V2 governance).
-* Repeated equivalent delete requests should converge safely as a no-op or documented idempotent success.
-* Comment truth changes first; comment counters may lag.
+- Unlike affects only the current user's active like.
+- Repeated unlike requests converge to `liked = false`.
+- Unlike remains allowed after the article becomes unpublished, archived or soft-deleted because the user is retracting their own relationship.
+- `LikeCount` may update asynchronously after the unlike truth mutation commits.
+- Like count must never become negative.
 
 ---
 
-## 4) Counters (optional read endpoints)
+### GET `/api/v1/articles/{articlePublicId}/my-like`
 
-If you want dedicated endpoints for counters (optional in V1):
+Return the authenticated user's authoritative like state for an article.
 
-### GET `/articles/{articleId}/counters` (optional)
+### Authentication
 
-**Response (200)**
+Required.
+
+### Response
+
+#### `200 OK`
 
 ```json
 {
-  "views": 123,
-  "likes": 45,
-  "comments": 6,
-  "partial": false
+  "articlePublicId": "01J...",
+  "liked": true
 }
 ```
 
-**Rules**
+### Rules
 
-* Counters are derived and may be stale.
-* `partial = true` may be used if the endpoint wants to signal degraded aggregate completeness.
-* Clients must not treat this endpoint as authority for whether an interaction truth change committed.
+- This endpoint reads `ArticleLike` truth, not derived public counters.
+- It is the recommended reconciliation endpoint after ambiguous like/unlike timeout.
 
 ---
 
-## 5) Versioning and conventions
+## 3) Public Comments
 
-* All endpoints use `/api/v1`.
-* Errors follow the standard envelope.
-* List responses follow `{ items[], pageInfo{} }`.
-* Interaction truth and aggregate outputs have different consistency expectations:
+### GET `/api/v1/articles/{articlePublicId}/comments`
 
-  * likes and comments truth are deterministic
-  * counters and trending are eventual
-* Public reads must remain correct even when interaction-derived aggregates lag.
+List publicly visible top-level comments for an article.
+
+### Authentication
+
+Not required.
+
+### Query Parameters
+
+| Parameter | Required | Default | Rules |
+|---|---:|---:|---|
+| `page` | No | `1` | Must be positive |
+| `pageSize` | No | Configured default | Must remain within configured maximum |
+| `sort` | No | `-createdAtUtc` | Allowlisted values only |
+
+Recommended sort allowlist:
+
+```text
+-createdAtUtc
+createdAtUtc
+```
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "commentPublicId": "01J...",
+      "articlePublicId": "01J...",
+      "authorDisplayName": "Reader",
+      "content": "Comment content",
+      "createdAtUtc": "2026-05-25T10:30:00Z"
+    }
+  ],
+  "pageInfo": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1
+  }
+}
+```
+
+### Rules
+
+Public comments query returns only comments satisfying:
+
+```text
+Comment.Status = Visible
+AND Comment.ParentCommentId = NULL
+AND article is eligible for public exposure according to Interaction/public contract
+```
+
+Public response must never expose:
+
+```text
+Pending comments
+Rejected comments
+Hidden comments
+Deleted comments
+Reporter information
+CommentModerationCase metadata
+Moderation reasons or notes
+Moderator identity
+Internal version fields
+```
+
+### Post-moderation clarification
+
+In default V1, a valid newly created comment begins as `Visible` and may appear in this public query immediately while the related article remains publicly eligible.
+
+`Pending` and `Rejected` remain reserved for a future selective-moderation workflow and are not produced by the default V1 comment-creation endpoint.
+
+### V1 reply limitation
+
+```text
+V1 returns top-level comments only.
+Reply creation and nested-thread rendering are not supported.
+```
+
+---
+
+## 4) Authenticated Comment Commands
+
+### POST `/api/v1/articles/{articlePublicId}/comments`
+
+Create a new top-level public comment under the default V1 post-moderation policy.
+
+### Authentication
+
+Required.
+
+### Headers
+
+| Header | Required | Purpose |
+|---|---:|---|
+| `Idempotency-Key` | Recommended | Prevent duplicate comment creation after retry ambiguity |
+| `X-Correlation-Id` | No | Request tracing |
+
+### Request
+
+```json
+{
+  "content": "This is my comment."
+}
+```
+
+### V1 Request Constraint
+
+The request must not accept:
+
+```text
+parentCommentPublicId
+parentCommentId
+```
+
+`ParentCommentId` is reserved in the domain model for future reply support only.
+
+### Response
+
+#### `201 Created`
+
+```json
+{
+  "commentPublicId": "01J...",
+  "articlePublicId": "01J...",
+  "status": "Visible",
+  "createdAtUtc": "2026-05-25T10:30:00Z",
+  "version": 1
+}
+```
+
+### Rules
+
+- Article must be locally confirmed as interaction-enabled.
+- Comment content must pass validation, length, sanitization and adopted safety rules.
+- Every valid default V1-created comment is created with:
+
+```text
+Status = Visible
+ParentCommentId = NULL
+```
+
+- A valid new comment is immediately eligible for public display while its article remains publicly eligible.
+- Moderator approval is not required before display in default V1.
+- Comment creation eventually increases `VisibleCommentCount`.
+- Counter publication to Reading happens asynchronously and must not block comment creation.
+- If `Idempotency-Key` is supported:
+  - retry with the same key and same semantic payload returns the same logical created result;
+  - reuse with conflicting payload returns deterministic conflict.
+
+### Reserved Future Selective-Moderation Hook
+
+The following behavior is not part of default V1:
+
+```text
+Create comment -> Pending -> Approve / Reject
+```
+
+`Pending`, `Rejected`, `Approve` and `Reject` may be introduced later only through an explicit selective-moderation policy.
+
+### Relevant outcomes
+
+| Situation | Status |
+|---|---:|
+| Comment created as visible | `201 Created` |
+| Same idempotency key and same request already committed | `200 OK` or `201 Created` with original result, according to API convention |
+| Conflicting reuse of idempotency key | `409 Conflict` |
+| Unauthenticated | `401 Unauthorized` |
+| Article not interaction-enabled | `404 Not Found` or standard unavailable-resource response |
+| Invalid or unsafe content | `400 Bad Request` |
+| Rate limited | `429 Too Many Requests` |
+
+---
+
+### DELETE `/api/v1/comments/{commentPublicId}`
+
+Delete a comment owned by the authenticated user.
+
+### Authentication
+
+Required.
+
+### Headers
+
+| Header | Required | Purpose |
+|---|---:|---|
+| `X-Correlation-Id` | No | Request tracing |
+
+### Response
+
+#### `204 No Content`
+
+No response body.
+
+### Rules
+
+- The authenticated user must be the authoritative author of the comment.
+- Admin approval is not required for author deletion.
+- Supported default V1 deletion transitions:
+
+| Current status | Next status |
+|---|---|
+| `Visible` | `Deleted` |
+| `Hidden` | `Deleted` |
+| `Deleted` | Idempotent no-op |
+
+- If deleting a `Visible` comment, `VisibleCommentCount` eventually decreases.
+- If deleting a `Hidden` comment, no additional visible-counter change occurs.
+- If the comment belongs to an open moderation case:
+  - comment becomes `Deleted`;
+  - case becomes `ClosedByAuthorDeletion`;
+  - pending reports become `ClosedByAuthorDeletion`;
+  - required moderation history is written atomically.
+
+### Reserved Future Selective-Moderation Hook
+
+If a future selective-moderation flow creates `Pending` or `Rejected` comments, authors may also delete their own comments from those states.
+
+### Relevant outcomes
+
+| Situation | Status |
+|---|---:|
+| Deleted successfully | `204 No Content` |
+| Already deleted by author, retry/no-op | `204 No Content` |
+| Unauthenticated | `401 Unauthorized` |
+| Not comment owner | `404 Not Found` preferred to avoid exposing ownership/resource information |
+| Comment not found | `404 Not Found` |
+| Concurrent stale conflict requiring client refresh | `409 Conflict` |
+
+---
+
+## 5) Comment Reports
+
+### POST `/api/v1/comments/{commentPublicId}/reports`
+
+Report a publicly visible comment for moderator review.
+
+### Authentication
+
+Required.
+
+### Headers
+
+| Header | Required | Purpose |
+|---|---:|---|
+| `X-Correlation-Id` | No | Request tracing |
+
+### Request
+
+```json
+{
+  "reasonCode": "Spam",
+  "description": "Optional bounded details."
+}
+```
+
+### Allowed Reason Codes
+
+```text
+Spam
+Harassment
+HateSpeech
+Violence
+SexualContent
+PersonalInformation
+Misinformation
+OffTopic
+Other
+```
+
+### Request Rules
+
+| Field | Rule |
+|---|---|
+| `reasonCode` | Required and allowlisted |
+| `description` | Optional for standard reasons |
+| `description` with `Other` | Required |
+| `description` length | Bounded by validation policy |
+
+### Response
+
+#### `201 Created`
+
+```json
+{
+  "commentReportPublicId": "01J...",
+  "commentPublicId": "01J...",
+  "status": "Pending",
+  "createdAtUtc": "2026-05-25T10:35:00Z"
+}
+```
+
+### Rules
+
+A report is allowed only when:
+
+- comment currently has `Status = Visible`;
+- related article is interaction-enabled;
+- reporter is not the comment author;
+- reporter has not already reported that comment;
+- request passes rate-limit and validation policy.
+
+A report:
+
+- creates or joins a moderation case;
+- does not hide the comment automatically;
+- does not change public comment counters;
+- may asynchronously trigger one admin alert intent if the open case reaches configured escalation policy.
+
+### Authoritative invariant
+
+```text
+At most one CommentReport per (CommentId, ReporterUserId).
+```
+
+### Relevant outcomes
+
+| Situation | Status |
+|---|---:|
+| Report created | `201 Created` |
+| User already reported comment | `409 Conflict` |
+| User reports own comment | `403 Forbidden` or standard domain-forbidden response |
+| Comment not visible / article not eligible / not found | `404 Not Found` preferred for public-facing safety |
+| Invalid reason/description | `400 Bad Request` |
+| Unauthenticated | `401 Unauthorized` |
+| Rate limited | `429 Too Many Requests` |
+
+---
+
+## 6) Public Counter Read Surface
+
+### No dedicated public counter endpoint in Interaction V1
+
+Interaction does not expose a required public endpoint such as:
+
+```text
+GET /api/v1/articles/{articlePublicId}/counters
+```
+
+for website article composition in V1.
+
+Instead:
+
+```text
+Interaction
+    -> interaction.article_counters_projection_published
+    -> Reading
+    -> public article response contains projected counters
+```
+
+### Rules
+
+- Reading owns public article response composition.
+- Interaction owns counter derivation and publication.
+- Public counters are eventually consistent.
+- Clients must not use displayed counters to determine whether a like/comment command committed.
+
+### Optional administrative diagnostics
+
+An authorized admin/operational endpoint may be introduced for counter inspection, as defined later in the admin surface below.
+
+---
+
+## 7) Admin Comment Moderation API
+
+### Authorization
+
+Admin/moderator comment APIs require appropriate permissions:
+
+```text
+Interaction.Comments.Read
+Interaction.Comments.Moderate
+```
+
+---
+
+### GET `/api/v1/admin/interaction/comments`
+
+List comments for administrative moderation.
+
+### Query Parameters
+
+| Parameter | Required | Example | Purpose |
+|---|---:|---|---|
+| `status` | No | `Visible` | Filter by comment status |
+| `articlePublicId` | No | `01J...` | Filter by article |
+| `authorUserId` | No | `01J...` | Filter by author where authorized |
+| `page` | No | `1` | Paging |
+| `pageSize` | No | `20` | Paging |
+| `sort` | No | `-createdAtUtc` | Allowlisted sort |
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "commentPublicId": "01J...",
+      "articlePublicId": "01J...",
+      "authorUserId": "01U...",
+      "content": "Submitted comment",
+      "status": "Visible",
+      "parentCommentPublicId": null,
+      "createdAtUtc": "2026-05-25T10:30:00Z",
+      "version": 1
+    }
+  ],
+  "pageInfo": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1
+  }
+}
+```
+
+### Rules
+
+- Authorized admin query may include non-public comment states.
+- V1 comments remain top-level only; `parentCommentPublicId` remains `null`.
+- Default V1 comment creation produces `Visible` comments immediately.
+- Administrators normally review visible or hidden comments through post-moderation workflows.
+- `Pending` and `Rejected` may remain queryable only as reserved future selective-moderation states if later adopted.
+
+---
+
+### GET `/api/v1/admin/interaction/comments/{commentPublicId}`
+
+Return administrative detail for one comment.
+
+### Authorization
+
+Requires:
+
+```text
+Interaction.Comments.Read
+```
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "commentPublicId": "01J...",
+  "articlePublicId": "01J...",
+  "authorUserId": "01U...",
+  "content": "Submitted comment",
+  "status": "Visible",
+  "parentCommentPublicId": null,
+  "createdAtUtc": "2026-05-25T10:30:00Z",
+  "updatedAtUtc": "2026-05-25T10:40:00Z",
+  "deletedAtUtc": null,
+  "version": 2
+}
+```
+
+---
+
+### Deferred Endpoint Hook — Selective Pre-Moderation
+
+The following endpoints are not supported in the default V1 post-moderation flow:
+
+```text
+POST /api/v1/admin/interaction/comments/{commentPublicId}/approve
+POST /api/v1/admin/interaction/comments/{commentPublicId}/reject
+```
+
+Default V1 behavior is:
+
+```text
+Create valid comment -> Visible immediately
+Visible -> Hidden by authorized moderator/admin
+Hidden -> Visible through restore
+```
+
+Approve/reject endpoints may be introduced later only if an explicit selective-moderation policy creates comments in `Pending` state.
+
+---
+
+### POST `/api/v1/admin/interaction/comments/{commentPublicId}/hide`
+
+Hide a currently visible comment through the default V1 post-moderation workflow, outside an open report-case resolution flow.
+
+### Authorization
+
+Requires:
+
+```text
+Interaction.Comments.Moderate
+```
+
+### Request
+
+```json
+{
+  "expectedVersion": 2,
+  "reasonCode": "PolicyViolation",
+  "note": "Comment violates moderation policy."
+}
+```
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "commentPublicId": "01J...",
+  "status": "Hidden",
+  "version": 3
+}
+```
+
+### Rules
+
+```text
+Valid transition: Visible -> Hidden
+```
+
+This is a primary default V1 moderation operation because valid comments may already be publicly visible immediately after creation.
+
+`reasonCode` is required.
+
+When `reasonCode = Other`, `note` is required.
+
+`VisibleCommentCount` decreases asynchronously after a successful hide transition.
+
+If an open moderation case exists for this comment, admin should use the reported-comment resolution endpoint instead:
+
+```text
+POST /api/v1/admin/interaction/comment-moderation-cases/{casePublicId}/hide-comment
+```
+
+This ensures case and associated reports are resolved atomically.
+
+---
+
+### POST `/api/v1/admin/interaction/comments/{commentPublicId}/restore`
+
+Restore a hidden comment to visible state.
+
+### Authorization
+
+Requires:
+
+```text
+Interaction.Comments.Moderate
+```
+
+### Request
+
+```json
+{
+  "expectedVersion": 3,
+  "note": "Restored after moderator review."
+}
+```
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "commentPublicId": "01J...",
+  "status": "Visible",
+  "version": 4
+}
+```
+
+### Rules
+
+```text
+Valid transition: Hidden -> Visible
+```
+
+Restore reverses a previous post-moderation hide action.
+
+It does not represent initial approval of a newly submitted comment.
+
+`VisibleCommentCount` increases asynchronously after a successful restore transition.
+
+If the related article is currently non-public, the comment state may become `Visible` in Interaction but must not appear publicly until the article is public again.
+
+---
+
+## 8) Admin Comment Report / Moderation Case API
+
+### Authorization
+
+Reading and resolving reported-comment cases uses:
+
+```text
+Interaction.CommentReports.Read
+Interaction.CommentReports.Resolve
+```
+
+Resolving a case by hiding its comment may additionally require:
+
+```text
+Interaction.Comments.Moderate
+```
+
+### Post-moderation posture
+
+A report case concerns a comment that may already be publicly visible.
+
+Creating or joining an open moderation case must not automatically hide the comment.
+
+The comment remains visible until:
+
+- an authorized moderator/admin hides it; or
+- its author deletes it.
+
+`CommentReport.Status = Pending` is still valid. `Pending` here is the state of the report awaiting resolution, not the visibility state of the comment.
+
+---
+
+### GET `/api/v1/admin/interaction/comment-moderation-cases`
+
+List moderation cases.
+
+### Query Parameters
+
+| Parameter | Required | Example | Purpose |
+|---|---:|---|---|
+| `status` | No | `Open` | Filter case lifecycle |
+| `priority` | No | `High` | Filter urgency |
+| `articlePublicId` | No | `01J...` | Filter article |
+| `commentPublicId` | No | `01J...` | Filter comment |
+| `alertTriggered` | No | `true` | Filter alert state |
+| `page` | No | `1` | Paging |
+| `pageSize` | No | `20` | Paging |
+| `sort` | No | `-openedAtUtc` | Allowlisted sort |
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "commentModerationCasePublicId": "01C...",
+      "commentPublicId": "01J...",
+      "articlePublicId": "01A...",
+      "status": "Open",
+      "priority": "High",
+      "highestSeverity": "Normal",
+      "pendingReportCount": 3,
+      "distinctReporterCount": 3,
+      "alertTriggeredAtUtc": "2026-05-25T10:35:00Z",
+      "alertLevel": "High",
+      "openedAtUtc": "2026-05-25T10:30:00Z",
+      "version": 3
+    }
+  ],
+  "pageInfo": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1
+  }
+}
+```
+
+### Rules
+
+- This is an authorized admin-only view.
+- Report counts and severity are moderation data and must not appear in public APIs.
+- Derived case-summary fields, where materialized, remain subordinate to report/case truth.
+
+---
+
+### GET `/api/v1/admin/interaction/comment-moderation-cases/{casePublicId}`
+
+Return case detail, associated comment and submitted reports.
+
+### Authorization
+
+Requires:
+
+```text
+Interaction.CommentReports.Read
+```
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "commentModerationCasePublicId": "01C...",
+  "status": "Open",
+  "priority": "High",
+  "highestSeverity": "Normal",
+  "alertTriggeredAtUtc": "2026-05-25T10:35:00Z",
+  "alertLevel": "High",
+  "openedAtUtc": "2026-05-25T10:30:00Z",
+  "resolvedAtUtc": null,
+  "resolutionType": null,
+  "resolutionReasonCode": null,
+  "resolutionNote": null,
+  "version": 3,
+  "comment": {
+    "commentPublicId": "01J...",
+    "articlePublicId": "01A...",
+    "authorUserId": "01U...",
+    "content": "Reported comment content.",
+    "status": "Visible",
+    "version": 2
+  },
+  "reports": [
+    {
+      "commentReportPublicId": "01R...",
+      "reporterUserId": "01U...",
+      "reasonCode": "Spam",
+      "description": "Promotional comment.",
+      "status": "Pending",
+      "createdAtUtc": "2026-05-25T10:30:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### POST `/api/v1/admin/interaction/comment-moderation-cases/{casePublicId}/dismiss`
+
+Dismiss reports and keep the comment visible.
+
+### Authorization
+
+Requires:
+
+```text
+Interaction.CommentReports.Resolve
+```
+
+### Request
+
+```json
+{
+  "expectedCaseVersion": 3,
+  "reasonCode": "PolicyViolation",
+  "note": "Reports reviewed; comment does not require removal."
+}
+```
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "commentModerationCasePublicId": "01C...",
+  "caseStatus": "Dismissed",
+  "commentStatus": "Visible",
+  "version": 4
+}
+```
+
+### Rules
+
+Valid state change:
+
+```text
+Case: Open -> Dismissed
+Pending Reports -> Dismissed
+Comment remains Visible
+```
+
+Success commits:
+
+```text
+Case/report transitions
++ CommentModerationActionHistory: DismissReportedCase
++ interaction.comment_reports_dismissed outbox intent
+```
+
+No public counter change occurs.
+
+---
+
+### POST `/api/v1/admin/interaction/comment-moderation-cases/{casePublicId}/hide-comment`
+
+Resolve an open case by hiding the reported visible comment.
+
+### Authorization
+
+Requires:
+
+```text
+Interaction.CommentReports.Resolve
+Interaction.Comments.Moderate
+```
+
+### Request
+
+```json
+{
+  "expectedCaseVersion": 3,
+  "expectedCommentVersion": 2,
+  "reasonCode": "Harassment",
+  "note": "Confirmed violation after review."
+}
+```
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "commentModerationCasePublicId": "01C...",
+  "caseStatus": "Actioned",
+  "commentPublicId": "01J...",
+  "commentStatus": "Hidden",
+  "caseVersion": 4,
+  "commentVersion": 3
+}
+```
+
+### Rules
+
+Valid atomic state change:
+
+```text
+Comment: Visible -> Hidden
+Case: Open -> Actioned
+Pending Reports -> Actioned
+```
+
+Success commits:
+
+```text
+Comment/case/report transitions
++ CommentModerationActionHistory: HideReportedComment
++ interaction.comment_hidden outbox intent with case-resolution metadata
+```
+
+`VisibleCommentCount` decreases asynchronously.
+
+---
+
+## 9) Admin Moderation History API
+
+### GET `/api/v1/admin/interaction/comments/{commentPublicId}/moderation-history`
+
+Return Interaction-owned moderation operational history for one comment.
+
+### Authorization
+
+Requires:
+
+```text
+Interaction.Comments.Read
+```
+
+or a more specific future history-read permission.
+
+### Query Parameters
+
+| Parameter | Required | Default |
+|---|---:|---:|
+| `page` | No | `1` |
+| `pageSize` | No | Configured default |
+| `sort` | No | `-occurredAtUtc` |
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "historyPublicId": "01H...",
+      "commentPublicId": "01J...",
+      "commentModerationCasePublicId": "01C...",
+      "actionType": "HideReportedComment",
+      "fromStatus": "Visible",
+      "toStatus": "Hidden",
+      "actorUserId": "01U...",
+      "actorType": "Moderator",
+      "reasonCode": "Harassment",
+      "note": "Confirmed violation after review.",
+      "occurredAtUtc": "2026-05-25T11:00:00Z",
+      "correlationId": "01X..."
+    }
+  ],
+  "pageInfo": {
+    "page": 1,
+    "pageSize": 20,
+    "totalItems": 1,
+    "totalPages": 1
+  }
+}
+```
+
+### Rules
+
+- This reads Interaction local operational history.
+- It is not an Audit query endpoint.
+- Audit may contain canonical cross-system evidence asynchronously.
+
+---
+
+## 10) Admin Counter Inspection API
+
+### GET `/api/v1/admin/interaction/articles/{articlePublicId}/stats`
+
+Inspect Interaction-owned derived counter state for administration or diagnostics.
+
+### Authorization
+
+Requires:
+
+```text
+Interaction.Counters.Read
+```
+
+### Response
+
+#### `200 OK`
+
+```json
+{
+  "articlePublicId": "01A...",
+  "viewCount": 1250,
+  "likeCount": 48,
+  "visibleCommentCount": 12,
+  "viewVersion": 1250,
+  "statsVersion": 29,
+  "lastMaterializedAtUtc": "2026-05-25T10:35:00Z",
+  "lastPublishedAtUtc": "2026-05-25T10:35:02Z"
+}
+```
+
+### Rules
+
+- This endpoint exposes derived state for authorized operations only.
+- It must not be treated as authority for one user's like truth or one comment's status.
+- Counter values may lag committed truth.
+- Public website counters should be served through Reading projection, not this endpoint.
+
+---
+
+## 11) Endpoints Not Supported in V1
+
+### Comment editing
+
+Not supported:
+
+```text
+PUT /api/v1/comments/{commentPublicId}
+PATCH /api/v1/comments/{commentPublicId}
+```
+
+Reason:
+
+- requires edit-after-publication policy;
+- may require re-review or automatic hide policy after substantial edits;
+- requires edit history/revision rules;
+- increases report and visibility complexity.
+
+### Reply comments
+
+Not supported:
+
+```text
+POST /api/v1/comments/{commentPublicId}/replies
+POST /api/v1/articles/{articlePublicId}/comments with parentCommentPublicId
+```
+
+`Comment.ParentCommentId` may be reserved in persistence, but V1 API behavior remains top-level only.
+
+### Auto-hide through report endpoint
+
+Not supported.
+
+Submitting a report never directly changes comment visibility.
+
+### Pre-moderation approve/reject endpoints
+
+Not supported in default V1:
+
+```text
+POST /api/v1/admin/interaction/comments/{commentPublicId}/approve
+POST /api/v1/admin/interaction/comments/{commentPublicId}/reject
+```
+
+Reason:
+
+- V1 uses post-moderation;
+- valid comments are created as `Visible` immediately;
+- `Pending` and `Rejected` are reserved for future selective moderation only.
+
+### Public counter query directly from Interaction
+
+Not required for V1 public website serving. Reading owns public composition using projected counter snapshots.
+
+---
+
+## 12) Status and Error Summary
+
+| Situation | Status posture |
+|---|---:|
+| Valid create command | `201 Created` |
+| Valid idempotent relationship state command | `200 OK` |
+| Valid idempotent delete-own-comment | `204 No Content` |
+| View submission accepted | `202 Accepted` |
+| Valid query | `200 OK` |
+| Request validation failure | `400 Bad Request` |
+| Authentication missing/invalid | `401 Unauthorized` |
+| Authenticated but lacks admin permission | `403 Forbidden` |
+| Public/user resource unavailable or deliberately concealed | `404 Not Found` |
+| Duplicate report / idempotency conflict / stale state conflict | `409 Conflict` |
+| Rate limit exceeded | `429 Too Many Requests` |
+| Unexpected error | `500 Internal Server Error` |
+
+### Standard error envelope
+
+Errors follow the host-wide standard envelope. Conceptual example:
+
+```json
+{
+  "code": "Interaction.Comment.VersionConflict",
+  "message": "The comment has changed. Reload the current state and try again.",
+  "correlationId": "01X..."
+}
+```
+
+---
+
+## 13) Endpoint and Async Effect Matrix
+
+| Endpoint / command | Interaction authoritative mutation | Local history | Async event/outbox consequence |
+|---|---|---|---|
+| `POST /articles/{id}/views` | `ArticleViewCount` atomic increment if accepted | No | Counter snapshot publication later/coalesced |
+| `POST /articles/{id}/likes` | Activate/create `ArticleLike` | No | `interaction.article_liked`; counter snapshot later |
+| `DELETE /articles/{id}/likes` | Deactivate/remove own `ArticleLike` | No | `interaction.article_unliked`; counter snapshot later |
+| `POST /articles/{id}/comments` | Create `Comment(Visible)` | No | `interaction.comment_created`; counter snapshot later |
+| `DELETE /comments/{id}` | `Visible/Hidden -> Deleted`; optionally close open case | Only if closes open case | `interaction.comment_deleted_by_author`; counter snapshot later only if previously visible |
+| `POST /comments/{id}/reports` | Create report; create/join open case; optional alert state | No | `interaction.comment_reported`; optional `interaction.comment_report_alert_triggered` |
+| Admin hide comment | `Visible -> Hidden` | `Hide` | `interaction.comment_hidden`; counter snapshot later |
+| Admin restore comment | `Hidden -> Visible` | `Restore` | `interaction.comment_restored`; counter snapshot later |
+| Admin dismiss case | Case/reports dismissed; comment remains visible | `DismissReportedCase` | `interaction.comment_reports_dismissed` |
+| Admin hide reported comment | Comment hidden; case/reports actioned | `HideReportedComment` | `interaction.comment_hidden`; counter snapshot later |
+
+### Reserved Future Selective-Moderation Effects
+
+| Future command | Interaction authoritative mutation | Local history | Async event/outbox consequence |
+|---|---|---|---|
+| Admin approve pending comment | `Pending -> Visible` | `Approve` | `interaction.comment_approved`; counter snapshot later |
+| Admin reject pending comment | `Pending -> Rejected` | `Reject` | `interaction.comment_rejected` |
+
+These future commands are not part of the default V1 API surface.
+
+---
+
+## 14) Async Consistency Conventions
+
+### Interaction → Reading
+
+```text
+interaction.article_counters_projection_published
+```
+
+Reading receives:
+
+```json
+{
+  "articlePublicId": "01J...",
+  "viewCount": 1250,
+  "likeCount": 48,
+  "visibleCommentCount": 12,
+  "statsVersion": 29,
+  "projectedAtUtc": "2026-05-25T10:35:00Z"
+}
+```
+
+For default V1 comment creation:
+
+```text
+Create valid visible comment
+    -> Interaction truth commits immediately
+    -> VisibleCommentCount is materialized asynchronously
+    -> Reading receives a later counter snapshot
+```
+
+Reading must not consume raw comment lifecycle events to compute public counters.
+
+Reading only consumes Interaction-published known-value counter snapshots.
+
+Rules:
+
+- Reading applies known values, not increments.
+- Reading accepts only a newer `statsVersion`.
+- Public counters may lag.
+
+### Interaction → Notifications
+
+```text
+interaction.comment_report_alert_triggered
+```
+
+Rules:
+
+- One open moderation case triggers at most one alert intent in V1.
+- Notifications owns email delivery and recipient policy.
+- Email failure does not roll back report/case truth.
+
+### Interaction → Audit
+
+Moderation facts are sent asynchronously.
+
+Rules:
+
+- Interaction local moderation history is available immediately after commit.
+- Audit ingestion may lag.
+- Audit lag does not make moderation command fail.
+
+---
+
+## 15) V1 Surface Summary
+
+### Public / authenticated endpoints
+
+```text
+POST   /api/v1/articles/{articlePublicId}/views
+POST   /api/v1/articles/{articlePublicId}/likes
+DELETE /api/v1/articles/{articlePublicId}/likes
+GET    /api/v1/articles/{articlePublicId}/my-like
+
+GET    /api/v1/articles/{articlePublicId}/comments
+POST   /api/v1/articles/{articlePublicId}/comments
+DELETE /api/v1/comments/{commentPublicId}
+
+POST   /api/v1/comments/{commentPublicId}/reports
+```
+
+### Administrator endpoints
+
+```text
+GET    /api/v1/admin/interaction/comments
+GET    /api/v1/admin/interaction/comments/{commentPublicId}
+POST   /api/v1/admin/interaction/comments/{commentPublicId}/hide
+POST   /api/v1/admin/interaction/comments/{commentPublicId}/restore
+
+GET    /api/v1/admin/interaction/comment-moderation-cases
+GET    /api/v1/admin/interaction/comment-moderation-cases/{casePublicId}
+POST   /api/v1/admin/interaction/comment-moderation-cases/{casePublicId}/dismiss
+POST   /api/v1/admin/interaction/comment-moderation-cases/{casePublicId}/hide-comment
+
+GET    /api/v1/admin/interaction/comments/{commentPublicId}/moderation-history
+GET    /api/v1/admin/interaction/articles/{articlePublicId}/stats
+```
+
+### Explicitly deferred endpoints
+
+```text
+PUT/PATCH /api/v1/comments/{commentPublicId}
+POST      /api/v1/comments/{commentPublicId}/replies
+POST      /api/v1/articles/{articlePublicId}/comments with parent identifier
+POST      /api/v1/admin/interaction/comments/{commentPublicId}/approve
+POST      /api/v1/admin/interaction/comments/{commentPublicId}/reject
+Public GET /api/v1/articles/{articlePublicId}/counters from Interaction
+```

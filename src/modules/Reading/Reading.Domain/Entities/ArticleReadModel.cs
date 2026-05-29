@@ -97,14 +97,6 @@ public sealed class ArticleReadModel
 
     public string? SearchText { get; private set; }
 
-    public long ViewCount { get; private set; }
-
-    public long LikeCount { get; private set; }
-
-    public long CommentCount { get; private set; }
-
-    public double? PopularityScore { get; private set; }
-
     /// <summary>
     /// Version of the Content article projection only.
     /// This must not be overwritten by SEO, Media, or Interaction enrichment.
@@ -213,11 +205,6 @@ public sealed class ArticleReadModel
                 body,
                 categoryName,
                 authorDisplayName),
-
-            ViewCount = 0,
-            LikeCount = 0,
-            CommentCount = 0,
-            PopularityScore = null,
 
             SourceVersion = sourceVersion,
             LastEventMessageId = NormalizeMessageId(messageId),
@@ -477,48 +464,6 @@ public sealed class ArticleReadModel
         CoverMediaId = coverMediaId;
         CoverMediaUrl = NormalizeNullable(coverMediaUrl);
         CoverAlt = NormalizeNullable(coverAlt);
-    }
-
-    /// <summary>
-    /// Applies denormalized counters only.
-    /// Interaction checkpoint is not represented in Reading V1.
-    /// </summary>
-    public void ApplyCounters(
-        long viewCount,
-        long likeCount,
-        long commentCount,
-        double? popularityScore)
-    {
-        if (viewCount < 0 || likeCount < 0 || commentCount < 0)
-        {
-            throw new ReadingDomainException(
-                "READING.INVALID_COUNTERS",
-                "Counters must be non-negative.");
-        }
-
-        ValidatePopularityScore(popularityScore);
-
-        ViewCount = viewCount;
-        LikeCount = likeCount;
-        CommentCount = commentCount;
-        PopularityScore = popularityScore;
-    }
-
-    private static void ValidatePopularityScore(double? popularityScore)
-    {
-        if (!popularityScore.HasValue)
-        {
-            return;
-        }
-
-        if (double.IsNaN(popularityScore.Value)
-            || double.IsInfinity(popularityScore.Value)
-            || popularityScore.Value < 0)
-        {
-            throw new ReadingDomainException(
-                "READING.INVALID_POPULARITY_SCORE",
-                "Popularity score must be a finite non-negative value when provided.");
-        }
     }
 
     private DateTime? ResolvePublishedAtForContentApply(

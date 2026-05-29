@@ -6,6 +6,7 @@ public static class NotificationTemplateKey
     public const string ResetPassword = "ResetPassword";
     public const string PasswordChanged = "PasswordChanged";
     public const string EmailVerified = "EmailVerified";
+    public const string CommentReportAlert = "CommentReportAlert";
     public const string NewArticle = "NewArticle";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -14,6 +15,7 @@ public static class NotificationTemplateKey
         ResetPassword,
         PasswordChanged,
         EmailVerified,
+        CommentReportAlert,
         NewArticle
     };
 

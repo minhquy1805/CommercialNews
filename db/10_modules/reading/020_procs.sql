@@ -14,10 +14,12 @@
       * projection updates from SEO / Media / Identity / Interaction events
 
   Notes:
-  - Public read path reads from [reading].[ArticleReadModel].
+  - Public read path starts from [reading].[ArticleReadModel] and composes
+    local projections such as [reading].[ArticleInteractionCounterProjection].
   - Source truth remains in Content / SEO / Media / Identity / Interaction.
   - Projection apply must be idempotent and version-aware.
-  - SourceVersion prevents stale overwrite.
+  - SourceVersion prevents stale overwrite for source-versioned projection lanes.
+  - InteractionStatsVersion guards Interaction counter snapshots.
   - MessageId supports duplicate tracing / dedupe.
   - This file is idempotent: safe to re-run.
 */
@@ -87,6 +89,12 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'[reading].[ArticleInteractionCounterProjection]', N'U') IS NULL
+BEGIN
+    THROW 58200, 'Table [reading].[ArticleInteractionCounterProjection] does not exist. Run reading/001_tables.sql first.', 1;
+END
+GO
+
 /* =========================================================
    1) PUBLIC ARTICLE DETAIL BY PUBLIC ID
    ========================================================= */
@@ -142,11 +150,16 @@ BEGIN
         [a].[PublishedAtUtc],
         [a].[UpdatedAtUtc],
 
-        [a].[ViewCount],
-        [a].[LikeCount],
-        [a].[CommentCount],
-        [a].[PopularityScore]
+        COALESCE([i].[ViewCount], 0) AS [ViewCount],
+        COALESCE([i].[LikeCount], 0) AS [LikeCount],
+        COALESCE([i].[VisibleCommentCount], 0) AS [VisibleCommentCount],
+        CASE
+            WHEN [i].[ArticlePublicId] IS NULL THEN CAST(1 AS BIT)
+            ELSE CAST(0 AS BIT)
+        END AS [CountersPartial]
     FROM [reading].[ArticleReadModel] AS [a]
+    LEFT JOIN [reading].[ArticleInteractionCounterProjection] AS [i]
+        ON [i].[ArticlePublicId] = [a].[ArticlePublicId]
     WHERE [a].[ArticlePublicId] = @ArticlePublicId
       AND [a].[IsPublic] = 1
       AND [a].[Status] = N'Published';
@@ -263,8 +276,7 @@ BEGIN
 
             CAST(NULL AS BIGINT) AS [ViewCount],
             CAST(NULL AS BIGINT) AS [LikeCount],
-            CAST(NULL AS BIGINT) AS [CommentCount],
-            CAST(NULL AS FLOAT) AS [PopularityScore]
+            CAST(NULL AS BIGINT) AS [VisibleCommentCount]
         WHERE 1 = 0;
 
         /* Empty result set 2: tags */
@@ -321,7 +333,7 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    IF @SortBy NOT IN (N'PublishedAt', N'Popularity')
+    IF @SortBy <> N'PublishedAt'
         SET @SortBy = N'PublishedAt';
 
     IF UPPER(@SortDirection) NOT IN (N'ASC', N'DESC')
@@ -351,13 +363,18 @@ BEGIN
             [a].[PublishedAtUtc],
             [a].[UpdatedAtUtc],
 
-            [a].[ViewCount],
-            [a].[LikeCount],
-            [a].[CommentCount],
-            [a].[PopularityScore],
+            COALESCE([i].[ViewCount], 0) AS [ViewCount],
+            COALESCE([i].[LikeCount], 0) AS [LikeCount],
+            COALESCE([i].[VisibleCommentCount], 0) AS [VisibleCommentCount],
+            CASE
+                WHEN [i].[ArticlePublicId] IS NULL THEN CAST(1 AS BIT)
+                ELSE CAST(0 AS BIT)
+            END AS [CountersPartial],
 
             COUNT(1) OVER() AS [TotalCount]
         FROM [reading].[ArticleReadModel] AS [a]
+        LEFT JOIN [reading].[ArticleInteractionCounterProjection] AS [i]
+            ON [i].[ArticlePublicId] = [a].[ArticlePublicId]
         WHERE [a].[IsPublic] = 1
           AND [a].[Status] = N'Published'
           AND (@CategoryId IS NULL OR [a].[CategoryId] = @CategoryId)
@@ -402,16 +419,14 @@ BEGIN
 
         [ViewCount],
         [LikeCount],
-        [CommentCount],
-        [PopularityScore],
+        [VisibleCommentCount],
+        [CountersPartial],
 
         [TotalCount]
     FROM [Filtered]
     ORDER BY
-        CASE WHEN @SortBy = N'PublishedAt' AND UPPER(@SortDirection) = N'ASC'  THEN [PublishedAtUtc] END ASC,
-        CASE WHEN @SortBy = N'PublishedAt' AND UPPER(@SortDirection) = N'DESC' THEN [PublishedAtUtc] END DESC,
-        CASE WHEN @SortBy = N'Popularity'  AND UPPER(@SortDirection) = N'ASC'  THEN [PopularityScore] END ASC,
-        CASE WHEN @SortBy = N'Popularity'  AND UPPER(@SortDirection) = N'DESC' THEN [PopularityScore] END DESC,
+        CASE WHEN UPPER(@SortDirection) = N'ASC'  THEN [PublishedAtUtc] END ASC,
+        CASE WHEN UPPER(@SortDirection) = N'DESC' THEN [PublishedAtUtc] END DESC,
         [ArticleId] DESC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END
@@ -509,8 +524,8 @@ BEGIN
 
             CAST(NULL AS BIGINT) AS [ViewCount],
             CAST(NULL AS BIGINT) AS [LikeCount],
-            CAST(NULL AS BIGINT) AS [CommentCount],
-            CAST(NULL AS FLOAT) AS [PopularityScore]
+            CAST(NULL AS BIGINT) AS [VisibleCommentCount],
+            CAST(NULL AS BIT) AS [CountersPartial]
         WHERE 1 = 0;
 
         RETURN;
@@ -538,10 +553,13 @@ BEGIN
             [a].[PublishedAtUtc],
             [a].[UpdatedAtUtc],
 
-            [a].[ViewCount],
-            [a].[LikeCount],
-            [a].[CommentCount],
-            [a].[PopularityScore],
+            COALESCE([i].[ViewCount], 0) AS [ViewCount],
+            COALESCE([i].[LikeCount], 0) AS [LikeCount],
+            COALESCE([i].[VisibleCommentCount], 0) AS [VisibleCommentCount],
+            CASE
+                WHEN [i].[ArticlePublicId] IS NULL THEN CAST(1 AS BIT)
+                ELSE CAST(0 AS BIT)
+            END AS [CountersPartial],
 
             CASE
                 WHEN @CategoryId IS NOT NULL
@@ -564,6 +582,8 @@ BEGIN
                 ELSE 3
             END AS [MatchRank]
         FROM [reading].[ArticleReadModel] AS [a]
+        LEFT JOIN [reading].[ArticleInteractionCounterProjection] AS [i]
+            ON [i].[ArticlePublicId] = [a].[ArticlePublicId]
         WHERE [a].[ArticleId] <> @ArticleId
           AND [a].[IsPublic] = 1
           AND [a].[Status] = N'Published'
@@ -590,8 +610,8 @@ BEGIN
 
         [ViewCount],
         [LikeCount],
-        [CommentCount],
-        [PopularityScore]
+        [VisibleCommentCount],
+        [CountersPartial]
     FROM [Candidate]
     ORDER BY
         [MatchRank] ASC,
@@ -847,10 +867,6 @@ BEGIN
             [PublishedAtUtc],
             [UpdatedAtUtc],
             [SearchText],
-            [ViewCount],
-            [LikeCount],
-            [CommentCount],
-            [PopularityScore],
             [SourceVersion],
             [LastEventMessageId],
             [LastSourceOccurredAtUtc],
@@ -890,10 +906,6 @@ BEGIN
             @EffectivePublishedAtUtc,
             @UpdatedAtUtc,
             CONCAT_WS(N' ', @Title, @Summary, @Body, @CategoryName, @ProjectedAuthorDisplayName),
-            0,
-            0,
-            0,
-            NULL,
             @SourceVersion,
             @MessageId,
             @SourceOccurredAtUtc,
@@ -1473,7 +1485,16 @@ END
 GO
 
 /* =========================================================
-   10) UPDATE COUNTERS
+   10) INTERACTION COUNTER SNAPSHOT PROJECTION
+   Applies:
+   - interaction.article_counters_projection_published
+
+   Notes:
+   - Interaction owns counter truth.
+   - Reading stores only local displayed counter snapshots.
+   - Snapshot apply is guarded by InteractionStatsVersion.
+   - No ArticleReadModel row is required because Interaction snapshot
+     may arrive before Content projection.
    ========================================================= */
 
 SET ANSI_NULLS ON;
@@ -1481,42 +1502,120 @@ GO
 SET QUOTED_IDENTIFIER ON;
 GO
 
-CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModel_UpdateCounters]
-    @ArticleId                 BIGINT,
-    @ViewCount                 BIGINT = 0,
-    @LikeCount                 BIGINT = 0,
-    @CommentCount              BIGINT = 0,
-    @PopularityScore           FLOAT = NULL,
-    @MessageId                 CHAR(26) = NULL,
-    @SourceOccurredAtUtc       DATETIME2(3) = NULL
+IF OBJECT_ID(N'[reading].[Reading_ArticleReadModel_UpdateCounters]', N'P') IS NOT NULL
+BEGIN
+    DROP PROCEDURE [reading].[Reading_ArticleReadModel_UpdateCounters];
+END
+GO
+
+CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleInteractionCounterProjection_ApplyFromInteraction]
+    @ArticlePublicId             CHAR(26),
+    @ViewCount                   BIGINT,
+    @LikeCount                   BIGINT,
+    @VisibleCommentCount         BIGINT,
+    @InteractionStatsVersion     BIGINT,
+    @MessageId                   CHAR(26),
+    @SourceOccurredAtUtc         DATETIME2(3)
 AS
 BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF @ArticleId IS NULL OR @ArticleId <= 0
-        THROW 58280, 'ArticleId must be > 0.', 1;
+    IF @ArticlePublicId IS NULL OR LEN(@ArticlePublicId) <> 26
+        THROW 58400, 'ArticlePublicId must be a valid 26-character public id.', 1;
 
-    IF @ViewCount < 0 OR @LikeCount < 0 OR @CommentCount < 0
-        THROW 58281, 'Counters must be non-negative.', 1;
+    IF @ViewCount IS NULL
+        OR @LikeCount IS NULL
+        OR @VisibleCommentCount IS NULL
+        OR @ViewCount < 0
+        OR @LikeCount < 0
+        OR @VisibleCommentCount < 0
+    BEGIN
+        THROW 58401, 'Interaction counters must be non-null and non-negative.', 1;
+    END
 
-    /*
-        Interaction projection is not version-aware in Reading V1 yet.
-        Do not overwrite Content checkpoint fields on ArticleReadModel.
-        This procedure is suitable for authoritative refresh/reconciliation only
-        until ArticleInteractionProjectionState is introduced.
-    */
-    UPDATE [reading].[ArticleReadModel]
-    SET
-        [ViewCount] = @ViewCount,
-        [LikeCount] = @LikeCount,
-        [CommentCount] = @CommentCount,
-        [PopularityScore] = @PopularityScore
-    WHERE [ArticleId] = @ArticleId;
+    IF @InteractionStatsVersion IS NULL OR @InteractionStatsVersion <= 0
+        THROW 58402, 'InteractionStatsVersion must be > 0.', 1;
+
+    IF @MessageId IS NULL OR LEN(@MessageId) <> 26
+        THROW 58403, 'MessageId must be a valid 26-character id.', 1;
+
+    IF @SourceOccurredAtUtc IS NULL
+        THROW 58404, 'SourceOccurredAtUtc is required.', 1;
+
+    DECLARE @Now DATETIME2(3) = SYSUTCDATETIME();
+    DECLARE @Applied BIT = 0;
+    DECLARE @CurrentInteractionStatsVersion BIGINT = NULL;
+
+    BEGIN TRANSACTION;
 
     SELECT
-        CAST(CASE WHEN @@ROWCOUNT = 1 THEN 1 ELSE 0 END AS BIT) AS [Applied],
-        CASE WHEN @@ROWCOUNT = 1 THEN N'Applied' ELSE N'IgnoredMissingArticle' END AS [Decision];
+        @CurrentInteractionStatsVersion = [InteractionStatsVersion]
+    FROM [reading].[ArticleInteractionCounterProjection] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [ArticlePublicId] = @ArticlePublicId;
+
+    IF @CurrentInteractionStatsVersion IS NULL
+    BEGIN
+        INSERT INTO [reading].[ArticleInteractionCounterProjection]
+        (
+            [ArticlePublicId],
+            [ViewCount],
+            [LikeCount],
+            [VisibleCommentCount],
+            [InteractionStatsVersion],
+            [LastEventMessageId],
+            [LastSourceOccurredAtUtc],
+            [LastSyncedAtUtc],
+            [CreatedAtUtc],
+            [UpdatedAtUtc]
+        )
+        VALUES
+        (
+            @ArticlePublicId,
+            @ViewCount,
+            @LikeCount,
+            @VisibleCommentCount,
+            @InteractionStatsVersion,
+            @MessageId,
+            @SourceOccurredAtUtc,
+            @Now,
+            @Now,
+            @Now
+        );
+
+        SET @Applied = 1;
+    END
+    ELSE IF @InteractionStatsVersion > @CurrentInteractionStatsVersion
+    BEGIN
+        UPDATE [reading].[ArticleInteractionCounterProjection]
+        SET
+            [ViewCount] = @ViewCount,
+            [LikeCount] = @LikeCount,
+            [VisibleCommentCount] = @VisibleCommentCount,
+            [InteractionStatsVersion] = @InteractionStatsVersion,
+            [LastEventMessageId] = @MessageId,
+            [LastSourceOccurredAtUtc] = @SourceOccurredAtUtc,
+            [LastSyncedAtUtc] = @Now,
+            [UpdatedAtUtc] = @Now
+        WHERE [ArticlePublicId] = @ArticlePublicId
+          AND [InteractionStatsVersion] < @InteractionStatsVersion;
+
+        SET @Applied = CASE WHEN @@ROWCOUNT = 1 THEN 1 ELSE 0 END;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        @Applied AS [Applied],
+        CASE
+            WHEN @Applied = 1 THEN N'Applied'
+            WHEN @CurrentInteractionStatsVersion IS NOT NULL
+             AND @InteractionStatsVersion <= @CurrentInteractionStatsVersion
+                THEN N'IgnoredDuplicateOrStaleVersion'
+            ELSE N'Ignored'
+        END AS [Decision],
+        @CurrentInteractionStatsVersion AS [PreviousInteractionStatsVersion],
+        @InteractionStatsVersion AS [IncomingInteractionStatsVersion];
 END
 GO
 

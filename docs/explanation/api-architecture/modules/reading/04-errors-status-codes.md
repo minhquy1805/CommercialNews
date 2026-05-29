@@ -1,24 +1,44 @@
-# Reading — Errors & Status Codes (V1)
+# Reading — Errors & Status Codes (V1 Async Projections)
 
 ## Purpose
 
-This document defines the public error and status-code behavior for the Reading module.
+This document defines public status-code and error behavior for the Reading module.
 
-Reading APIs are public-facing and must prioritize:
+Reading serves ordinary public requests from Reading-owned asynchronous projections:
 
-* safe public exposure
-* bounded latency
-* graceful degradation
-* stable response contracts
-* no leakage of draft, unpublished, archived, soft-deleted, or visibility-uncertain content
+```text
+ArticleReadModel
+ArticleSeoRouteProjection
+```
 
-Reading must prefer safe `404` or safe omission over incorrect public exposure.
+Reading APIs must prioritize:
+
+```text
+Safe public exposure
+Bounded latency
+Stable public response contracts
+Safe degradation of optional enrichments
+No leakage of hidden article existence
+No synchronous fallback to upstream source modules in ordinary public reads
+```
+
+Core rule:
+
+```text
+Locally missing, denied or unsafe route/visibility state
+    -> fail closed using safe public not-found behavior.
+
+Missing or delayed optional media/counter enrichment
+    -> return degraded success when core article visibility is safe.
+```
+
+Reading V1 accepts bounded eventual-consistency lag before a newer upstream change reaches and is applied to Reading.
 
 ---
 
-## 1) Standard error envelope
+## 1. Standard Error Envelope
 
-Reading follows the system-wide error envelope.
+Reading follows the system-wide public error envelope.
 
 Reference:
 
@@ -32,7 +52,7 @@ Expected shape:
 {
   "error": {
     "code": "READING.NOT_FOUND",
-    "message": "The requested resource was not found.",
+    "message": "The requested article was not found.",
     "details": [],
     "correlationId": "string"
   }
@@ -41,47 +61,78 @@ Expected shape:
 
 Rules:
 
-* error responses must include a stable machine-readable code
-* public messages must be safe and must not reveal whether non-public content exists
-* correlation id should be included where available
-* internal dependency details must not be exposed to public clients
+```text
+Errors must include a stable machine-readable code.
+
+Public error messages must not reveal hidden resource existence.
+
+CorrelationId should be returned where available.
+
+Internal projection, event, dependency and visibility diagnostics
+must not be exposed publicly.
+```
 
 ---
 
-## 2) Status code mapping
+## 2. Public Status-Code Mapping
 
 | Status | Meaning | Reading behavior |
 |---|---|---|
-| `200` | Success | Returned when public content can be safely served. Optional enrichments may be stale, omitted, or defaulted. |
-| `400` | Invalid request | Invalid query parameters, invalid paging, unsupported sort/filter values. |
-| `404` | Safe not found | Resource does not exist, is not public, is archived, is soft-deleted, slug is inactive, or visibility is uncertain. |
-| `408` | Request timeout | Optional if API gateway/framework maps request timeout explicitly. Prefer bounded internal timeouts and safe failure. |
-| `429` | Rate limited | Edge/API rate limiting for public endpoints. |
-| `500` | Unexpected server error | Rare. Used for unexpected bugs or unhandled failures. Must not leak internal details. |
-| `503` | Temporarily unavailable | Used when Reading cannot serve safely due to required projection/storage dependency being unavailable and no safe fallback exists. |
+| `200 OK` | Successful public response | Returned when safely public Reading projection state is available. Optional media/counters may be missing, defaulted or stale. |
+| `400 Bad Request` | Invalid client request | Invalid paging, filter, search, route input or unsupported sort values. |
+| `404 Not Found` | Safe public denial | Article/route projection missing, locally non-public, locally unsafe, route inactive or route requires resync. |
+| `429 Too Many Requests` | Request rate limited | Applied by public API/edge rate-limit policy. |
+| `500 Internal Server Error` | Unexpected defect | Unhandled failure; must not disclose internal details. |
+| `503 Service Unavailable` | Required Reading serving capability unavailable | Reading projection store or required serving infrastructure is unavailable, preventing safe handling of requests. |
+
+### Status Selection Rule
+
+```text
+A specific article or route cannot be served safely from available local state
+    -> 404.
+
+Reading cannot access required serving infrastructure at service level
+    -> 503.
+
+Only optional enrichment is absent or delayed
+    -> 200 with safe degradation.
+```
 
 ---
 
-## 3) Public visibility error posture
+## 3. Public Not-Found Posture
 
-Reading must fail closed for public visibility.
+Reading must not disclose whether a hidden article exists upstream or inside internal projection state.
 
-The following cases should return safe `404`:
+Public detail requests should normally return:
 
-* article public id not found
-* slug not found
-* article exists but is not public
-* source-derived status is not `Published`
-* projection `IsPublic` is false
-* article is archived
-* article is soft-deleted
-* slug is inactive or not mapped to a public article
-* projection visibility is uncertain
-* projected route exists but visibility does not pass
+```text
+404 + READING.NOT_FOUND
+```
 
-Public `404` responses must not reveal whether the resource exists internally.
+for all of the following cases:
 
-Recommended public message:
+```text
+ArticleReadModel is missing.
+
+ArticleReadModel.Status is not Published.
+
+ArticleReadModel.IsPublic is false.
+
+Article visibility is locally unsafe or requires resync.
+
+ArticleSeoRouteProjection is missing for slug request.
+
+Slug route is inactive.
+
+Slug route requires resync.
+
+Slug route points to a missing ArticleReadModel.
+
+Slug route points to an article that fails local public visibility checks.
+```
+
+Recommended public response:
 
 ```json
 {
@@ -94,36 +145,107 @@ Recommended public message:
 }
 ```
 
-Internal logs may record the real reason, such as:
+### Internal Reason Codes
 
-* `NotFound`
-* `NotPublic`
-* `Archived`
-* `SoftDeleted`
-* `SlugInactive`
-* `VisibilityUncertain`
-* `ProjectionMissing`
+Internal logs or operational diagnostics may distinguish:
 
-These internal reasons must not be exposed directly to public clients.
+```text
+ArticleProjectionMissing
+ArticleNotPublished
+ArticleNotPublic
+ArticleVisibilityUnsafe
+ArticleVisibilityRequiresResync
+RouteProjectionMissing
+RouteInactive
+RouteRequiresResync
+RouteTargetProjectionMissing
+RouteTargetNotPublic
+```
+
+These internal reasons must not appear as separate public article-existence disclosures.
 
 ---
 
-## 4) Validation errors
+## 4. Bounded Eventual-Consistency Clarification
 
-Invalid client-controlled query values should return `400`.
+Reading follows Content and SEO asynchronously.
+
+Therefore, upstream state may have changed before Reading has applied the newer projection snapshot.
 
 Examples:
 
-* `page < 1`
-* `pageSize < 1`
-* `pageSize` exceeds maximum allowed value
-* unsupported `sort`
-* invalid `categoryId`
-* invalid `tagId`
-* missing required search query `q`
-* invalid `limit` for related articles
+```text
+Content published an article, but Reading has not received the new public projection yet.
+    -> Request may temporarily return safe 404.
 
-Example response:
+SEO activated a new slug route, but Reading has not received the route projection yet.
+    -> Slug request may temporarily return safe 404.
+
+Content unpublished an article, but Reading has not received the newer non-public projection yet.
+    -> Reading may temporarily still hold prior local public state within accepted bounded lag.
+
+SEO deactivated a route, but Reading has not received the route-deactivation projection yet.
+    -> Reading may temporarily still hold prior active route state within accepted bounded lag.
+```
+
+Rules:
+
+```text
+Reading evaluates requests from current local projection state.
+
+Once local state is known denied or unsafe, Reading must fail closed.
+
+Reading must not synchronously call source modules to eliminate normal propagation lag.
+
+Visibility and route lag must be monitored against SLOs.
+
+Repair/reconciliation applies when drift or prolonged lag is detected.
+```
+
+---
+
+## 5. Validation Errors
+
+Invalid client-controlled input returns:
+
+```text
+400 Bad Request
+```
+
+Examples:
+
+```text
+page < 1
+pageSize < 1
+pageSize exceeds the configured maximum
+unsupported sort value
+invalid categoryPublicId
+invalid tagPublicId
+missing search query q
+invalid search query format
+invalid related-article limit
+invalid articlePublicId or slug format where validation policy applies
+```
+
+### V1 Sort Validation
+
+Supported list/search sort values:
+
+```text
+-publishedAt
+publishedAt
+```
+
+The following are not supported in V1:
+
+```text
+-popularity
+popularity
+```
+
+Popularity/trending sorting is deferred beyond V1.
+
+### Example Response
 
 ```json
 {
@@ -144,292 +266,522 @@ Example response:
 
 ---
 
-## 5) Degraded success
+## 6. Degraded Success
 
-Reading should return `200` with degraded content when:
-
-* core public article data is available
-* source-derived projection visibility is public
-* optional enrichments are missing, stale, or unavailable
-
-Optional enrichments include:
-
-* counters
-* cover media
-* media gallery
-* SEO metadata
-* related article signals
-* popularity/trending signals
-
-Examples of safe degradation:
-
-| Missing or stale data | Allowed behavior |
-|---|---|
-| Counters | return zero, null, omitted counters, or future `countersPartial = true` |
-| Cover media | return null cover, omitted cover, or placeholder according to API policy |
-| Media gallery | return empty array |
-| SEO metadata | return projected defaults or null fields |
-| Related signals | return empty list or deterministic fallback |
-| Popularity score | fall back to published date sort if policy allows |
-
-Degradation must not make visibility more permissive.
-
-Degradation must not expose non-public content.
-
----
-
-## 6) Dependency and projection failures
-
-Reading distinguishes required data from optional enrichments.
-
-### 6.1 Required projection unavailable
-
-If Reading cannot access required projection data needed to determine safe public visibility, return:
+Reading should return:
 
 ```text
-503 Temporarily Unavailable
+200 OK
 ```
 
-Or return safe `404` if the specific request cannot be verified and policy requires fail-closed behavior.
+with degraded optional response data when:
 
-Use `503` when the service-level dependency is unavailable.
+```text
+Core article projection exists.
+Local public visibility passes.
+Required slug route state passes for slug-based requests.
+Only optional enrichment is absent, delayed or stale.
+```
 
-Use `404` when a specific resource cannot be safely confirmed as public.
+Optional enrichments in V1 include:
 
-### 6.2 Optional enrichment unavailable
+```text
+Cover/media presentation
+SEO response metadata that is not required for route resolution
+Interaction counters
+Related article result state
+Optional search presentation fields
+```
 
-If optional enrichment is unavailable, prefer degraded `200` if the core article/list response is safe.
+### Safe Degradation Table
 
-Do not return `500` or `503` merely because optional enrichments are delayed or missing.
+| Missing or delayed data | Allowed public behavior |
+|---|---|
+| Interaction counter snapshot has never arrived | Return documented zero/default counters |
+| Interaction counter snapshot is behind current Interaction truth | Return last-known counters |
+| Cover media missing | Return `cover: null` or omit cover according to response standard |
+| Media gallery missing | Return empty array or omit according to response standard |
+| Optional SEO metadata missing | Return null/omitted SEO fields |
+| Related state missing | Return empty result or deterministic fallback |
+| Optional search enrichment missing | Omit safely |
 
-### 6.3 Projection lag
+Rules:
 
-Projection lag after publish may produce:
+```text
+Optional enrichment absence must not turn a public article into 404.
 
-* `404` for newly published article not yet projected
-* missing item from article list
-* stale counters or enrichments
+Optional enrichment presence must not make a hidden article public.
 
-Projection lag must not produce public exposure of content that is known or suspected to be non-public.
-
-### 6.4 Stale projection
-
-If a projection is known to be stale for visibility-sensitive data:
-
-* fail closed
-* return safe `404`
-* or use explicit policy-controlled fallback
-
-Do not serve stale public visibility with confidence.
+Reading must not synchronously query upstream modules to fill missing optional fields.
+```
 
 ---
 
-## 7) Search errors
+## 7. Required Reading Serving Failures
 
-### Missing query
+## 7.1. Specific Resource Cannot Be Confirmed Public Locally
 
-`GET /articles/search` without `q` should return `400`.
-
-Error code:
+Return:
 
 ```text
+404 Not Found
+```
+
+Examples:
+
+```text
+Requested article projection is absent.
+Requested article projection is locally non-public.
+Requested slug route projection is absent or inactive.
+Requested route/article state is locally unsafe.
+```
+
+Reason:
+
+```text
+The API can safely deny this specific public resource
+without revealing internal details.
+```
+
+## 7.2. Required Reading Infrastructure Is Unavailable
+
+Return:
+
+```text
+503 Service Unavailable
+```
+
+Examples:
+
+```text
+Reading projection database is unavailable.
+Required query infrastructure cannot execute requests.
+Required local serving state cannot be accessed because of infrastructure failure.
+```
+
+Example response:
+
+```json
+{
+  "error": {
+    "code": "READING.SERVICE_UNAVAILABLE",
+    "message": "The service is temporarily unavailable.",
+    "details": [],
+    "correlationId": "string"
+  }
+}
+```
+
+## 7.3. Optional Enrichment Infrastructure Is Unavailable
+
+Do not return `503` merely because:
+
+```text
+Counter enrichment is unavailable.
+Media enrichment is absent.
+Related enrichment is unavailable.
+Optional SEO presentation metadata is missing.
+```
+
+When core public state is safe, prefer:
+
+```text
+200 OK with documented degradation.
+```
+
+---
+
+## 8. Article Listing Errors
+
+For:
+
+```http
+GET /api/v1/articles
+```
+
+| Case | Status | Behavior |
+|---|---:|---|
+| Valid request with no public articles | `200` | Return empty `items` list |
+| Invalid paging/filter/sort | `400` | Return validation error |
+| Optional counters/media missing | `200` | Return safe degraded items |
+| Reading projection query store unavailable | `503` | Cannot serve list safely |
+| Locally non-public candidate rows encountered | `200` | Exclude those rows |
+
+Rules:
+
+```text
+List responses must not include locally denied or unsafe articles.
+
+List requests do not synchronously query upstream source modules.
+
+Popularity sort requests are invalid in V1.
+```
+
+---
+
+## 9. Article Detail by Public ID Errors
+
+For:
+
+```http
+GET /api/v1/articles/{articlePublicId}
+```
+
+| Case | Status | Public behavior |
+|---|---:|---|
+| Public article projection exists and is safe | `200` | Return detail |
+| Article projection missing | `404` | `READING.NOT_FOUND` |
+| Article locally non-public | `404` | `READING.NOT_FOUND` |
+| Article visibility locally unsafe | `404` | `READING.NOT_FOUND` |
+| Optional media/counters missing | `200` | Return degraded detail |
+| Reading projection infrastructure unavailable | `503` | `READING.SERVICE_UNAVAILABLE` |
+
+Public response must not distinguish:
+
+```text
+missing article
+hidden article
+unpublished article
+archived article
+deleted article
+unsafe article projection
+```
+
+---
+
+## 10. Article Detail by Slug Errors
+
+For:
+
+```http
+GET /api/v1/articles/slug/{slug}
+```
+
+Reading uses:
+
+```text
+ArticleSeoRouteProjection
+    -> ArticleReadModel
+```
+
+It does not synchronously call SEO `/resolve` in the ordinary V1 request path.
+
+| Case | Status | Public behavior |
+|---|---:|---|
+| Active safe route and public article projection exist | `200` | Return detail |
+| Route projection missing | `404` | `READING.NOT_FOUND` |
+| Route inactive | `404` | `READING.NOT_FOUND` |
+| Route requires resync | `404` | `READING.NOT_FOUND` |
+| Route target article projection missing | `404` | `READING.NOT_FOUND` |
+| Route target locally non-public/unsafe | `404` | `READING.NOT_FOUND` |
+| Optional media/counter/SEO metadata missing | `200` | Return degraded detail |
+| Reading route/article projection infrastructure unavailable | `503` | `READING.SERVICE_UNAVAILABLE` |
+
+Rules:
+
+```text
+Public clients must not receive distinct route-versus-article hidden-state errors.
+
+Canonical redirect behavior remains deferred to its later ADR.
+
+Missing local route state is not resolved through synchronous SEO fallback in V1.
+```
+
+---
+
+## 11. Search Errors
+
+For:
+
+```http
+GET /api/v1/articles/search
+```
+
+### Missing Query
+
+If `q` is missing:
+
+```text
+400 Bad Request
 READING.SEARCH_QUERY_REQUIRED
 ```
 
-### Invalid query
+### Invalid Query
 
-Invalid or too-short query may return `400` depending on API policy.
-
-Error codes:
+Invalid or policy-disallowed query input may return:
 
 ```text
+400 Bad Request
 READING.INVALID_SEARCH_QUERY
+```
+
+or:
+
+```text
+400 Bad Request
 READING.SEARCH_QUERY_TOO_SHORT
 ```
 
-### Search backend unavailable
+if a minimum length policy is adopted.
 
-If search uses Reading projection and projection is available, return normal results.
+### Search Serving Failure
 
-If a future external search backend is unavailable:
+| Situation | Status | Behavior |
+|---|---:|---|
+| Valid query with no matches | `200` | Empty result |
+| Optional result enrichment missing | `200` | Safe degraded results |
+| Reading-owned search projection/query unavailable | `503` | `READING.SEARCH_UNAVAILABLE` |
+| Candidate item locally denied/unsafe | `200` | Omit candidate |
 
-* fall back to Reading projection where policy allows
-* otherwise return `503`
-* never expose non-public content from stale search index
-
----
-
-## 8) Related articles errors
-
-For `GET /articles/{articlePublicId}/related`:
-
-| Case | Status |
-|---|---|
-| Parent article not found or not public | `404` |
-| Invalid `limit` | `400` |
-| Related signals unavailable but parent is public | `200` with empty list or deterministic fallback |
-| Related projection unavailable and no fallback exists | `200` empty list or `503` depending on policy |
-
-Recommended V1 behavior:
-
-* if parent article is public, related failures should not fail article detail
-* standalone related endpoint may return empty result if related data is unavailable
-* non-public related candidates must be filtered out
-
----
-
-## 9) Slug resolution errors
-
-For `GET /articles/slug/{slug}`:
-
-| Case | Status |
-|---|---|
-| Slug not found | `404` |
-| Slug exists but target is not public | `404` |
-| Slug exists but projection visibility is uncertain | `404` |
-| Slug exists but canonical redirect policy is unavailable | `200` or `404` depending on safe serving policy |
-| SEO fallback unavailable and Reading projection cannot verify public visibility | `404` or `503` depending on scope |
-
-Public clients should not receive internal distinction between:
-
-* slug missing
-* target article unpublished
-* target article archived
-* target article soft-deleted
-* projection visibility uncertain
-
-All should be safe not found.
-
----
-
-## 10) View tracking errors
-
-Reading does not expose interaction write endpoints in V1.
-
-View tracking is owned by Interaction.
-
-If the client sends view signal to Interaction and it fails:
-
-* Reading response remains unaffected
-* counters may lag
-* Interaction defines retry, dedupe, rate limit, and abuse behavior
-
-Reading must not return failure for article detail because view tracking failed.
-
----
-
-## 11) Error codes
-
-### General
-
-| Code | Meaning |
-|---|---|
-| `READING.VALIDATION_FAILED` | Request validation failed. |
-| `READING.NOT_FOUND` | Resource is not found or is not publicly visible. |
-| `READING.SERVICE_UNAVAILABLE` | Required Reading dependency or projection store is unavailable. |
-| `READING.INTERNAL_ERROR` | Unexpected internal failure. |
-| `READING.RATE_LIMITED` | Request was rate limited. |
-
-### Query validation
-
-| Code | Meaning |
-|---|---|
-| `READING.INVALID_PAGE` | `page` is invalid. |
-| `READING.INVALID_PAGE_SIZE` | `pageSize` is invalid or exceeds max. |
-| `READING.INVALID_SORT_FIELD` | Unsupported sort value. |
-| `READING.INVALID_FILTER` | Filter parameter is invalid. |
-| `READING.INVALID_LIMIT` | Related article limit is invalid. |
-
-### Search
-
-| Code | Meaning |
-|---|---|
-| `READING.SEARCH_QUERY_REQUIRED` | Search query `q` is required. |
-| `READING.INVALID_SEARCH_QUERY` | Search query is invalid. |
-| `READING.SEARCH_UNAVAILABLE` | Search backend or materialized search projection is unavailable. |
-
-### Slug/detail
-
-| Code | Meaning |
-|---|---|
-| `READING.SLUG_NOT_FOUND` | Internal-only or safe-public alias to `READING.NOT_FOUND`. |
-| `READING.ARTICLE_NOT_PUBLIC` | Internal-only reason; public response should usually use `READING.NOT_FOUND`. |
-| `READING.VISIBILITY_UNCERTAIN` | Internal-only reason; public response should usually use `READING.NOT_FOUND`. |
-
-### Dependency / degraded behavior
-
-| Code | Meaning |
-|---|---|
-| `READING.DEPENDENCY_DEGRADED` | Optional dependency/enrichment is degraded. Usually logged/observed, not returned as hard error. |
-| `READING.PROJECTION_UNAVAILABLE` | Required projection data unavailable. |
-| `READING.PROJECTION_STALE` | Projection is known stale beyond policy. Public response depends on visibility risk. |
-| `READING.FALLBACK_UNAVAILABLE` | Explicit fallback path was required but unavailable. |
-
----
-
-## 12) Public vs internal error details
-
-Public APIs should avoid revealing:
-
-* whether a draft exists
-* whether an unpublished article exists
-* whether a slug points to hidden content
-* whether an archived article exists
-* whether a soft-deleted article exists
-* whether a projection row exists internally
-
-Public response should usually collapse these into:
+Rules:
 
 ```text
-READING.NOT_FOUND
+Search reads Reading-owned public projection/search state only.
+
+Search must not expose locally known hidden content.
+
+External search integration is outside V1.
 ```
 
-Internal logs may include richer details for investigation.
+---
 
-Recommended internal fields:
+## 12. Related Articles Errors
 
-* `correlationId`
-* `articlePublicId`
-* `slug`
-* `visibilityState`
-* `projectionVersion`
-* `sourceVersion`
-* `lastSyncedAtUtc`
-* `dependencyName`
-* `fallbackUsed`
-* `degradationReason`
+For:
+
+```http
+GET /api/v1/articles/{articlePublicId}/related
+```
+
+| Case | Status | Behavior |
+|---|---:|---|
+| Parent article locally public; related items available | `200` | Return public related items |
+| Parent article missing/non-public/unsafe | `404` | `READING.NOT_FOUND` |
+| Invalid `limit` | `400` | `READING.INVALID_LIMIT` |
+| Related state unavailable but parent is public | `200` | Return empty list or deterministic fallback |
+| Optional related item media/counters missing | `200` | Return degraded related items |
+| Required Reading serving store unavailable | `503` | `READING.SERVICE_UNAVAILABLE` |
+
+Rules:
+
+```text
+Related failure must not invalidate an independently successful article detail response.
+
+Related results must exclude the current article.
+
+Only locally safe public related articles may be returned.
+
+Popularity-based related ranking is not part of V1.
+```
 
 ---
 
-## 13) Retry guidance
+## 13. Counter and View-Contribution Error Posture
 
-Reading public clients may retry:
+## 13.1. Counters Displayed by Reading
 
-* `503`
-* `429` after the indicated retry window
-* network timeouts according to client policy
+Reading consumes versioned counter snapshots from Interaction:
 
-Reading public clients should not blindly retry:
+```text
+interaction.article_counters_projection_published
+```
 
-* `400`
-* `404`
+Displayed fields may include:
 
-A `404` for a newly published article may be caused by projection lag, but the API must not expose internal lag details publicly.
+```json
+{
+  "counters": {
+    "views": 123,
+    "likes": 45,
+    "visibleComments": 6
+  }
+}
+```
+
+Rules:
+
+```text
+Counter truth belongs to Interaction.
+
+Reading returns last-known or default counter values.
+
+Counter snapshot delay does not cause Reading detail/list failure.
+
+Reading does not synchronously query Interaction for fresher values.
+
+Reading does not expose counter freshness/version internals publicly in V1.
+```
+
+## 13.2. View Contribution
+
+Reading does not expose view mutation endpoints.
+
+The client may separately send a view contribution request to Interaction after article rendering.
+
+If that Interaction request fails:
+
+```text
+The previously successful Reading response remains valid.
+
+Counters may remain unchanged or catch up later.
+
+Interaction owns error codes, rate limiting, retry and abuse behavior
+for the view contribution endpoint.
+```
 
 ---
 
-## 14) Non-goals
+## 14. Public Error Codes
+
+### Publicly Returned General Codes
+
+| Code | Typical Status | Meaning |
+|---|---:|---|
+| `READING.VALIDATION_FAILED` | `400` | Request query or route input validation failed. |
+| `READING.NOT_FOUND` | `404` | Article cannot be served publicly from safe local Reading state. |
+| `READING.RATE_LIMITED` | `429` | Public request rate limit exceeded. |
+| `READING.SERVICE_UNAVAILABLE` | `503` | Required Reading serving infrastructure is unavailable. |
+| `READING.INTERNAL_ERROR` | `500` | Unexpected internal failure. |
+
+### Publicly Returned Query Validation Codes
+
+| Code | Typical Status | Meaning |
+|---|---:|---|
+| `READING.INVALID_PAGE` | `400` | `page` is invalid. |
+| `READING.INVALID_PAGE_SIZE` | `400` | `pageSize` is invalid or exceeds configured maximum. |
+| `READING.INVALID_SORT_FIELD` | `400` | `sort` is not supported in V1. |
+| `READING.INVALID_FILTER` | `400` | A filter value is invalid. |
+| `READING.INVALID_LIMIT` | `400` | Related-item limit is invalid. |
+| `READING.SEARCH_QUERY_REQUIRED` | `400` | Search query `q` is required. |
+| `READING.INVALID_SEARCH_QUERY` | `400` | Search query is invalid. |
+| `READING.SEARCH_QUERY_TOO_SHORT` | `400` | Search query is shorter than adopted minimum policy. |
+| `READING.SEARCH_UNAVAILABLE` | `503` | Required Reading-owned search capability is unavailable. |
+
+---
+
+## 15. Internal-Only Diagnostic Codes
+
+The following reasons may be recorded internally but must normally collapse to safe public codes:
+
+| Internal reason | Public response |
+|---|---|
+| `READING.ARTICLE_PROJECTION_MISSING` | `404 / READING.NOT_FOUND` |
+| `READING.ARTICLE_NOT_PUBLIC` | `404 / READING.NOT_FOUND` |
+| `READING.ARTICLE_VISIBILITY_UNSAFE` | `404 / READING.NOT_FOUND` |
+| `READING.ARTICLE_VISIBILITY_REQUIRES_RESYNC` | `404 / READING.NOT_FOUND` |
+| `READING.ROUTE_PROJECTION_MISSING` | `404 / READING.NOT_FOUND` |
+| `READING.ROUTE_INACTIVE` | `404 / READING.NOT_FOUND` |
+| `READING.ROUTE_REQUIRES_RESYNC` | `404 / READING.NOT_FOUND` |
+| `READING.ROUTE_TARGET_MISSING` | `404 / READING.NOT_FOUND` |
+| `READING.OPTIONAL_MEDIA_DEGRADED` | No hard error; metric/log only |
+| `READING.OPTIONAL_COUNTERS_DEFAULTED` | No hard error; metric/log only |
+| `READING.PROJECTION_STORE_UNAVAILABLE` | `503 / READING.SERVICE_UNAVAILABLE` |
+
+Removed from V1 public/error posture:
+
+```text
+READING.FALLBACK_UNAVAILABLE
+```
+
+Reason:
+
+```text
+Reading V1 does not synchronously fall back to upstream modules
+during ordinary public serving.
+```
+
+---
+
+## 16. Public vs Internal Error Detail
+
+Public errors must not expose:
+
+```text
+Whether a hidden article exists.
+Whether a draft/unpublished/archived/deleted article exists.
+Whether a route points to hidden content.
+Which projection row exists internally.
+Why a route requires resync.
+Which source event has or has not applied.
+Which source version is current.
+Whether broker/outbox/consumer lag caused a public miss.
+```
+
+Internal logs may record:
+
+```text
+CorrelationId
+ArticlePublicId
+Slug
+Route scope
+Internal deny reason
+ContentSourceVersion
+SeoSourceVersion
+MediaSourceVersion
+InteractionStatsVersion
+Last source message identifiers
+RequiresResync marker/reason
+Consumer apply decision
+Dependency name
+Lag/freshness metrics
+```
+
+---
+
+## 17. Retry Guidance for Public Clients
+
+Public clients may retry:
+
+| Status | Retry posture |
+|---|---|
+| `503` | May retry using bounded client policy/backoff |
+| `429` | Retry only after server/client rate-limit policy allows |
+| Network timeout | Retry according to client request policy |
+| `400` | Do not blindly retry without correcting input |
+| `404` | Do not blindly retry as part of normal API behavior |
+
+A newly published article or newly activated slug may temporarily return `404` due to async projection lag, but the public API must not disclose internal propagation details as part of the response contract.
+
+---
+
+## 18. Non-Goals
 
 This document does not define:
 
-* Worker retry behavior for Reading consumers
-* RabbitMQ DLQ policy
-* Outbox publication status codes
-* database stored procedure result codes
-* internal projection apply result enums
+```text
+Reading consumer retry algorithm
+RabbitMQ retry/dead-letter behavior
+Outbox publication state
+Stored procedure result enums
+Repair/rebuild scheduling
+Projection freshness SLO threshold values
+Canonical redirect behavior
+Emergency/operator-controlled upstream fallback
+```
 
-Those belong to:
+These belong to:
 
-* `06-idempotency-consistency.md`
-* `07-observability-slos.md`
-* Worker/runtime implementation docs
+```text
+06-idempotency-consistency.md
+07-observability-slos.md
+09-open-questions.md
+Worker/runtime implementation documents
+Future ADRs where required
+```
+
+---
+
+## 19. V1 Error Posture Summary
+
+| Concern | V1 behavior |
+|---|---|
+| Missing/non-public/unsafe local article projection | Safe `404` |
+| Missing/inactive/unsafe local slug route projection | Safe `404` |
+| Reading required projection store unavailable | `503` |
+| Invalid query or unsupported popularity sort | `400` |
+| Media missing/delayed | Degraded `200` |
+| Interaction counters missing/delayed | Degraded `200` with default/last-known counters |
+| Client view contribution fails in Interaction | No effect on successful Reading response |
+| Upstream change not yet projected locally | Bounded lag accepted; local state governs response |
+| Sync SEO/Content/Media/Interaction fallback | Not used in ordinary V1 public serving |
+| Public disclosure of internal deny reason | Forbidden |

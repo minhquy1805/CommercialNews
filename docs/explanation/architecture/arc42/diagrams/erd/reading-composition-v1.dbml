@@ -1,225 +1,392 @@
 // =====================================================
-// CommercialNews — Reading Experience (V1) — Projection View
-// File: explanation/architecture/arc42/diagrams/erd/reading-composition-v1.dbml
+// CommercialNews — Reading Module (V1 Async Projections)
+// File: docs/explanation/architecture/arc42/diagrams/erd/reading-composition-v1.dbml
 //
 // Purpose
-// - Show Reading V1 as a derived public read projection.
-// - Reading serves public APIs from Reading-owned projection data in the normal path.
-// - Source modules remain authoritative for source truth.
-// - Reading projection is derived, version-aware, idempotent, and rebuildable.
+// - Model Reading-owned public serving projections.
+// - Reading serves ordinary public APIs from local projection data only.
+// - Source modules remain authoritative for their source truth.
+// - Each upstream projection lane is independently versioned.
+// - Projection state is derived, idempotent, repairable and rebuildable.
 //
-// Notes
-// - Content owns article lifecycle and editorial truth.
-// - SEO owns slug and canonical routing truth.
-// - Media owns media asset and primary media truth.
-// - Interaction owns engagement/counter truth.
-// - Reading owns projected public serving data only.
-// - Reading must fail closed when public visibility is uncertain.
-// - RabbitMQ/outbox delivery is not shown as a table relationship here.
+// Source ownership
+// - Content owns article lifecycle, editorial fields and public visibility truth.
+// - SEO owns canonical slug, route and metadata truth.
+// - Media owns media asset and public presentation truth.
+// - Interaction owns views, likes, comments, moderation and counter truth.
+//
+// V1 decisions
+// - Slug detail uses [reading].[ArticleSeoRouteProjection] locally.
+// - Interaction counters are received as known-value snapshots.
+// - Media is projected independently from Content.
+// - Popularity / trending is deferred beyond V1.
+// - Reading does not synchronously query source modules during ordinary reads.
+// - Reading V1 does not introduce a dedicated ConsumedMessage / Inbox table.
+// - Consumer safety relies on source-specific version-aware apply.
+// - No physical FK is required between independently delivered source lanes.
 // =====================================================
 
-// -------- Reading (derived public serving projection) --------
-Table Reading_ArticleReadModel {
-  ArticleId bigint [pk]
-  ArticlePublicId varchar [unique, not null]
 
-  // Source-derived routing/display fields
-  Slug nvarchar [unique]
-  Title nvarchar
-  Summary nvarchar
-  Body nvarchar
+// =====================================================
+// 1) Content lane — public article serving projection
+// =====================================================
 
-  // Source-derived taxonomy/author fields
-  CategoryId bigint
-  CategoryName nvarchar
-  AuthorUserId bigint
-  AuthorDisplayName nvarchar
+Table reading.ArticleReadModel {
+  ArticleReadModelId bigint [pk, increment]
 
-  // Source-derived media fields
-  CoverMediaId bigint [null]
-  CoverMediaUrl nvarchar [null]
-  CoverAlt nvarchar [null]
+  ArticlePublicId char(26) [not null, unique]
 
-  // Source-derived SEO fields
-  CanonicalUrl nvarchar [null]
-  MetaTitle nvarchar [null]
-  MetaDescription nvarchar [null]
+  // Projected public article content from Content
+  Title nvarchar(300) [not null]
+  Summary nvarchar(1000) [null]
+  Body nvarchar(max) [not null]
 
-  // Source-derived visibility fields
-  Status varchar
-  IsPublic bit
-  PublishedAtUtc datetime
-  UpdatedAtUtc datetime
+  // Projected taxonomy / author presentation from Content
+  CategoryPublicId char(26) [null]
+  CategoryName nvarchar(200) [null]
+  AuthorUserId bigint [null]
+  AuthorDisplayName nvarchar(200) [null]
 
-  // Derived search / ranking / counters
-  SearchText nvarchar [null]
-  ViewCount bigint [default: 0]
-  LikeCount bigint [default: 0]
-  CommentCount bigint [default: 0]
-  PopularityScore float [null]
+  // Content-derived public visibility
+  Status nvarchar(30) [not null]
+  IsPublic bit [not null, default: 0]
+  VisibilityRequiresResync bit [not null, default: 0]
 
-  // Projection freshness / idempotency
-  SourceVersion bigint
-  LastEventMessageId varchar [null]
-  LastSourceOccurredAtUtc datetime [null]
-  LastSyncedAtUtc datetime
+  PublishedAtUtc datetime2(3) [null]
+  ArticleUpdatedAtUtc datetime2(3) [null]
 
-  Note: "DERIVED: Reading-owned public serving projection. Normal public path reads here. SourceVersion prevents stale overwrite. IsPublic must fail closed when uncertain."
-}
+  // Optional public search materialization
+  SearchText nvarchar(max) [null]
 
-Table Reading_ArticleReadModelMedia {
-  ArticleId bigint
-  MediaId bigint
-  Url nvarchar
-  Alt nvarchar [null]
-  MediaType varchar
-  SortOrder int
-  IsPrimary bit
+  // Content-lane freshness / diagnostics
+  ContentSourceVersion bigint [not null]
+  ContentLastMessageId char(26) [not null]
+  ContentLastSourceOccurredAtUtc datetime2(3) [not null]
+  LastContentAppliedAtUtc datetime2(3) [not null]
+
+  CreatedAtUtc datetime2(3) [not null]
+  UpdatedAtUtc datetime2(3) [null]
 
   Indexes {
-    (ArticleId, MediaId) [pk]
+    (ArticlePublicId)
+      [unique, name: "UQ_ArticleReadModel_ArticlePublicId"]
+
+    (IsPublic, Status, VisibilityRequiresResync, PublishedAtUtc, ArticlePublicId)
+      [name: "IX_ArticleReadModel_Public_PublishedAt"]
+
+    (CategoryPublicId, IsPublic, Status, VisibilityRequiresResync, PublishedAtUtc, ArticlePublicId)
+      [name: "IX_ArticleReadModel_Category_Public_PublishedAt"]
   }
 
-  Note: "DERIVED: Optional projected media gallery for public detail. Missing rows degrade safely."
+  Note: '''
+  DERIVED: Reading-owned public article projection applied from Content snapshots.
+
+  Public serving condition:
+    Status = Published
+    AND IsPublic = 1
+    AND VisibilityRequiresResync = 0.
+
+  ContentSourceVersion protects this Content lane from stale overwrite.
+
+  Missing, non-public or unsafe rows must not be publicly served.
+  '''
 }
 
-Table Reading_ArticleReadModelTag {
-  ArticleId bigint
-  TagId bigint
-  Name nvarchar
-  Slug nvarchar
+
+// =====================================================
+// 2) Content lane child — projected public tags
+// =====================================================
+
+Table reading.ArticleTagProjection {
+  ArticlePublicId char(26) [not null]
+  TagPublicId char(26) [not null]
+
+  Name nvarchar(200) [not null]
+  Slug nvarchar(250) [null]
 
   Indexes {
-    (ArticleId, TagId) [pk]
+    (ArticlePublicId, TagPublicId)
+      [pk, name: "PK_ArticleTagProjection"]
+
+    (TagPublicId, ArticlePublicId)
+      [name: "IX_ArticleTagProjection_TagPublicId_ArticlePublicId"]
   }
 
-  Note: "DERIVED: Optional projected tags for detail/filtering."
+  Note: '''
+  DERIVED: Public tag projection applied together with the Content article snapshot.
+
+  Supports:
+    - public detail tag output
+    - tag filtering
+    - basic related-article candidate queries
+
+  When a newer Content snapshot removes all tags, existing tag rows for the
+  article are deleted within the same local Content projection transaction.
+  '''
 }
 
-// -------- Content (source truth) --------
-Table Content_Article {
-  ArticleId bigint [pk]
-  ArticlePublicId varchar [unique]
-  CategoryId bigint
-  AuthorUserId bigint
 
-  Title nvarchar
-  Summary nvarchar
-  Body nvarchar
-  Status varchar
-  PublishedAtUtc datetime
-  UpdatedAtUtc datetime
-  IsDeleted bit
-  Version bigint
+// =====================================================
+// 3) SEO lane — local public slug route / metadata projection
+// =====================================================
 
-  Note: "TRUTH: article lifecycle/editorial state. Reading follows this asynchronously."
-}
+Table reading.ArticleSeoRouteProjection {
+  ArticleSeoRouteProjectionId bigint [pk, increment]
 
-Table Content_Category {
-  CategoryId bigint [pk]
-  Name nvarchar
-}
+  Scope nvarchar(30) [not null]
+  Slug nvarchar(250) [not null]
+  ArticlePublicId char(26) [not null]
 
-Table Content_Tag {
-  TagId bigint [pk]
-  Name nvarchar
-  Slug nvarchar
-}
+  // Projected public SEO response data
+  CanonicalUrl nvarchar(500) [null]
+  MetaTitle nvarchar(300) [null]
+  MetaDescription nvarchar(500) [null]
 
-Table Content_ArticleTag {
-  ArticleId bigint
-  TagId bigint
+  // Local route serving safety
+  IsActive bit [not null, default: 0]
+  RequiresResync bit [not null, default: 0]
+
+  // SEO-lane freshness / diagnostics
+  SeoSourceVersion bigint [not null]
+  SeoLastMessageId char(26) [not null]
+  SeoLastSourceOccurredAtUtc datetime2(3) [not null]
+  LastSeoAppliedAtUtc datetime2(3) [not null]
+
+  CreatedAtUtc datetime2(3) [not null]
+  UpdatedAtUtc datetime2(3) [null]
 
   Indexes {
-    (ArticleId, TagId) [pk]
+    (Scope, Slug)
+      [unique, name: "UQ_ArticleSeoRouteProjection_Scope_Slug"]
+
+    (ArticlePublicId, Scope, IsActive, RequiresResync)
+      [name: "IX_ArticleSeoRouteProjection_ArticlePublicId_Serving"]
   }
+
+  Note: '''
+  DERIVED: Reading-owned route projection applied from SEO snapshots.
+
+  Slug-serving condition:
+    Scope = public
+    AND IsActive = 1
+    AND RequiresResync = 0.
+
+  A safe route is necessary but not sufficient:
+  its ArticlePublicId target must also resolve to a safely public
+  reading.ArticleReadModel row.
+
+  No FK to ArticleReadModel is enforced because SEO projection may arrive
+  before the Content projection during asynchronous delivery.
+  '''
 }
 
-// -------- SEO (source truth for slug + metadata) --------
-Table Seo_SlugRegistry {
-  SlugId bigint [pk]
-  ArticleId bigint
-  Scope varchar
-  Slug nvarchar
-  IsActive bit
-  Version bigint
 
-  Note: "TRUTH: slug/canonical routing. Reading may project active slug for public hot path."
+// =====================================================
+// 4) Media lane header — per-article media snapshot state
+// =====================================================
+
+Table reading.ArticleMediaProjectionState {
+  ArticlePublicId char(26) [pk, not null]
+
+  // Media-lane freshness / diagnostics
+  MediaSourceVersion bigint [not null]
+  MediaLastMessageId char(26) [not null]
+  MediaLastSourceOccurredAtUtc datetime2(3) [not null]
+  LastMediaAppliedAtUtc datetime2(3) [not null]
+
+  RequiresResync bit [not null, default: 0]
+
+  CreatedAtUtc datetime2(3) [not null]
+  UpdatedAtUtc datetime2(3) [null]
+
+  Note: '''
+  DERIVED: Header/state row for the independently delivered Media lane.
+
+  This row preserves the latest MediaSourceVersion even when an article has
+  zero currently available public media items.
+
+  Without this state row, an empty gallery or removed cover would have no
+  persisted version marker and an older media snapshot could be reapplied.
+
+  No FK to ArticleReadModel is enforced because Media projection may arrive
+  before the Content projection.
+  '''
 }
 
-Table Seo_SeoMetadata {
-  SeoId bigint [pk]
-  ArticleId bigint
-  CanonicalUrl nvarchar
-  MetaTitle nvarchar
-  MetaDescription nvarchar
-  Version bigint
+
+// =====================================================
+// 5) Media lane child — projected public media items
+// =====================================================
+
+Table reading.ArticleMediaItemProjection {
+  ArticlePublicId char(26) [not null]
+  MediaPublicId char(26) [not null]
+
+  Url nvarchar(1000) [not null]
+  AltText nvarchar(500) [null]
+  MediaType nvarchar(30) [not null]
+
+  SortOrder int [not null, default: 0]
+  IsPrimary bit [not null, default: 0]
+  IsAvailable bit [not null, default: 1]
+
+  CreatedAtUtc datetime2(3) [not null]
+  UpdatedAtUtc datetime2(3) [null]
+
+  Indexes {
+    (ArticlePublicId, MediaPublicId)
+      [pk, name: "PK_ArticleMediaItemProjection"]
+
+    (ArticlePublicId, IsAvailable, IsPrimary, SortOrder, MediaPublicId)
+      [name: "IX_ArticleMediaItemProjection_Article_Primary_Order"]
+
+    (ArticlePublicId, IsAvailable, SortOrder, MediaPublicId)
+      [name: "IX_ArticleMediaItemProjection_Article_Gallery_Order"]
+  }
+
+  Note: '''
+  DERIVED: Public media item rows belonging to the latest accepted
+  reading.ArticleMediaProjectionState snapshot.
+
+  Missing media safely degrades the public response.
+
+  Media rows never decide article public visibility.
+  '''
 }
 
-// -------- Media (source truth for cover + attachments) --------
-Table Media_ArticleMedia {
-  ArticleMediaId bigint [pk]
-  ArticleId bigint
-  MediaId bigint
-  SortOrder int
-  IsPrimary bit
-  IsDeleted bit
-  Version bigint
 
-  Note: "TRUTH: primary cover + ordered attachments. Reading projects public-safe media fields."
+// =====================================================
+// 6) Interaction lane — displayed counter snapshot projection
+// =====================================================
+
+Table reading.ArticleInteractionCounterProjection {
+  ArticlePublicId char(26) [pk, not null]
+
+  ViewCount bigint [not null, default: 0]
+  LikeCount bigint [not null, default: 0]
+  VisibleCommentCount bigint [not null, default: 0]
+
+  // Interaction-lane freshness / diagnostics
+  InteractionStatsVersion bigint [not null]
+  InteractionLastMessageId char(26) [not null]
+  InteractionLastSourceOccurredAtUtc datetime2(3) [not null]
+  LastInteractionAppliedAtUtc datetime2(3) [not null]
+
+  CreatedAtUtc datetime2(3) [not null]
+  UpdatedAtUtc datetime2(3) [null]
+
+  Note: '''
+  DERIVED: Reading-owned displayed counter snapshot applied from:
+
+    interaction.article_counters_projection_published
+
+  Apply rule:
+    Apply only when IncomingStatsVersion > InteractionStatsVersion.
+
+  Counter values are optional public enrichments only.
+  Counters never determine article visibility.
+
+  Reading never builds these totals through blind increment processing.
+
+  No FK to ArticleReadModel is enforced because an Interaction counter
+  snapshot may arrive before the Content projection.
+  '''
 }
 
-Table Media_MediaAsset {
-  MediaId bigint [pk]
-  Url nvarchar
-  Alt nvarchar [null]
-  MediaType varchar
-  IsDeleted bit
-}
 
-// -------- Interaction (source/aggregate truth for engagement) --------
-Table Interaction_Stats {
-  ArticleId bigint [pk]
-  ViewsTotal bigint
-  LikesTotal bigint
-  CommentsTotal bigint
-  PopularityScore float
-  Version bigint
+// =====================================================
+// Local projection relationships
+// =====================================================
 
-  Note: "AGGREGATE/TRUTH for engagement summary. Reading should project absolute values, not blindly increment."
-}
+// Content article and tag projection are applied as one Content-owned snapshot
+// boundary, therefore a local relationship is acceptable.
+Ref: reading.ArticleTagProjection.ArticlePublicId > reading.ArticleReadModel.ArticlePublicId
 
-Table Interaction_Comment {
-  CommentId bigint [pk]
-  ArticleId bigint
-  UserId bigint
-  ParentCommentId bigint [null]
-  Status varchar
-  CreatedAtUtc datetime
+// Media item rows belong to their local media snapshot state.
+// This relationship stays entirely inside the independent Media projection lane.
+Ref: reading.ArticleMediaItemProjection.ArticlePublicId > reading.ArticleMediaProjectionState.ArticlePublicId
 
-  Note: "Interaction-owned. Public reads only visible comments if comments are exposed later."
-}
 
-// -------- Relationships (source ownership + projection lineage) --------
-Ref: Content_Article.CategoryId > Content_Category.CategoryId
-Ref: Content_ArticleTag.ArticleId > Content_Article.ArticleId
-Ref: Content_ArticleTag.TagId > Content_Tag.TagId
+// =====================================================
+// Logical serving composition — local Reading joins only
+// =====================================================
+//
+// Public list/detail/search/related responses may compose:
+//
+// reading.ArticleReadModel
+//   LEFT JOIN reading.ArticleSeoRouteProjection
+//     ON ArticlePublicId
+//   LEFT JOIN reading.ArticleMediaProjectionState
+//     ON ArticlePublicId
+//   LEFT JOIN reading.ArticleMediaItemProjection
+//     ON ArticlePublicId
+//   LEFT JOIN reading.ArticleInteractionCounterProjection
+//     ON ArticlePublicId
+//   LEFT JOIN reading.ArticleTagProjection
+//     ON ArticlePublicId
+//
+// These joins are local Reading composition only.
+// They do not query Content, SEO, Media or Interaction truth during
+// ordinary public request handling.
+//
+// For list responses that require a slug link, the response should use a safe,
+// active public ArticleSeoRouteProjection row. If no safe route has arrived,
+// the article should be omitted from slug-linked results or the API contract
+// must explicitly allow a missing slug.
 
-Ref: Seo_SlugRegistry.ArticleId > Content_Article.ArticleId
-Ref: Seo_SeoMetadata.ArticleId > Content_Article.ArticleId
 
-Ref: Media_ArticleMedia.ArticleId > Content_Article.ArticleId
-Ref: Media_ArticleMedia.MediaId > Media_MediaAsset.MediaId
+// =====================================================
+// Consumer idempotency notes
+// =====================================================
+//
+// Reading V1 does not introduce a dedicated ReadingConsumedMessage table.
+//
+// Projection consumers rely on snapshot-shaped inputs and atomic,
+// source-specific version-aware persistence:
+//
+// reading.ArticleReadModel
+//   -> apply only when IncomingContentSourceVersion > ContentSourceVersion
+//
+// reading.ArticleSeoRouteProjection
+//   -> apply only when IncomingSeoSourceVersion > SeoSourceVersion
+//
+// reading.ArticleMediaProjectionState + ArticleMediaItemProjection
+//   -> replace media item set only when
+//      IncomingMediaSourceVersion > MediaSourceVersion
+//
+// reading.ArticleInteractionCounterProjection
+//   -> apply only when IncomingStatsVersion > InteractionStatsVersion
+//
+// Duplicate or stale deliveries must become safe no-ops.
+//
+// RabbitMQ message acknowledgement occurs only after local projection
+// persistence succeeds.
+//
+// If future Reading consumers introduce non-idempotent downstream effects,
+// delta-style mutation processing, or durable per-message audit/replay
+// requirements, an Inbox / ConsumedMessage mechanism must be reconsidered.
 
-Ref: Interaction_Stats.ArticleId > Content_Article.ArticleId
-Ref: Interaction_Comment.ArticleId > Content_Article.ArticleId
-Ref: Interaction_Comment.ParentCommentId > Interaction_Comment.CommentId
 
-// Projection lineage references.
-// These are logical lineage references, not ownership transfer.
-Ref: Reading_ArticleReadModel.ArticleId > Content_Article.ArticleId
-Ref: Reading_ArticleReadModel.CategoryId > Content_Category.CategoryId
-Ref: Reading_ArticleReadModel.CoverMediaId > Media_MediaAsset.MediaId
-
-Ref: Reading_ArticleReadModelMedia.ArticleId > Reading_ArticleReadModel.ArticleId
-Ref: Reading_ArticleReadModelTag.ArticleId > Reading_ArticleReadModel.ArticleId
+// =====================================================
+// Source lineage notes — no cross-module physical FK
+// =====================================================
+//
+// reading.ArticleReadModel
+//   <- Content public article projection snapshot
+//
+// reading.ArticleTagProjection
+//   <- Content public article projection snapshot
+//
+// reading.ArticleSeoRouteProjection
+//   <- SEO public route / metadata projection snapshot
+//
+// reading.ArticleMediaProjectionState
+// reading.ArticleMediaItemProjection
+//   <- Media public presentation projection snapshot
+//
+// reading.ArticleInteractionCounterProjection
+//   <- interaction.article_counters_projection_published
+//
+// Source modules retain truth ownership.
+//
+// Popularity / trending projection is intentionally not modeled in V1.

@@ -2,8 +2,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Notifications.Application.Ports.Persistence;
 using Notifications.Application.Ports.Services;
-using Notifications.Application.Ports.Transactions;
-using Notifications.Application.Services;
 using Notifications.Infrastructure.Persistence.Exceptions;
 using Notifications.Infrastructure.Persistence.Repositories;
 using Notifications.Infrastructure.Persistence.Sql;
@@ -42,7 +40,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IEmailTemplateRenderer, EmailTemplateRenderer>();
         services.AddScoped<IEmailSender, EmailSender>();
         services.AddScoped<IEmailDeliveryDedupeService, EmailDeliveryDedupeService>();
-        services.AddScoped<INotificationsOutboxWriter, NotificationsOutboxWriter>();
         services.AddScoped<INotificationsOutboxWriter, NotificationsOutboxWriter>();
 
         return services;

@@ -52,8 +52,6 @@ public sealed class ArticleDetailHttpResponse
 
     public ArticleCountersHttpResponse Counters { get; init; } = new();
 
-    public double? PopularityScore { get; init; }
-
     public IReadOnlyList<ArticleTagHttpResponse> Tags { get; init; } = [];
 
     public IReadOnlyList<ArticleMediaHttpResponse> Media { get; init; } = [];

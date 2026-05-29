@@ -2,7 +2,6 @@ using System.Data;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using Microsoft.Data.SqlClient;
 using Notifications.Application.Ports.Persistence;
-using Notifications.Application.Ports.Transactions;
 using Notifications.Domain.Entities;
 using Notifications.Infrastructure.Persistence.Exceptions;
 
