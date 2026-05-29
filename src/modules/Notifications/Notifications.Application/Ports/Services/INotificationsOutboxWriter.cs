@@ -1,4 +1,4 @@
-using Notifications.Application.Ports.Transactions;
+using Notifications.Application.Ports.Persistence;
 
 namespace Notifications.Application.Ports.Services;
 

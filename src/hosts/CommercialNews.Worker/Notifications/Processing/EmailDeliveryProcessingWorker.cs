@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Notifications.Application.Services;
+using Notifications.Application.Ports.Services;
 
 namespace CommercialNews.Worker.Notifications.Processing;
 

@@ -19,6 +19,7 @@ using CommercialNews.Worker.Interaction.Handlers.Stats;
 using CommercialNews.Worker.Notifications.Consumers;
 using CommercialNews.Worker.Notifications.Handlers;
 using CommercialNews.Worker.Notifications.Handlers.Identity;
+using CommercialNews.Worker.Notifications.Handlers.Interaction;
 using CommercialNews.Worker.Notifications.Processing;
 using CommercialNews.Worker.Outbox;
 using CommercialNews.Worker.Outbox.Handlers.Authorization;
@@ -165,6 +166,7 @@ public static class WorkerModuleRegistration
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityPasswordResetRequestedIntegrationEventHandler>();
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityPasswordChangedIntegrationEventHandler>();
         services.AddScoped<INotificationsIntegrationEventHandler, IdentityEmailVerifiedIntegrationEventHandler>();
+        services.AddScoped<INotificationsIntegrationEventHandler, CommentReportAlertTriggeredIntegrationEventHandler>();
 
         services.Configure<AuthorizationRabbitMqConsumerOptions>(
             configuration.GetSection(AuthorizationRabbitMqConsumerOptions.SectionName));

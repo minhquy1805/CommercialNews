@@ -4,7 +4,6 @@ using Notifications.Application.Contracts.EmailDeliveries.Requests;
 using Notifications.Application.Contracts.EmailDeliveries.Responses;
 using Notifications.Application.Errors;
 using Notifications.Application.Ports.Persistence;
-using Notifications.Application.Ports.Transactions;
 using Notifications.Application.Validation.EmailDeliveries.RetryEmailDelivery;
 using Notifications.Domain.Enums;
 using Notifications.Domain.Exceptions;
