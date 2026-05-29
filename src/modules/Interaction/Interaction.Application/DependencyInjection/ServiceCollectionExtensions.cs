@@ -26,16 +26,26 @@ namespace Interaction.Application.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddInteractionApplication(this IServiceCollection services)
+    public static IServiceCollection AddInteractionConsumerApplication(
+        this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<IApplyArticleInteractionTargetProjectionUseCase, ApplyArticleInteractionTargetProjectionUseCase>();
         services.AddScoped<IContentInteractionEventIngestionService, ContentInteractionEventIngestionService>();
 
-        services.AddScoped<IGetArticleInteractionStatsUseCase, GetArticleInteractionStatsUseCase>();
         services.AddScoped<IMaterializeArticleInteractionStatsUseCase, MaterializeArticleInteractionStatsUseCase>();
         services.AddScoped<IInteractionStatsEventIngestionService, InteractionStatsEventIngestionService>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddInteractionApiApplication(
+        this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IGetArticleInteractionStatsUseCase, GetArticleInteractionStatsUseCase>();
 
         services.AddScoped<ITrackArticleViewUseCase, TrackArticleViewUseCase>();
 
@@ -58,6 +68,17 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGetModerationCaseByPublicIdUseCase, GetModerationCaseByPublicIdUseCase>();
         services.AddScoped<IDismissReportedCommentCaseUseCase, DismissReportedCommentCaseUseCase>();
         services.AddScoped<IHideReportedCommentUseCase, HideReportedCommentUseCase>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddInteractionApplication(
+        this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddInteractionConsumerApplication();
+        services.AddInteractionApiApplication();
 
         return services;
     }
