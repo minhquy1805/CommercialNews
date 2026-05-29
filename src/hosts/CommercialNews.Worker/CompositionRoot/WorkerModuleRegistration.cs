@@ -79,7 +79,7 @@ public static class WorkerModuleRegistration
         services.AddReadingApplication();
         services.AddReadingInfrastructure();
 
-        services.AddInteractionApplication();
+        services.AddInteractionConsumerApplication();
         services.AddInteractionInfrastructure();
 
         services.AddOptions<OutboxWorkerOptions>()

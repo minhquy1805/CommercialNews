@@ -46,7 +46,7 @@ public static class ModuleRegistration
         services.AddReadingApplication();
         services.AddReadingInfrastructure();
 
-        services.AddInteractionApplication();
+        services.AddInteractionApiApplication();
         services.AddInteractionInfrastructure();
 
         services.AddNotificationsApplication(configuration);
