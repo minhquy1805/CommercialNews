@@ -152,7 +152,11 @@ BEGIN
 
         COALESCE([i].[ViewCount], 0) AS [ViewCount],
         COALESCE([i].[LikeCount], 0) AS [LikeCount],
-        COALESCE([i].[VisibleCommentCount], 0) AS [VisibleCommentCount]
+        COALESCE([i].[VisibleCommentCount], 0) AS [VisibleCommentCount],
+        CASE
+            WHEN [i].[ArticlePublicId] IS NULL THEN CAST(1 AS BIT)
+            ELSE CAST(0 AS BIT)
+        END AS [CountersPartial]
     FROM [reading].[ArticleReadModel] AS [a]
     LEFT JOIN [reading].[ArticleInteractionCounterProjection] AS [i]
         ON [i].[ArticlePublicId] = [a].[ArticlePublicId]
@@ -362,6 +366,10 @@ BEGIN
             COALESCE([i].[ViewCount], 0) AS [ViewCount],
             COALESCE([i].[LikeCount], 0) AS [LikeCount],
             COALESCE([i].[VisibleCommentCount], 0) AS [VisibleCommentCount],
+            CASE
+                WHEN [i].[ArticlePublicId] IS NULL THEN CAST(1 AS BIT)
+                ELSE CAST(0 AS BIT)
+            END AS [CountersPartial],
 
             COUNT(1) OVER() AS [TotalCount]
         FROM [reading].[ArticleReadModel] AS [a]
@@ -412,6 +420,7 @@ BEGIN
         [ViewCount],
         [LikeCount],
         [VisibleCommentCount],
+        [CountersPartial],
 
         [TotalCount]
     FROM [Filtered]
@@ -515,7 +524,8 @@ BEGIN
 
             CAST(NULL AS BIGINT) AS [ViewCount],
             CAST(NULL AS BIGINT) AS [LikeCount],
-            CAST(NULL AS BIGINT) AS [VisibleCommentCount]
+            CAST(NULL AS BIGINT) AS [VisibleCommentCount],
+            CAST(NULL AS BIT) AS [CountersPartial]
         WHERE 1 = 0;
 
         RETURN;
@@ -546,6 +556,10 @@ BEGIN
             COALESCE([i].[ViewCount], 0) AS [ViewCount],
             COALESCE([i].[LikeCount], 0) AS [LikeCount],
             COALESCE([i].[VisibleCommentCount], 0) AS [VisibleCommentCount],
+            CASE
+                WHEN [i].[ArticlePublicId] IS NULL THEN CAST(1 AS BIT)
+                ELSE CAST(0 AS BIT)
+            END AS [CountersPartial],
 
             CASE
                 WHEN @CategoryId IS NOT NULL
@@ -596,7 +610,8 @@ BEGIN
 
         [ViewCount],
         [LikeCount],
-        [VisibleCommentCount]
+        [VisibleCommentCount],
+        [CountersPartial]
     FROM [Candidate]
     ORDER BY
         [MatchRank] ASC,

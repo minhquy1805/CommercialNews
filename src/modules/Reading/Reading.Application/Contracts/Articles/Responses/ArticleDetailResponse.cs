@@ -56,6 +56,8 @@ public sealed class ArticleDetailResponse
 
     public long VisibleCommentCount { get; init; }
 
+    public bool CountersPartial { get; init; }
+
     public IReadOnlyList<ArticleTagResponse> Tags { get; init; } = [];
 
     public IReadOnlyList<ArticleMediaResponse> Media { get; init; } = [];

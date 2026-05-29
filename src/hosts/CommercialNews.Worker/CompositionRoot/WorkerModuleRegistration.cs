@@ -50,6 +50,7 @@ using CommercialNews.Worker.Reading.Handlers.Media;
 using CommercialNews.Worker.Reading.Handlers.Seo;
 using Interaction.Application.DependencyInjection;
 using Interaction.Infrastructure.DependencyInjection;
+using CommercialNews.Worker.Interaction.BatchProcessing.ViewStatsMaterialization;
 
 namespace CommercialNews.Worker.CompositionRoot;
 
@@ -80,6 +81,7 @@ public static class WorkerModuleRegistration
         services.AddReadingInfrastructure();
 
         services.AddInteractionConsumerApplication();
+        services.AddInteractionBatchProcessingApplication();
         services.AddInteractionInfrastructure();
 
         services.AddOptions<OutboxWorkerOptions>()
@@ -190,6 +192,28 @@ public static class WorkerModuleRegistration
         services.Configure<InteractionStatsRabbitMqConsumerOptions>(
             configuration.GetSection(InteractionStatsRabbitMqConsumerOptions.SectionName));
 
+        services.AddOptions<InteractionViewStatsMaterializationBatchOptions>()
+            .Bind(
+                configuration.GetSection(
+                    InteractionViewStatsMaterializationBatchOptions.SectionName))
+            .Validate(
+                options => !options.IsEnabled ||
+                        options.BatchSize is >= 1 and <= 500,
+                "Interaction view stats materialization batch BatchSize must be between 1 and 500 when enabled.")
+            .Validate(
+                options => !options.IsEnabled ||
+                        options.PollIntervalSeconds > 0,
+                "Interaction view stats materialization batch PollIntervalSeconds must be greater than zero when enabled.")
+            .Validate(
+                options => !options.IsEnabled ||
+                        options.BusyDelaySeconds >= 0,
+                "Interaction view stats materialization batch BusyDelaySeconds must not be negative when enabled.")
+            .Validate(
+                options => !options.IsEnabled ||
+                        options.ErrorDelaySeconds > 0,
+                "Interaction view stats materialization batch ErrorDelaySeconds must be greater than zero when enabled.")
+            .ValidateOnStart();
+
         services.AddScoped<AuditIntegrationEventDispatcher>();
 
         services.AddScoped<IAuditIntegrationEventHandler, AuthorizationUserRoleAssignedAuditHandler>();
@@ -291,6 +315,7 @@ public static class WorkerModuleRegistration
         services.AddHostedService<ReadingRabbitMqConsumerService>();
         services.AddHostedService<InteractionRabbitMqConsumerService>();
         services.AddHostedService<InteractionStatsRabbitMqConsumerService>();
+        services.AddHostedService<InteractionViewStatsMaterializationBatchWorker>();
         services.AddHostedService<EmailDeliveryProcessingWorker>();
 
         return services;

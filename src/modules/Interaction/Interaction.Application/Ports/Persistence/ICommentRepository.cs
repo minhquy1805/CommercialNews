@@ -37,6 +37,7 @@ public interface ICommentRepository
         long actorUserId,
         string reasonCode,
         string? note,
+        string? correlationId,
         string actorType,
         CancellationToken cancellationToken = default);
 
@@ -46,6 +47,7 @@ public interface ICommentRepository
         string historyPublicId,
         long actorUserId,
         string? note,
+        string? correlationId,
         string actorType,
         CancellationToken cancellationToken = default);
 

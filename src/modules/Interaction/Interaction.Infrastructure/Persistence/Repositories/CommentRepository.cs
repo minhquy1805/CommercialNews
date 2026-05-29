@@ -393,6 +393,7 @@ public sealed class CommentRepository : ICommentRepository
         long actorUserId,
         string reasonCode,
         string? note,
+        string? correlationId,
         string actorType,
         CancellationToken cancellationToken = default)
     {
@@ -440,6 +441,10 @@ public sealed class CommentRepository : ICommentRepository
                 {
                     Value = ToDbValue(note)
                 },
+                new SqlParameter("@CorrelationId", SqlDbType.Char, 26)
+                {
+                    Value = ToDbValue(correlationId)
+                },
                 new SqlParameter("@ActorType", SqlDbType.NVarChar, 30)
                 {
                     Value = actorType
@@ -469,6 +474,7 @@ public sealed class CommentRepository : ICommentRepository
         string historyPublicId,
         long actorUserId,
         string? note,
+        string? correlationId,
         string actorType,
         CancellationToken cancellationToken = default)
     {
@@ -510,6 +516,10 @@ public sealed class CommentRepository : ICommentRepository
                 new SqlParameter("@Note", SqlDbType.NVarChar, 1000)
                 {
                     Value = ToDbValue(note)
+                },
+                new SqlParameter("@CorrelationId", SqlDbType.Char, 26)
+                {
+                    Value = ToDbValue(correlationId)
                 },
                 new SqlParameter("@ActorType", SqlDbType.NVarChar, 30)
                 {

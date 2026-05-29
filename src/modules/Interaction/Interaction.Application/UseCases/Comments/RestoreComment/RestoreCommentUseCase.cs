@@ -84,6 +84,7 @@ public sealed class RestoreCommentUseCase : IRestoreCommentUseCase
                 historyPublicId: historyPublicId,
                 actorUserId: actorUserId,
                 note: note,
+                correlationId: _requestContext.CorrelationId,
                 actorType: ModeratorActorType,
                 cancellationToken: cancellationToken);
 
