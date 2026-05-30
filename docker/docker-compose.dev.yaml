@@ -38,6 +38,11 @@ services:
       FileStorage__GoogleCloud__BucketName: "${FILE_STORAGE_GCS_BUCKET_NAME}"
       FileStorage__GoogleCloud__PublicBaseUrl: "${FILE_STORAGE_GCS_PUBLIC_BASE_URL}"
       FileStorage__GoogleCloud__CredentialsJsonPath: "${FILE_STORAGE_GCS_CREDENTIALS_JSON_PATH}"
+      FileStorage__GoogleCloud__UsePublicUrl: "${FILE_STORAGE_GCS_USE_PUBLIC_URL}"
+
+      Cors__AllowedOrigins__0: "${API_CORS_ALLOWED_ORIGIN_0}"
+      Cors__AllowedOrigins__1: "${API_CORS_ALLOWED_ORIGIN_1}"
+      Cors__AllowedOrigins__2: "${API_CORS_ALLOWED_ORIGIN_2}"
 
       AllowedHosts: "${API_ALLOWED_HOSTS}"
 
@@ -88,6 +93,12 @@ services:
       Workers__EmailDeliveryProcessing__BusyDelaySeconds: "${WORKER_EMAIL_DELIVERY_PROCESSING_BUSY_DELAY_SECONDS}"
       Workers__EmailDeliveryProcessing__ErrorDelaySeconds: "${WORKER_EMAIL_DELIVERY_PROCESSING_ERROR_DELAY_SECONDS}"
 
+      Workers__Interaction__BatchProcessing__ViewStatsMaterialization__IsEnabled: "${WORKER_INTERACTION_VIEW_STATS_MATERIALIZATION_IS_ENABLED}"
+      Workers__Interaction__BatchProcessing__ViewStatsMaterialization__BatchSize: "${WORKER_INTERACTION_VIEW_STATS_MATERIALIZATION_BATCH_SIZE}"
+      Workers__Interaction__BatchProcessing__ViewStatsMaterialization__PollIntervalSeconds: "${WORKER_INTERACTION_VIEW_STATS_MATERIALIZATION_POLL_INTERVAL_SECONDS}"
+      Workers__Interaction__BatchProcessing__ViewStatsMaterialization__BusyDelaySeconds: "${WORKER_INTERACTION_VIEW_STATS_MATERIALIZATION_BUSY_DELAY_SECONDS}"
+      Workers__Interaction__BatchProcessing__ViewStatsMaterialization__ErrorDelaySeconds: "${WORKER_INTERACTION_VIEW_STATS_MATERIALIZATION_ERROR_DELAY_SECONDS}"
+
       Notifications__Email__Host: "${WORKER_EMAIL_HOST}"
       Notifications__Email__Port: "${WORKER_EMAIL_PORT}"
       Notifications__Email__UseSsl: "${WORKER_EMAIL_USE_SSL}"
@@ -108,6 +119,10 @@ services:
       Notifications__Delivery__InitialRetryDelaySeconds: "${WORKER_EMAIL_INITIAL_RETRY_DELAY_SECONDS}"
       Notifications__Delivery__MaxRetryDelaySeconds: "${WORKER_EMAIL_MAX_RETRY_DELAY_SECONDS}"
       Notifications__Delivery__PublicFrontendBaseUrl: "${WORKER_PUBLIC_FRONTEND_BASE_URL}"
+
+      Notifications__InteractionAlerts__CommentReportAlertRecipientEmail: "${WORKER_COMMENT_REPORT_ALERT_RECIPIENT_EMAIL}"
+      Notifications__InteractionAlerts__CommentReportAlertPriority: "${WORKER_COMMENT_REPORT_ALERT_PRIORITY}"
+      Notifications__InteractionAlerts__ModerationCaseUrlTemplate: "${WORKER_COMMENT_REPORT_ALERT_MODERATION_CASE_URL_TEMPLATE}"
 
       RabbitMq__Outbox__HostName: "${RABBITMQ_HOST}"
       RabbitMq__Outbox__Port: "${RABBITMQ_PORT}"
@@ -141,6 +156,7 @@ services:
       RabbitMq__NotificationsConsumer__RoutingKeys__1: "identity.password_reset_requested"
       RabbitMq__NotificationsConsumer__RoutingKeys__2: "identity.password_changed"
       RabbitMq__NotificationsConsumer__RoutingKeys__3: "identity.email_verified"
+      RabbitMq__NotificationsConsumer__RoutingKeys__4: "interaction.comment_report_alert_triggered"
 
       RabbitMq__AuthorizationConsumer__HostName: "${RABBITMQ_HOST}"
       RabbitMq__AuthorizationConsumer__Port: "${RABBITMQ_PORT}"
@@ -210,6 +226,10 @@ services:
       RabbitMq__AuditConsumer__RoutingKeys__31: "media.article_media_detached"
       RabbitMq__AuditConsumer__RoutingKeys__32: "media.article_media_reordered"
       RabbitMq__AuditConsumer__RoutingKeys__33: "media.article_primary_media_set"
+      RabbitMq__AuditConsumer__RoutingKeys__34: "interaction.comment_hidden"
+      RabbitMq__AuditConsumer__RoutingKeys__35: "interaction.comment_restored"
+      RabbitMq__AuditConsumer__RoutingKeys__36: "interaction.comment_deleted_by_author"
+      RabbitMq__AuditConsumer__RoutingKeys__37: "interaction.comment_reports_dismissed"
 
       RabbitMq__SeoConsumer__HostName: "${RABBITMQ_HOST}"
       RabbitMq__SeoConsumer__Port: "${RABBITMQ_PORT}"
@@ -264,6 +284,51 @@ services:
       RabbitMq__ReadingConsumer__RoutingKeys__11: "seo.slug_route_changed"
       RabbitMq__ReadingConsumer__RoutingKeys__12: "seo.slug_route_deactivated"
       RabbitMq__ReadingConsumer__RoutingKeys__13: "seo.metadata_updated"
+      RabbitMq__ReadingConsumer__RoutingKeys__14: "interaction.article_counters_projection_published"
+
+      RabbitMq__InteractionConsumer__HostName: "${RABBITMQ_HOST}"
+      RabbitMq__InteractionConsumer__Port: "${RABBITMQ_PORT}"
+      RabbitMq__InteractionConsumer__UserName: "${RABBITMQ_USERNAME}"
+      RabbitMq__InteractionConsumer__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__InteractionConsumer__VirtualHost: "${RABBITMQ_VIRTUAL_HOST}"
+      RabbitMq__InteractionConsumer__ExchangeName: "${RABBITMQ_EXCHANGE_NAME}"
+      RabbitMq__InteractionConsumer__ExchangeType: "${RABBITMQ_EXCHANGE_TYPE}"
+      RabbitMq__InteractionConsumer__QueueName: "${RABBITMQ_INTERACTION_QUEUE_NAME}"
+      RabbitMq__InteractionConsumer__DurableQueue: "${RABBITMQ_INTERACTION_DURABLE_QUEUE}"
+      RabbitMq__InteractionConsumer__ExclusiveQueue: "${RABBITMQ_INTERACTION_EXCLUSIVE_QUEUE}"
+      RabbitMq__InteractionConsumer__AutoDeleteQueue: "${RABBITMQ_INTERACTION_AUTO_DELETE_QUEUE}"
+      RabbitMq__InteractionConsumer__PrefetchCount: "${RABBITMQ_INTERACTION_PREFETCH_COUNT}"
+      RabbitMq__InteractionConsumer__ConsumerTag: "${RABBITMQ_INTERACTION_CONSUMER_TAG}"
+      RabbitMq__InteractionConsumer__ClientProvidedName: "${RABBITMQ_INTERACTION_CLIENT_PROVIDED_NAME}"
+      RabbitMq__InteractionConsumer__RequeueOnFailure: "${RABBITMQ_INTERACTION_REQUEUE_ON_FAILURE}"
+
+      RabbitMq__InteractionConsumer__RoutingKeys__0: "content.article_published"
+      RabbitMq__InteractionConsumer__RoutingKeys__1: "content.article_unpublished"
+      RabbitMq__InteractionConsumer__RoutingKeys__2: "content.article_archived"
+      RabbitMq__InteractionConsumer__RoutingKeys__3: "content.article_soft_deleted"
+
+      RabbitMq__InteractionStatsConsumer__HostName: "${RABBITMQ_HOST}"
+      RabbitMq__InteractionStatsConsumer__Port: "${RABBITMQ_PORT}"
+      RabbitMq__InteractionStatsConsumer__UserName: "${RABBITMQ_USERNAME}"
+      RabbitMq__InteractionStatsConsumer__Password: "${RABBITMQ_PASSWORD}"
+      RabbitMq__InteractionStatsConsumer__VirtualHost: "${RABBITMQ_VIRTUAL_HOST}"
+      RabbitMq__InteractionStatsConsumer__ExchangeName: "${RABBITMQ_EXCHANGE_NAME}"
+      RabbitMq__InteractionStatsConsumer__ExchangeType: "${RABBITMQ_EXCHANGE_TYPE}"
+      RabbitMq__InteractionStatsConsumer__QueueName: "${RABBITMQ_INTERACTION_STATS_QUEUE_NAME}"
+      RabbitMq__InteractionStatsConsumer__DurableQueue: "${RABBITMQ_INTERACTION_STATS_DURABLE_QUEUE}"
+      RabbitMq__InteractionStatsConsumer__ExclusiveQueue: "${RABBITMQ_INTERACTION_STATS_EXCLUSIVE_QUEUE}"
+      RabbitMq__InteractionStatsConsumer__AutoDeleteQueue: "${RABBITMQ_INTERACTION_STATS_AUTO_DELETE_QUEUE}"
+      RabbitMq__InteractionStatsConsumer__PrefetchCount: "${RABBITMQ_INTERACTION_STATS_PREFETCH_COUNT}"
+      RabbitMq__InteractionStatsConsumer__ConsumerTag: "${RABBITMQ_INTERACTION_STATS_CONSUMER_TAG}"
+      RabbitMq__InteractionStatsConsumer__ClientProvidedName: "${RABBITMQ_INTERACTION_STATS_CLIENT_PROVIDED_NAME}"
+      RabbitMq__InteractionStatsConsumer__RequeueOnFailure: "${RABBITMQ_INTERACTION_STATS_REQUEUE_ON_FAILURE}"
+
+      RabbitMq__InteractionStatsConsumer__RoutingKeys__0: "interaction.article_liked"
+      RabbitMq__InteractionStatsConsumer__RoutingKeys__1: "interaction.article_unliked"
+      RabbitMq__InteractionStatsConsumer__RoutingKeys__2: "interaction.comment_created"
+      RabbitMq__InteractionStatsConsumer__RoutingKeys__3: "interaction.comment_hidden"
+      RabbitMq__InteractionStatsConsumer__RoutingKeys__4: "interaction.comment_restored"
+      RabbitMq__InteractionStatsConsumer__RoutingKeys__5: "interaction.comment_deleted_by_author"
     depends_on:
       - cn-mssql
       - rabbitmq
