@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../../../building-blocks/CommercialNews.BuildingBlocks/CommercialNews.BuildingBlocks.csproj" />
+  </ItemGroup>
+
 </Project>
