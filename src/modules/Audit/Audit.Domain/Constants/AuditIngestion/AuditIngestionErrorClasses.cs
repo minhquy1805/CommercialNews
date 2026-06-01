@@ -2,7 +2,7 @@ using System.Collections.Frozen;
 
 namespace Audit.Domain.Constants.AuditIngestion;
 
-public static class AuditErrorClasses
+public static class AuditIngestionErrorClasses
 {
     public const string Transient = "Transient";
     public const string Permanent = "Permanent";
