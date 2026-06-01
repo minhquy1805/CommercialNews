@@ -10,24 +10,36 @@ public sealed record AuditSourceEvent
     public string EventType { get; }
     public int? EventVersion { get; }
     public string SourceModule { get; }
+    public int? SourcePriority { get; }
+    public DateTime SourceOccurredAtUtc { get; }
+    public DateTime? SourcePublishedAtUtc { get; }
 
     private AuditSourceEvent(
         string messageId,
         string eventType,
         int? eventVersion,
-        string sourceModule)
+        string sourceModule,
+        int? sourcePriority,
+        DateTime sourceOccurredAtUtc,
+        DateTime? sourcePublishedAtUtc)
     {
         MessageId = messageId;
         EventType = eventType;
         EventVersion = eventVersion;
         SourceModule = sourceModule;
+        SourcePriority = sourcePriority;
+        SourceOccurredAtUtc = sourceOccurredAtUtc;
+        SourcePublishedAtUtc = sourcePublishedAtUtc;
     }
 
     public static AuditSourceEvent Create(
         string? messageId,
         string? eventType,
         int? eventVersion,
-        string? sourceModule)
+        string? sourceModule,
+        int? sourcePriority,
+        DateTime sourceOccurredAtUtc,
+        DateTime? sourcePublishedAtUtc = null)
     {
         var normalizedMessageId = messageId?.Trim();
         if (string.IsNullOrWhiteSpace(normalizedMessageId))
@@ -72,10 +84,53 @@ public sealed record AuditSourceEvent
             throw AuditDomainException.EventVersionInvalid();
         }
 
+        if (sourcePriority is not null &&
+            (sourcePriority < AuditConstants.MinSourcePriority ||
+             sourcePriority > AuditConstants.MaxSourcePriority))
+        {
+            throw AuditDomainException.SourcePriorityInvalid();
+        }
+
+        EnsureSourceOccurredAtUtc(sourceOccurredAtUtc);
+        EnsureSourcePublishedAtUtc(sourcePublishedAtUtc, sourceOccurredAtUtc);
+
         return new AuditSourceEvent(
             normalizedMessageId,
             normalizedEventType,
             eventVersion,
-            normalizedSourceModule);
+            normalizedSourceModule,
+            sourcePriority,
+            sourceOccurredAtUtc,
+            sourcePublishedAtUtc);
+    }
+
+    private static void EnsureSourceOccurredAtUtc(DateTime sourceOccurredAtUtc)
+    {
+        if (sourceOccurredAtUtc == default)
+        {
+            throw AuditDomainException.SourceOccurredAtUtcRequired();
+        }
+
+        if (sourceOccurredAtUtc.Kind != DateTimeKind.Utc)
+        {
+            throw AuditDomainException.TimestampMustBeUtc(nameof(sourceOccurredAtUtc));
+        }
+    }
+
+    private static void EnsureSourcePublishedAtUtc(
+        DateTime? sourcePublishedAtUtc,
+        DateTime sourceOccurredAtUtc)
+    {
+        if (sourcePublishedAtUtc is null)
+        {
+            return;
+        }
+
+        if (sourcePublishedAtUtc.Value == default ||
+            sourcePublishedAtUtc.Value.Kind != DateTimeKind.Utc ||
+            sourcePublishedAtUtc.Value < sourceOccurredAtUtc)
+        {
+            throw AuditDomainException.SourcePublishedAtUtcInvalid();
+        }
     }
 }

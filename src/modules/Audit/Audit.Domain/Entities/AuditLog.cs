@@ -1,347 +1,244 @@
-namespace Audit.Domain.Entities;
-
-using Audit.Domain.Enums;
+using Audit.Domain.Constants.Common;
 using Audit.Domain.Exceptions;
+using Audit.Domain.Policies.Evidence;
+using Audit.Domain.ValueObjects.Common;
+using Audit.Domain.ValueObjects.Evidence;
+
+namespace Audit.Domain.Entities;
 
 public sealed class AuditLog
 {
-    public long AuditId { get; private set; }
+    public long AuditLogId { get; private set; }
+    public string PublicId { get; private set; }
 
-    public string AuditEventId { get; private set; } = string.Empty;
+    public AuditSourceEvent SourceEvent { get; private set; }
+    public AuditAggregateRef AggregateRef { get; private set; }
+    public AuditTraceContext TraceContext { get; private set; }
 
-    public long? ActorUserId { get; private set; }
+    public AuditActor Actor { get; private set; }
+    public AuditResource Resource { get; private set; }
+    public AuditRisk Risk { get; private set; }
+    public AuditRequestContext RequestContext { get; private set; }
+    public AuditJsonPayload JsonPayload { get; private set; }
 
-    public string Action { get; private set; } = string.Empty;
+    public string Action { get; private set; }
+    public string? ActionCategory { get; private set; }
 
-    public string ResourceType { get; private set; } = string.Empty;
-
-    public string ResourceId { get; private set; } = string.Empty;
-
-    public string? Outcome { get; private set; }
-
-    public string Summary { get; private set; } = string.Empty;
-
+    public string Summary { get; private set; }
     public string? Reason { get; private set; }
 
-    public DateTime OccurredAt { get; private set; }
+    public DateTime OccurredAtUtc => SourceEvent.SourceOccurredAtUtc;
+    public int? SourcePriority => SourceEvent.SourcePriority;
+    public DateTime IngestedAtUtc { get; private set; }
+    public DateTime CreatedAtUtc { get; private set; }
 
-    public string? CorrelationId { get; private set; }
-
-    public string? IpAddress { get; private set; }
-
-    public string? UserAgent { get; private set; }
-
-    public string? OldValuesJson { get; private set; }
-
-    public string? NewValuesJson { get; private set; }
-
-    public string? MetadataJson { get; private set; }
-
-    private AuditLog()
+    private AuditLog(
+        long auditLogId,
+        string publicId,
+        AuditSourceEvent sourceEvent,
+        AuditAggregateRef aggregateRef,
+        AuditTraceContext traceContext,
+        AuditActor actor,
+        AuditResource resource,
+        AuditRisk risk,
+        AuditRequestContext requestContext,
+        AuditJsonPayload jsonPayload,
+        string action,
+        string? actionCategory,
+        string summary,
+        string? reason,
+        DateTime ingestedAtUtc,
+        DateTime createdAtUtc)
     {
+        AuditLogId = auditLogId;
+        PublicId = publicId;
+        SourceEvent = sourceEvent;
+        AggregateRef = aggregateRef;
+        TraceContext = traceContext;
+        Actor = actor;
+        Resource = resource;
+        Risk = risk;
+        RequestContext = requestContext;
+        JsonPayload = jsonPayload;
+        Action = action;
+        ActionCategory = actionCategory;
+        Summary = summary;
+        Reason = reason;
+        IngestedAtUtc = ingestedAtUtc;
+        CreatedAtUtc = createdAtUtc;
     }
 
     public static AuditLog Create(
-        string auditEventId,
-        long? actorUserId,
-        string action,
-        string resourceType,
-        string resourceId,
-        string? outcome,
-        string summary,
+        string? publicId,
+        AuditSourceEvent sourceEvent,
+        AuditAggregateRef? aggregateRef,
+        AuditTraceContext? traceContext,
+        AuditActor actor,
+        AuditResource resource,
+        AuditRisk risk,
+        AuditRequestContext? requestContext,
+        AuditJsonPayload? jsonPayload,
+        AuditActionClassificationResult actionClassification,
+        string? summary,
         string? reason,
-        DateTime occurredAt,
-        string? correlationId = null,
-        string? ipAddress = null,
-        string? userAgent = null,
-        string? oldValuesJson = null,
-        string? newValuesJson = null,
-        string? metadataJson = null)
+        DateTime ingestedAtUtc)
     {
-        ValidateAuditEventId(auditEventId);
-        ValidateActorUserId(actorUserId);
-        ValidateAction(action);
-        ValidateResourceType(resourceType);
-        ValidateResourceId(resourceId);
-        ValidateOutcome(outcome);
-        ValidateSummary(summary);
-        ValidateReason(reason);
-        ValidateOccurredAt(occurredAt);
-        ValidateCorrelationId(correlationId);
-        ValidateIpAddress(ipAddress);
-        ValidateUserAgent(userAgent);
+        ArgumentNullException.ThrowIfNull(sourceEvent);
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(resource);
+        ArgumentNullException.ThrowIfNull(risk);
+        ArgumentNullException.ThrowIfNull(actionClassification);
 
-        return new AuditLog
-        {
-            AuditEventId = NormalizeRequired(auditEventId),
-            ActorUserId = actorUserId,
-            Action = NormalizeRequired(action),
-            ResourceType = NormalizeRequired(resourceType),
-            ResourceId = NormalizeRequired(resourceId),
-            Outcome = NormalizeOptional(outcome),
-            Summary = NormalizeRequired(summary),
-            Reason = NormalizeOptional(reason),
-            OccurredAt = occurredAt,
-            CorrelationId = NormalizeOptional(correlationId),
-            IpAddress = NormalizeOptional(ipAddress),
-            UserAgent = NormalizeOptional(userAgent),
-            OldValuesJson = NormalizeOptional(oldValuesJson),
-            NewValuesJson = NormalizeOptional(newValuesJson),
-            MetadataJson = NormalizeOptional(metadataJson)
-        };
+        var normalizedPublicId = NormalizeRequiredPublicId(publicId);
+        var normalizedSummary = NormalizeRequiredSummary(summary);
+        var normalizedReason = NormalizeOptional(reason);
+
+        EnsureValidIngestedAtUtc(ingestedAtUtc);
+
+        return new AuditLog(
+            auditLogId: 0,
+            publicId: normalizedPublicId,
+            sourceEvent: sourceEvent,
+            aggregateRef: aggregateRef ?? AuditAggregateRef.Empty(),
+            traceContext: traceContext ?? AuditTraceContext.Empty(),
+            actor: actor,
+            resource: resource,
+            risk: risk,
+            requestContext: requestContext ?? AuditRequestContext.Empty(),
+            jsonPayload: jsonPayload ?? AuditJsonPayload.Empty(),
+            action: actionClassification.Action,
+            actionCategory: actionClassification.ActionCategory,
+            summary: normalizedSummary,
+            reason: normalizedReason,
+            ingestedAtUtc: ingestedAtUtc,
+            createdAtUtc: ingestedAtUtc);
     }
 
     public static AuditLog Rehydrate(
-        long auditId,
-        string auditEventId,
-        long? actorUserId,
+        long auditLogId,
+        string publicId,
+        AuditSourceEvent sourceEvent,
+        AuditAggregateRef aggregateRef,
+        AuditTraceContext traceContext,
+        AuditActor actor,
+        AuditResource resource,
+        AuditRisk risk,
+        AuditRequestContext requestContext,
+        AuditJsonPayload jsonPayload,
         string action,
-        string resourceType,
-        string resourceId,
-        string? outcome,
+        string? actionCategory,
         string summary,
         string? reason,
-        DateTime occurredAt,
-        string? correlationId,
-        string? ipAddress,
-        string? userAgent,
-        string? oldValuesJson,
-        string? newValuesJson,
-        string? metadataJson)
+        DateTime ingestedAtUtc,
+        DateTime createdAtUtc)
     {
-        if (auditId <= 0)
+        if (auditLogId <= 0)
         {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_ID",
-                "Audit id must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(auditLogId), "Audit log id must be greater than zero.");
         }
 
-        ValidateAuditEventId(auditEventId);
-        ValidateActorUserId(actorUserId);
-        ValidateAction(action);
-        ValidateResourceType(resourceType);
-        ValidateResourceId(resourceId);
-        ValidateOutcome(outcome);
-        ValidateSummary(summary);
-        ValidateReason(reason);
-        ValidateOccurredAt(occurredAt);
-        ValidateCorrelationId(correlationId);
-        ValidateIpAddress(ipAddress);
-        ValidateUserAgent(userAgent);
+        ArgumentNullException.ThrowIfNull(sourceEvent);
+        ArgumentNullException.ThrowIfNull(aggregateRef);
+        ArgumentNullException.ThrowIfNull(traceContext);
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(resource);
+        ArgumentNullException.ThrowIfNull(risk);
+        ArgumentNullException.ThrowIfNull(requestContext);
+        ArgumentNullException.ThrowIfNull(jsonPayload);
 
-        return new AuditLog
-        {
-            AuditId = auditId,
-            AuditEventId = NormalizeRequired(auditEventId),
-            ActorUserId = actorUserId,
-            Action = NormalizeRequired(action),
-            ResourceType = NormalizeRequired(resourceType),
-            ResourceId = NormalizeRequired(resourceId),
-            Outcome = NormalizeOptional(outcome),
-            Summary = NormalizeRequired(summary),
-            Reason = NormalizeOptional(reason),
-            OccurredAt = occurredAt,
-            CorrelationId = NormalizeOptional(correlationId),
-            IpAddress = NormalizeOptional(ipAddress),
-            UserAgent = NormalizeOptional(userAgent),
-            OldValuesJson = NormalizeOptional(oldValuesJson),
-            NewValuesJson = NormalizeOptional(newValuesJson),
-            MetadataJson = NormalizeOptional(metadataJson)
-        };
+        var normalizedPublicId = NormalizeRequiredPublicId(publicId);
+        var normalizedActionClassification = AuditActionClassificationResult.Create(action, actionCategory);
+        var normalizedSummary = NormalizeRequiredSummary(summary);
+        var normalizedReason = NormalizeOptional(reason);
+
+        EnsureValidIngestedAtUtc(ingestedAtUtc);
+        EnsureValidCreatedAtUtc(createdAtUtc);
+
+        return new AuditLog(
+            auditLogId: auditLogId,
+            publicId: normalizedPublicId,
+            sourceEvent: sourceEvent,
+            aggregateRef: aggregateRef,
+            traceContext: traceContext,
+            actor: actor,
+            resource: resource,
+            risk: risk,
+            requestContext: requestContext,
+            jsonPayload: jsonPayload,
+            action: normalizedActionClassification.Action,
+            actionCategory: normalizedActionClassification.ActionCategory,
+            summary: normalizedSummary,
+            reason: normalizedReason,
+            ingestedAtUtc: ingestedAtUtc,
+            createdAtUtc: createdAtUtc);
     }
 
-    private static void ValidateAuditEventId(string? auditEventId)
+    private static string NormalizeRequiredPublicId(string? publicId)
     {
-        if (string.IsNullOrWhiteSpace(auditEventId))
+        var normalizedPublicId = publicId?.Trim();
+
+        if (string.IsNullOrWhiteSpace(normalizedPublicId))
         {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_EVENT_ID",
-                "Audit event id is required.");
+            throw AuditDomainException.PublicIdRequired();
         }
 
-        if (auditEventId.Trim().Length > 26)
+        if (normalizedPublicId.Length != AuditConstants.PublicIdLength)
         {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_EVENT_ID_TOO_LONG",
-                "Audit event id must not exceed 26 characters.");
+            throw AuditDomainException.PublicIdInvalidLength();
         }
+
+        return normalizedPublicId;
     }
 
-    private static void ValidateActorUserId(long? actorUserId)
+    private static string NormalizeRequiredSummary(string? summary)
     {
-        if (actorUserId.HasValue && actorUserId.Value <= 0)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_ACTOR_USER_ID",
-                "Actor user id must be greater than zero when provided.");
-        }
-    }
+        var normalizedSummary = summary?.Trim();
 
-    private static void ValidateAction(string? action)
-    {
-        if (string.IsNullOrWhiteSpace(action))
+        if (string.IsNullOrWhiteSpace(normalizedSummary))
         {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_ACTION",
-                "Audit action is required.");
+            throw AuditDomainException.SummaryRequired();
         }
 
-        if (action.Trim().Length > 120)
+        if (normalizedSummary.Length > AuditConstants.MaxSummaryLength)
         {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_ACTION_TOO_LONG",
-                "Audit action must not exceed 120 characters.");
-        }
-    }
-
-    private static void ValidateResourceType(string? resourceType)
-    {
-        if (string.IsNullOrWhiteSpace(resourceType))
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_RESOURCE_TYPE",
-                "Resource type is required.");
+            throw AuditDomainException.SummaryTooLong();
         }
 
-        if (resourceType.Trim().Length > 60)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_RESOURCE_TYPE_TOO_LONG",
-                "Resource type must not exceed 60 characters.");
-        }
-    }
-
-    private static void ValidateResourceId(string? resourceId)
-    {
-        if (string.IsNullOrWhiteSpace(resourceId))
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_RESOURCE_ID",
-                "Resource id is required.");
-        }
-
-        if (resourceId.Trim().Length > 100)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_RESOURCE_ID_TOO_LONG",
-                "Resource id must not exceed 100 characters.");
-        }
-    }
-
-    private static void ValidateOutcome(string? outcome)
-    {
-        if (string.IsNullOrWhiteSpace(outcome))
-        {
-            return;
-        }
-
-        if (!AuditOutcome.IsValid(outcome))
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_OUTCOME",
-                "Audit outcome is invalid.");
-        }
-    }
-
-    private static void ValidateSummary(string? summary)
-    {
-        if (string.IsNullOrWhiteSpace(summary))
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_SUMMARY",
-                "Audit summary is required.");
-        }
-
-        if (summary.Trim().Length > 300)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_SUMMARY_TOO_LONG",
-                "Audit summary must not exceed 300 characters.");
-        }
-    }
-
-    private static void ValidateReason(string? reason)
-    {
-        if (string.IsNullOrWhiteSpace(reason))
-        {
-            return;
-        }
-
-        if (reason.Trim().Length > 500)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_REASON_TOO_LONG",
-                "Audit reason must not exceed 500 characters.");
-        }
-    }
-
-    private static void ValidateOccurredAt(DateTime occurredAt)
-    {
-        if (occurredAt == default)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_INVALID_OCCURRED_AT",
-                "OccurredAt must be a valid UTC datetime.");
-        }
-    }
-
-    private static void ValidateCorrelationId(string? correlationId)
-    {
-        if (string.IsNullOrWhiteSpace(correlationId))
-        {
-            return;
-        }
-
-        if (correlationId.Trim().Length > 100)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_CORRELATION_ID_TOO_LONG",
-                "CorrelationId must not exceed 100 characters.");
-        }
-    }
-
-    private static void ValidateIpAddress(string? ipAddress)
-    {
-        if (string.IsNullOrWhiteSpace(ipAddress))
-        {
-            return;
-        }
-
-        if (ipAddress.Trim().Length > 45)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_IP_ADDRESS_TOO_LONG",
-                "IpAddress must not exceed 45 characters.");
-        }
-    }
-
-    private static void ValidateUserAgent(string? userAgent)
-    {
-        if (string.IsNullOrWhiteSpace(userAgent))
-        {
-            return;
-        }
-
-        if (userAgent.Trim().Length > 300)
-        {
-            throw new AuditDomainException(
-                "AUDIT.AUDIT_LOG_USER_AGENT_TOO_LONG",
-                "UserAgent must not exceed 300 characters.");
-        }
-    }
-
-    private static string NormalizeRequired(string value)
-    {
-        return value.Trim();
+        return normalizedSummary;
     }
 
     private static string? NormalizeOptional(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        var normalized = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized;
+    }
+
+    private static void EnsureValidIngestedAtUtc(DateTime ingestedAtUtc)
+    {
+        if (ingestedAtUtc == default)
         {
-            return null;
+            throw AuditDomainException.IngestedAtUtcRequired();
         }
 
-        return value.Trim();
+        if (ingestedAtUtc.Kind != DateTimeKind.Utc)
+        {
+            throw AuditDomainException.TimestampMustBeUtc(nameof(ingestedAtUtc));
+        }
+    }
+
+    private static void EnsureValidCreatedAtUtc(DateTime createdAtUtc)
+    {
+        if (createdAtUtc == default)
+        {
+            throw AuditDomainException.TimestampRequired(nameof(createdAtUtc));
+        }
+
+        if (createdAtUtc.Kind != DateTimeKind.Utc)
+        {
+            throw AuditDomainException.TimestampMustBeUtc(nameof(createdAtUtc));
+        }
     }
 }

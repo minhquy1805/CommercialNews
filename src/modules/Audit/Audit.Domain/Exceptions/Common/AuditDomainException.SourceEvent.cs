@@ -71,4 +71,25 @@ public sealed partial class AuditDomainException
             AuditDomainErrorCodes.EventVersionInvalid,
             "Audit event version must be greater than or equal to 1.");
     }
+
+    public static AuditDomainException SourcePriorityInvalid()
+    {
+        return new AuditDomainException(
+            AuditDomainErrorCodes.SourcePriorityInvalid,
+            "Audit source priority is invalid.");
+    }
+
+    public static AuditDomainException SourceOccurredAtUtcRequired()
+    {
+        return new AuditDomainException(
+            AuditDomainErrorCodes.SourceOccurredAtUtcRequired,
+            "Audit source occurred time is required.");
+    }
+
+    public static AuditDomainException SourcePublishedAtUtcInvalid()
+    {
+        return new AuditDomainException(
+            AuditDomainErrorCodes.SourcePublishedAtUtcInvalid,
+            "Audit source published time is invalid.");
+    }
 }

@@ -76,6 +76,10 @@ public static class AuditDomainErrorCodes
     public const string OccurredAtUtcRequired = "AUDIT_DOMAIN.OCCURRED_AT_UTC_REQUIRED";
     public const string SourceOccurredAtUtcRequired = "AUDIT_DOMAIN.SOURCE_OCCURRED_AT_UTC_REQUIRED";
     public const string SourcePublishedAtUtcInvalid = "AUDIT_DOMAIN.SOURCE_PUBLISHED_AT_UTC_INVALID";
+    public const string IngestedAtUtcRequired = "AUDIT_DOMAIN.INGESTED_AT_UTC_REQUIRED";
+    public const string FirstReceivedAtUtcRequired = "AUDIT_DOMAIN.FIRST_RECEIVED_AT_UTC_REQUIRED";
+    public const string TimestampRequired = "AUDIT_DOMAIN.TIMESTAMP_REQUIRED";
+    public const string TimestampMustBeUtc = "AUDIT_DOMAIN.TIMESTAMP_MUST_BE_UTC";
 
     // JSON payload
     public const string JsonPayloadInvalid = "AUDIT_DOMAIN.JSON_PAYLOAD_INVALID";

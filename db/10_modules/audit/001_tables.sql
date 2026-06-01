@@ -259,6 +259,7 @@ BEGIN
 
         [LastAttemptAtUtc]      DATETIME2(3)         NULL,
         [ProcessedAtUtc]        DATETIME2(3)         NULL,
+        [DeadLetteredAtUtc]     DATETIME2(3)         NULL,
 
         [LastErrorCode]         NVARCHAR(100)        NULL,
         [LastErrorMessage]      NVARCHAR(2000)       NULL,
@@ -339,6 +340,12 @@ BEGIN
             CHECK (
                 [ProcessedAtUtc] IS NULL
                 OR [ProcessedAtUtc] >= [FirstReceivedAtUtc]
+            ),
+
+        CONSTRAINT [CK_AuditIngestion_DeadLetteredAtUtc]
+            CHECK (
+                [DeadLetteredAtUtc] IS NULL
+                OR [DeadLetteredAtUtc] >= [FirstReceivedAtUtc]
             )
     );
 

@@ -120,6 +120,9 @@ CREATE OR ALTER PROCEDURE [audit].[AuditLog_Insert]
     @Hash                  CHAR(64) = NULL,
     @PrevHash              CHAR(64) = NULL,
 
+    @IngestedAtUtc         DATETIME2(3) = NULL,
+    @CreatedAtUtc          DATETIME2(3) = NULL,
+
     @AuditLogId            BIGINT OUTPUT,
     @WasInserted           BIT OUTPUT
 AS
@@ -127,8 +130,12 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
     SET @PublicId = LTRIM(RTRIM(@PublicId));
     SET @MessageId = LTRIM(RTRIM(@MessageId));
+    SET @IngestedAtUtc = ISNULL(@IngestedAtUtc, @NowUtc);
+    SET @CreatedAtUtc = ISNULL(@CreatedAtUtc, @IngestedAtUtc);
 
     IF NULLIF(@PublicId, '') IS NULL
         THROW 56310, 'Audit public id is required.', 1;
@@ -249,6 +256,8 @@ BEGIN
         [UserAgent],
         [SourcePriority],
         [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
         [RawPayloadJson],
@@ -290,6 +299,8 @@ BEGIN
         @UserAgent,
         @SourcePriority,
         @OccurredAtUtc,
+        @IngestedAtUtc,
+        @CreatedAtUtc,
         @MetadataJson,
         @HeadersJson,
         @RawPayloadJson,
@@ -315,7 +326,48 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     WHERE [AuditLogId] = @AuditLogId;
 END;
@@ -332,7 +384,48 @@ BEGIN
     IF NULLIF(@PublicId, '') IS NULL
         THROW 56310, 'Audit public id is required.', 1;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     WHERE [PublicId] = @PublicId;
 END;
@@ -349,7 +442,48 @@ BEGIN
     IF NULLIF(@MessageId, '') IS NULL
         THROW 56312, 'Audit message id is required.', 1;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     WHERE [MessageId] = @MessageId;
 END;
@@ -370,7 +504,48 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     WHERE [CorrelationId] = @CorrelationId
     ORDER BY [OccurredAtUtc] DESC, [AuditLogId] DESC
@@ -397,7 +572,48 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     WHERE [ResourceType] = @ResourceType
       AND [ResourceId] = @ResourceId
@@ -423,7 +639,48 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     WHERE [ActorUserId] = @ActorUserId
     ORDER BY [OccurredAtUtc] DESC, [AuditLogId] DESC
@@ -436,7 +693,48 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     ORDER BY [OccurredAtUtc] DESC, [AuditLogId] DESC;
 END;
@@ -453,7 +751,48 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     ORDER BY [OccurredAtUtc] DESC, [AuditLogId] DESC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
@@ -505,7 +844,48 @@ BEGIN
        AND NULLIF(LTRIM(RTRIM(@MessageId)), '') IS NULL
         SET @MessageId = NULL;
 
-    SELECT *
+    SELECT
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [RawPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
     FROM [audit].[AuditLog]
     WHERE
         (@FromOccurredAtUtc IS NULL OR [OccurredAtUtc] >= @FromOccurredAtUtc)
@@ -660,6 +1040,8 @@ BEGIN
     IF @SourcePriority IS NOT NULL AND (@SourcePriority < 1 OR @SourcePriority > 9)
         THROW 56359, 'Audit ingestion source priority must be between 1 and 9.', 1;
 
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
     IF EXISTS
     (
         SELECT 1
@@ -671,11 +1053,13 @@ BEGIN
         SET
             [Status] = 'Processing',
             [AttemptCount] = [AttemptCount] + 1,
-            [LastAttemptAtUtc] = SYSUTCDATETIME(),
-            [UpdatedAtUtc] = SYSUTCDATETIME(),
+            [LastAttemptAtUtc] = @NowUtc,
+            [UpdatedAtUtc] = @NowUtc,
+            [DeadLetteredAtUtc] = NULL,
             [LastErrorCode] = NULL,
             [LastErrorMessage] = NULL,
-            [LastErrorClass] = NULL
+            [LastErrorClass] = NULL,
+            [ProcessedAtUtc] = NULL
         WHERE [MessageId] = @MessageId
           AND [Status] IN ('Processing', 'Failed');
 
@@ -722,8 +1106,8 @@ BEGIN
         @ConsumerName,
         'Processing',
         1,
-        SYSUTCDATETIME(),
-        SYSUTCDATETIME()
+        @NowUtc,
+        @NowUtc
     );
 
     SET @AuditIngestionId = CONVERT(BIGINT, SCOPE_IDENTITY());
@@ -743,11 +1127,15 @@ BEGIN
     IF NULLIF(@MessageId, '') IS NULL
         THROW 56352, 'Audit ingestion message id is required.', 1;
 
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
     UPDATE [audit].[AuditIngestion]
     SET
         [Status] = 'Succeeded',
-        [ProcessedAtUtc] = SYSUTCDATETIME(),
-        [UpdatedAtUtc] = SYSUTCDATETIME(),
+        [LastAttemptAtUtc] = @NowUtc,
+        [ProcessedAtUtc] = @NowUtc,
+        [UpdatedAtUtc] = @NowUtc,
+        [DeadLetteredAtUtc] = NULL,
         [LastErrorCode] = NULL,
         [LastErrorMessage] = NULL,
         [LastErrorClass] = NULL
@@ -767,11 +1155,15 @@ BEGIN
     IF NULLIF(@MessageId, '') IS NULL
         THROW 56352, 'Audit ingestion message id is required.', 1;
 
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
     UPDATE [audit].[AuditIngestion]
     SET
         [Status] = 'Duplicate',
-        [ProcessedAtUtc] = SYSUTCDATETIME(),
-        [UpdatedAtUtc] = SYSUTCDATETIME(),
+        [LastAttemptAtUtc] = @NowUtc,
+        [ProcessedAtUtc] = @NowUtc,
+        [UpdatedAtUtc] = @NowUtc,
+        [DeadLetteredAtUtc] = NULL,
         [LastErrorCode] = NULL,
         [LastErrorMessage] = NULL,
         [LastErrorClass] = NULL
@@ -791,11 +1183,15 @@ BEGIN
     IF NULLIF(@MessageId, '') IS NULL
         THROW 56352, 'Audit ingestion message id is required.', 1;
 
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
     UPDATE [audit].[AuditIngestion]
     SET
         [Status] = 'Ignored',
-        [ProcessedAtUtc] = SYSUTCDATETIME(),
-        [UpdatedAtUtc] = SYSUTCDATETIME(),
+        [LastAttemptAtUtc] = @NowUtc,
+        [ProcessedAtUtc] = @NowUtc,
+        [UpdatedAtUtc] = @NowUtc,
+        [DeadLetteredAtUtc] = NULL,
         [LastErrorCode] = NULL,
         [LastErrorMessage] = NULL,
         [LastErrorClass] = NULL
@@ -822,11 +1218,15 @@ BEGIN
        AND @LastErrorClass NOT IN ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
         THROW 56360, 'Audit ingestion error class is invalid.', 1;
 
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
     UPDATE [audit].[AuditIngestion]
     SET
         [Status] = 'Failed',
-        [LastAttemptAtUtc] = SYSUTCDATETIME(),
-        [UpdatedAtUtc] = SYSUTCDATETIME(),
+        [LastAttemptAtUtc] = @NowUtc,
+        [ProcessedAtUtc] = NULL,
+        [UpdatedAtUtc] = @NowUtc,
+        [DeadLetteredAtUtc] = NULL,
         [LastErrorCode] = @LastErrorCode,
         [LastErrorMessage] = @LastErrorMessage,
         [LastErrorClass] = ISNULL(@LastErrorClass, 'Unknown')
@@ -853,11 +1253,15 @@ BEGIN
        AND @LastErrorClass NOT IN ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
         THROW 56360, 'Audit ingestion error class is invalid.', 1;
 
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
     UPDATE [audit].[AuditIngestion]
     SET
         [Status] = 'DeadLettered',
-        [ProcessedAtUtc] = SYSUTCDATETIME(),
-        [UpdatedAtUtc] = SYSUTCDATETIME(),
+        [LastAttemptAtUtc] = @NowUtc,
+        [ProcessedAtUtc] = @NowUtc,
+        [DeadLetteredAtUtc] = @NowUtc,
+        [UpdatedAtUtc] = @NowUtc,
         [LastErrorCode] = @LastErrorCode,
         [LastErrorMessage] = @LastErrorMessage,
         [LastErrorClass] = ISNULL(@LastErrorClass, 'Unknown')
@@ -875,7 +1279,31 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    SELECT *
+    SELECT
+        [AuditIngestionId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [CorrelationId],
+        [SourcePriority],
+        [SourceOccurredAtUtc],
+        [SourcePublishedAtUtc],
+        [ConsumerName],
+        [Status],
+        [AttemptCount],
+        [FirstReceivedAtUtc],
+        [LastAttemptAtUtc],
+        [ProcessedAtUtc],
+        [DeadLetteredAtUtc],
+        [LastErrorCode],
+        [LastErrorMessage],
+        [LastErrorClass],
+        [CreatedAtUtc],
+        [UpdatedAtUtc]
     FROM [audit].[AuditIngestion]
     WHERE [AuditIngestionId] = @AuditIngestionId;
 END;
@@ -892,7 +1320,31 @@ BEGIN
     IF NULLIF(@PublicId, '') IS NULL
         THROW 56350, 'Audit ingestion public id is required.', 1;
 
-    SELECT *
+    SELECT
+        [AuditIngestionId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [CorrelationId],
+        [SourcePriority],
+        [SourceOccurredAtUtc],
+        [SourcePublishedAtUtc],
+        [ConsumerName],
+        [Status],
+        [AttemptCount],
+        [FirstReceivedAtUtc],
+        [LastAttemptAtUtc],
+        [ProcessedAtUtc],
+        [DeadLetteredAtUtc],
+        [LastErrorCode],
+        [LastErrorMessage],
+        [LastErrorClass],
+        [CreatedAtUtc],
+        [UpdatedAtUtc]
     FROM [audit].[AuditIngestion]
     WHERE [PublicId] = @PublicId;
 END;
@@ -909,7 +1361,31 @@ BEGIN
     IF NULLIF(@MessageId, '') IS NULL
         THROW 56352, 'Audit ingestion message id is required.', 1;
 
-    SELECT *
+    SELECT
+        [AuditIngestionId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [CorrelationId],
+        [SourcePriority],
+        [SourceOccurredAtUtc],
+        [SourcePublishedAtUtc],
+        [ConsumerName],
+        [Status],
+        [AttemptCount],
+        [FirstReceivedAtUtc],
+        [LastAttemptAtUtc],
+        [ProcessedAtUtc],
+        [DeadLetteredAtUtc],
+        [LastErrorCode],
+        [LastErrorMessage],
+        [LastErrorClass],
+        [CreatedAtUtc],
+        [UpdatedAtUtc]
     FROM [audit].[AuditIngestion]
     WHERE [MessageId] = @MessageId;
 END;
@@ -926,7 +1402,31 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    SELECT *
+    SELECT
+        [AuditIngestionId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [CorrelationId],
+        [SourcePriority],
+        [SourceOccurredAtUtc],
+        [SourcePublishedAtUtc],
+        [ConsumerName],
+        [Status],
+        [AttemptCount],
+        [FirstReceivedAtUtc],
+        [LastAttemptAtUtc],
+        [ProcessedAtUtc],
+        [DeadLetteredAtUtc],
+        [LastErrorCode],
+        [LastErrorMessage],
+        [LastErrorClass],
+        [CreatedAtUtc],
+        [UpdatedAtUtc]
     FROM [audit].[AuditIngestion]
     WHERE [Status] IN ('Failed', 'DeadLettered')
     ORDER BY [LastAttemptAtUtc] DESC, [AuditIngestionId] DESC
@@ -967,7 +1467,31 @@ BEGIN
        AND NULLIF(LTRIM(RTRIM(@MessageId)), '') IS NULL
         SET @MessageId = NULL;
 
-    SELECT *
+    SELECT
+        [AuditIngestionId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [CorrelationId],
+        [SourcePriority],
+        [SourceOccurredAtUtc],
+        [SourcePublishedAtUtc],
+        [ConsumerName],
+        [Status],
+        [AttemptCount],
+        [FirstReceivedAtUtc],
+        [LastAttemptAtUtc],
+        [ProcessedAtUtc],
+        [DeadLetteredAtUtc],
+        [LastErrorCode],
+        [LastErrorMessage],
+        [LastErrorClass],
+        [CreatedAtUtc],
+        [UpdatedAtUtc]
     FROM [audit].[AuditIngestion]
     WHERE
         (@FromFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] >= @FromFirstReceivedAtUtc)
