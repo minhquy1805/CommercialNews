@@ -3,70 +3,210 @@
 // File: explanation/architecture/arc42/diagrams/erd/audit-v1.dbml
 //
 // Purpose
-// - Append-only logging for sensitive actions across modules.
+// - SQL-backed append-only audit evidence for important actions across modules.
 // - Investigation-ready and governance-friendly.
+// - Tracks consumer-side ingestion state separately from producer-side Outbox state.
 //
 // Design
-// - ResourceType/ResourceId stored as strings (no hard FK).
-// - Idempotency via unique AuditEventId.
-// - ActorUserId is nullable for system actions.
-// - Summary is a short, safe, investigation-friendly text.
-// - Outcome is optional and reflects business evidence outcome,
-//   not ingestion pipeline outcome.
+// - AuditLog is canonical append-only evidence truth for Audit.
+// - AuditIngestion is consumer-side processing state.
+// - MessageId is copied from outbox.OutboxMessage.MessageId and is the canonical dedupe key.
+// - PublicId is the API-facing Audit-owned identifier.
+// - Resource references are stored as stable strings; no hard FK to source modules.
+// - ActorInternalId may store producer-side InitiatorUserId, but Audit does not own Identity truth.
+// - Dashboard summaries, alerts, digests, reports, caches, and archive outputs are derived.
+// - V1 does not physically partition Audit tables by default.
 //
 // Notes
 // - dbdiagram cannot enforce triggers/permissions.
-// - Enforce append-only in SQL Server via deny UPDATE/DELETE or trigger.
+// - Enforce append-only behavior in SQL Server via repository policy, DB permissions, or trigger.
+// - Never store secrets, raw tokens, password hashes, session cookies, or unsafe PII.
 // =====================================================
 
 Table audit.AuditLog {
-  AuditId bigint [pk, increment]
-  AuditEventId uniqueidentifier [not null, default: `NEWID()`] // canonical idempotency key
+AuditLogId bigint [pk, increment]
+PublicId char(26) [not null]              // Audit-owned API identifier, ULID
+MessageId char(26) [not null]             // Outbox MessageId, canonical dedupe key
 
-  ActorUserId bigint [null] // identity.UserAccount (nullable for system actions)
+EventType nvarchar(200) [not null]        // original integration event type
+EventVersion int [null]                   // source event contract version if available
+SourceModule nvarchar(100) [not null]     // derived from EventType / Headers / normalizer
 
-  Action nvarchar(120) [not null]        // e.g. Content.Publish, Auth.RoleGrant
-  ResourceType nvarchar(60) [not null]   // Article/User/Comment/...
-  ResourceId nvarchar(100) [not null]    // string for cross-module ids
+Action nvarchar(120) [not null]           // normalized action, e.g. RolePermissionGranted
+ActionCategory nvarchar(100) [null]       // Authorization / IdentitySecurity / ContentLifecycle / Moderation / ...
 
-  Outcome nvarchar(30) [null]            // optional: Success / Failure
-  Summary nvarchar(300) [not null]       // short, safe text for list/investigation views
-  Reason nvarchar(500) [null]            // required by policy for some actions
+AggregateType nvarchar(100) [null]        // copied from Outbox
+AggregateId nvarchar(100) [null]          // copied from Outbox
+AggregatePublicId char(26) [null]         // copied from Outbox when available
+AggregateVersion int [null]               // copied from Outbox when available
 
-  OccurredAt datetime2(3) [not null, default: `SYSUTCDATETIME()`]
-  CorrelationId nvarchar(100) [null]
+ResourceType nvarchar(100) [not null]     // normalized resource type
+ResourceId nvarchar(100) [not null]       // prefer AggregatePublicId if available, otherwise AggregateId/composite
+ResourceDisplayName nvarchar(300) [null]  // safe display text
 
-  IpAddress nvarchar(45) [null]
-  UserAgent nvarchar(300) [null]
+ActorInternalId bigint [null]             // from Outbox InitiatorUserId or payload; no hard FK
+ActorUserId char(26) [null]               // public/opaque actor id when available
+ActorEmail nvarchar(320) [null]           // optional, use cautiously
+ActorDisplayName nvarchar(200) [null]     // optional
+ActorType varchar(30) [not null]          // User/Admin/Moderator/System/Worker/Anonymous/External
 
-  OldValuesJson nvarchar(max) [null]     // redacted/minimized
-  NewValuesJson nvarchar(max) [null]     // redacted/minimized
-  MetadataJson nvarchar(max) [null]      // module info, policy version, safe extras
+Outcome varchar(30) [not null]            // Success/Failure/Denied/Ignored
+Severity varchar(30) [not null]           // Info/Warning/Error/Critical
+RiskLevel varchar(30) [not null]          // Low/Medium/High/Critical
 
-  Indexes {
-    (AuditEventId) [unique, name: "UQ_AuditLog_AuditEventId"]
+Summary nvarchar(500) [not null]          // short, safe investigation text
 
-    (OccurredAt) [name: "IX_AuditLog_OccurredAt"]
-    (ActorUserId, OccurredAt) [name: "IX_AuditLog_ActorUserId_OccurredAt"]
-    (ResourceType, ResourceId, OccurredAt) [name: "IX_AuditLog_Resource_OccurredAt"]
-    (Action, OccurredAt) [name: "IX_AuditLog_Action_OccurredAt"]
-    (CorrelationId) [name: "IX_AuditLog_CorrelationId"]
-  }
+CorrelationId nvarchar(100) [null]        // request/workflow correlation id
+CausationId nvarchar(100) [null]          // optional causation id
+TraceId nvarchar(100) [null]              // optional distributed trace id
 
-  Note: "Append-only canonical audit evidence. Never store secrets, raw tokens, password hashes, or unsafe PII."
+IpAddress nvarchar(45) [null]             // optional PII, policy-controlled
+UserAgent nvarchar(500) [null]            // optional PII, policy-controlled
+
+SourcePriority tinyint [null]             // copied from Outbox Priority when useful
+
+OccurredAtUtc datetime2(3) [not null]     // source event occurrence time
+IngestedAtUtc datetime2(3) [not null]     // time Audit persisted evidence
+CreatedAtUtc datetime2(3) [not null]      // row creation time
+
+MetadataJson nvarchar(max) [null]         // sanitized safe metadata
+HeadersJson nvarchar(max) [null]          // sanitized safe headers
+RawPayloadJson nvarchar(max) [null]       // sanitized payload subset, not unsafe raw dump
+BeforeJson nvarchar(max) [null]           // sanitized previous state snapshot
+AfterJson nvarchar(max) [null]            // sanitized new state snapshot
+ChangesJson nvarchar(max) [null]          // sanitized field-level changes
+
+Hash char(64) [null]                      // future tamper-evident hook
+PrevHash char(64) [null]                  // future tamper-evident hook
+
+Indexes {
+(PublicId) [unique, name: "UQ_AuditLog_PublicId"]
+(MessageId) [unique, name: "UQ_AuditLog_MessageId"]
+
+```
+(OccurredAtUtc) [name: "IX_AuditLog_OccurredAtUtc"]
+(IngestedAtUtc) [name: "IX_AuditLog_IngestedAtUtc"]
+
+(SourceModule, OccurredAtUtc) [name: "IX_AuditLog_SourceModule_OccurredAtUtc"]
+(EventType, OccurredAtUtc) [name: "IX_AuditLog_EventType_OccurredAtUtc"]
+(Action, OccurredAtUtc) [name: "IX_AuditLog_Action_OccurredAtUtc"]
+(ActionCategory, OccurredAtUtc) [name: "IX_AuditLog_ActionCategory_OccurredAtUtc"]
+
+(ActorUserId, OccurredAtUtc) [name: "IX_AuditLog_ActorUserId_OccurredAtUtc"]
+(ActorInternalId, OccurredAtUtc) [name: "IX_AuditLog_ActorInternalId_OccurredAtUtc"]
+
+(ResourceType, ResourceId, OccurredAtUtc) [name: "IX_AuditLog_Resource_OccurredAtUtc"]
+(CorrelationId, OccurredAtUtc) [name: "IX_AuditLog_CorrelationId_OccurredAtUtc"]
+
+(RiskLevel, OccurredAtUtc) [name: "IX_AuditLog_RiskLevel_OccurredAtUtc"]
+(Severity, OccurredAtUtc) [name: "IX_AuditLog_Severity_OccurredAtUtc"]
+(Outcome, OccurredAtUtc) [name: "IX_AuditLog_Outcome_OccurredAtUtc"]
+
+(AggregateType, AggregateId, AggregateVersion) [name: "IX_AuditLog_Aggregate_Version"]
+```
+
 }
 
-// ---------- External stub (optional, for ERD readability only) ----------
+Note: "Append-only canonical audit evidence. MessageId is copied from Outbox and must be unique. No hard FK to source modules. Redact before persistence."
+}
+
+Table audit.AuditIngestion {
+AuditIngestionId bigint [pk, increment]
+PublicId char(26) [not null]              // Audit-owned API identifier, ULID
+MessageId char(26) [not null]             // Outbox MessageId, consumer-side dedupe key
+
+EventType nvarchar(200) [not null]        // original integration event type
+AggregateType nvarchar(100) [null]        // copied from Outbox
+AggregateId nvarchar(100) [null]          // copied from Outbox
+AggregatePublicId char(26) [null]         // copied from Outbox when available
+AggregateVersion int [null]               // copied from Outbox when available
+
+CorrelationId nvarchar(100) [null]        // request/workflow correlation id
+SourcePriority tinyint [null]             // copied from Outbox Priority
+
+SourceOccurredAtUtc datetime2(3) [not null]   // Outbox OccurredAt
+SourcePublishedAtUtc datetime2(3) [null]      // Outbox PublishedAt when available
+
+ConsumerName nvarchar(150) [not null]     // audit consumer/handler name
+Status varchar(30) [not null]             // Processing/Succeeded/Duplicate/Ignored/Failed/DeadLettered
+AttemptCount int [not null]               // consumer-side attempt count
+
+FirstReceivedAtUtc datetime2(3) [not null]
+LastAttemptAtUtc datetime2(3) [null]
+ProcessedAtUtc datetime2(3) [null]
+
+LastErrorCode nvarchar(100) [null]        // sanitized
+LastErrorMessage nvarchar(2000) [null]    // sanitized
+LastErrorClass varchar(30) [null]         // Transient/Permanent/Ambiguous/Validation/Policy/Redaction/Unknown
+
+CreatedAtUtc datetime2(3) [not null]
+UpdatedAtUtc datetime2(3) [not null]
+
+Indexes {
+(PublicId) [unique, name: "UQ_AuditIngestion_PublicId"]
+(MessageId) [unique, name: "UQ_AuditIngestion_MessageId"]
+
+```
+(Status, FirstReceivedAtUtc) [name: "IX_AuditIngestion_Status_FirstReceivedAtUtc"]
+(Status, LastAttemptAtUtc) [name: "IX_AuditIngestion_Status_LastAttemptAtUtc"]
+
+(EventType, FirstReceivedAtUtc) [name: "IX_AuditIngestion_EventType_FirstReceivedAtUtc"]
+(CorrelationId, FirstReceivedAtUtc) [name: "IX_AuditIngestion_CorrelationId_FirstReceivedAtUtc"]
+
+(ConsumerName, Status) [name: "IX_AuditIngestion_ConsumerName_Status"]
+
+(SourceOccurredAtUtc) [name: "IX_AuditIngestion_SourceOccurredAtUtc"]
+(SourcePublishedAtUtc) [name: "IX_AuditIngestion_SourcePublishedAtUtc"]
+(ProcessedAtUtc) [name: "IX_AuditIngestion_ProcessedAtUtc"]
+```
+
+}
+
+Note: "Consumer-side processing state. Do not confuse with producer-side Outbox status. Published is not an AuditIngestion status."
+}
+
+// ---------- External stubs for ERD readability only ----------
+// These tables are shown only to explain conceptual relationships.
+// Audit does not own their truth and should not use hard FK constraints to source modules.
+
+Table outbox.OutboxMessage {
+OutboxMessageId bigint [pk]
+MessageId char(26) [unique, not null]
+EventType nvarchar(200) [not null]
+AggregateType nvarchar(100) [not null]
+AggregateId nvarchar(100) [not null]
+AggregatePublicId char(26) [null]
+AggregateVersion int [null]
+CorrelationId nvarchar(100) [null]
+InitiatorUserId bigint [null]
+Priority tinyint [not null]
+Status varchar(20) [not null]
+OccurredAt datetime2(3) [not null]
+PublishedAt datetime2(3) [null]
+
+Note: "EXTERNAL STUB (Outbox). Producer-side publication artifact. Outbox Published means broker handoff, not Audit processing."
+}
+
 Table identity.UserAccount {
-  UserId bigint [pk]
-  Note: "EXTERNAL STUB (Identity module). Readability only; Audit does not own Identity truth."
+UserId bigint [pk]
+PublicId char(26) [unique]
+Email nvarchar(320)
+
+Note: "EXTERNAL STUB (Identity). Readability only. Audit stores ActorInternalId/ActorUserId without owning Identity truth."
 }
 
-Ref: audit.AuditLog.ActorUserId > identity.UserAccount.UserId
+// Conceptual references for readability only.
+// In the actual Audit schema, prefer no hard FK from AuditLog/AuditIngestion to source module truth.
+Ref: audit.AuditLog.MessageId > outbox.OutboxMessage.MessageId
+Ref: audit.AuditIngestion.MessageId > outbox.OutboxMessage.MessageId
+Ref: audit.AuditLog.ActorInternalId > identity.UserAccount.UserId
 
 // ---------- Notes for SQL Server enforcement ----------
-// 1) Append-only enforcement via DB permissions (deny UPDATE/DELETE) or trigger.
-// 2) Optional CHECK: Action/ResourceType/ResourceId/Summary not empty.
-// 3) Idempotent ingestion: unique AuditEventId prevents duplicates under retries/replay.
-// 4) Outcome is business evidence outcome, not consumer processing outcome.
-// 5) Derived summaries/reports are NOT canonical evidence truth.
+// 1) AuditLog append-only enforcement via repository policy, DB permissions, or trigger.
+// 2) Unique MessageId on AuditLog prevents duplicate canonical evidence under retry/replay.
+// 3) Unique MessageId on AuditIngestion supports consumer-side processing visibility.
+// 4) AuditIngestion.Status is consumer-side state; OutboxMessage.Status is producer-side state.
+// 5) Outcome is source business outcome, not consumer processing status.
+// 6) Dashboard summaries/reports/alerts/digests/caches are derived, not canonical evidence truth.
+// 7) Do not store secrets, raw tokens, password hashes, refresh tokens, verification tokens, reset tokens, session cookies, or unsafe PII.
+// 8) Future partitioning may be time-range or worker-lane based, but V1 is not physically partitioned by default.
