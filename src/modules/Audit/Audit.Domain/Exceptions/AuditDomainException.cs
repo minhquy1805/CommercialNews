@@ -1,12 +1,31 @@
+using CommercialNews.BuildingBlocks.Domain.Exceptions;
+
 namespace Audit.Domain.Exceptions;
 
-public sealed class AuditDomainException : Exception
+public sealed class AuditDomainException : DomainException
 {
-    public string Code { get; }
-
-    public AuditDomainException(string code, string message)
-        : base(message)
+    private AuditDomainException(string code, string message)
+        : base(code, message)
     {
-        Code = code;
+    }
+
+    private AuditDomainException(string code, string message, Exception innerException)
+        : base(code, message, innerException)
+    {
+    }
+
+    public static AuditDomainException JsonPayloadInvalid(Exception innerException)
+    {
+        return new AuditDomainException(
+            AuditDomainErrorCodes.JsonPayloadInvalid,
+            "Audit json payload is invalid.",
+            innerException);
+    }
+
+    public static AuditDomainException MessageIdRequired()
+    {
+        return new AuditDomainException(
+            AuditDomainErrorCodes.MessageIdRequired,
+            "Audit message id is required.");
     }
 }
