@@ -7,11 +7,11 @@ namespace Audit.Domain.Policies.Evidence;
 public sealed record AuditActionClassificationResult
 {
     public string Action { get; }
-    public string ActionCategory { get; }
+    public string? ActionCategory { get; }
 
     private AuditActionClassificationResult(
         string action,
-        string actionCategory)
+        string? actionCategory)
     {
         Action = action;
         ActionCategory = actionCategory;
@@ -32,18 +32,16 @@ public sealed record AuditActionClassificationResult
             throw AuditDomainException.ActionTooLong();
         }
 
-        var normalizedActionCategory = actionCategory?.Trim();
-        if (string.IsNullOrWhiteSpace(normalizedActionCategory))
-        {
-            throw AuditDomainException.ActionCategoryInvalid("Empty");
-        }
+        var normalizedActionCategory = NormalizeOptional(actionCategory);
 
-        if (normalizedActionCategory.Length > AuditConstants.MaxActionCategoryLength)
+        if (normalizedActionCategory is not null &&
+            normalizedActionCategory.Length > AuditConstants.MaxActionCategoryLength)
         {
             throw AuditDomainException.ActionCategoryTooLong();
         }
 
-        if (!AuditActionCategories.IsValid(normalizedActionCategory))
+        if (normalizedActionCategory is not null &&
+            !AuditActionCategories.IsValid(normalizedActionCategory))
         {
             throw AuditDomainException.ActionCategoryInvalid(normalizedActionCategory);
         }
@@ -51,5 +49,14 @@ public sealed record AuditActionClassificationResult
         return new AuditActionClassificationResult(
             normalizedAction,
             normalizedActionCategory);
+    }
+
+    private static string? NormalizeOptional(string? value)
+    {
+        var normalized = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized;
     }
 }

@@ -6,5 +6,5 @@ public interface IAuditRiskClassificationPolicy
         string sourceModule,
         string eventType,
         string action,
-        string actionCategory);
+        string? actionCategory);
 }

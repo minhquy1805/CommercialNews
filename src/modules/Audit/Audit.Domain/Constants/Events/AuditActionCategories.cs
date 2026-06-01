@@ -4,45 +4,48 @@ namespace Audit.Domain.Constants.Events;
 
 public static class AuditActionCategories
 {
-    public const string AuthorizationGovernance = "AuthorizationGovernance";
+    public const string Authentication = "Authentication";
+    public const string Authorization = "Authorization";
     public const string IdentitySecurity = "IdentitySecurity";
     public const string ContentLifecycle = "ContentLifecycle";
+    public const string Moderation = "Moderation";
     public const string MediaGovernance = "MediaGovernance";
-    public const string InteractionModeration = "InteractionModeration";
 
     // Future extension.
     public const string SeoGovernance = "SeoGovernance";
-    public const string NotificationGovernance = "NotificationGovernance";
-    public const string AuditGovernance = "AuditGovernance";
+    public const string NotificationDelivery = "NotificationDelivery";
+    public const string AuditIngestion = "AuditIngestion";
     public const string System = "System";
 
     public static readonly FrozenSet<string> All = new[]
     {
-        AuthorizationGovernance,
+        Authentication,
+        Authorization,
         IdentitySecurity,
         ContentLifecycle,
+        Moderation,
         MediaGovernance,
-        InteractionModeration,
         SeoGovernance,
-        NotificationGovernance,
-        AuditGovernance,
+        NotificationDelivery,
+        AuditIngestion,
         System
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     public static readonly FrozenSet<string> CurrentV1Baseline = new[]
     {
-        AuthorizationGovernance,
+        Authentication,
+        Authorization,
         IdentitySecurity,
         ContentLifecycle,
         MediaGovernance,
-        InteractionModeration
+        Moderation
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     public static readonly FrozenSet<string> FutureExtensionCategories = new[]
     {
         SeoGovernance,
-        NotificationGovernance,
-        AuditGovernance,
+        NotificationDelivery,
+        AuditIngestion,
         System
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 

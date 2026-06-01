@@ -542,6 +542,7 @@ The following should be physical columns rather than JSON-only because they supp
 | `FirstReceivedAtUtc`   |    `DATETIME2(3)` |   NO | First time Audit saw the message                                  |
 | `LastAttemptAtUtc`     |    `DATETIME2(3)` |  YES | Last processing attempt                                           |
 | `ProcessedAtUtc`       |    `DATETIME2(3)` |  YES | Completion time                                                   |
+| `DeadLetteredAtUtc`    |    `DATETIME2(3)` |  YES | Terminal dead-letter handling time                                |
 | `LastErrorCode`        |   `NVARCHAR(100)` |  YES | Sanitized consumer-side error code                                |
 | `LastErrorMessage`     |  `NVARCHAR(2000)` |  YES | Sanitized consumer-side error message                             |
 | `LastErrorClass`       |     `VARCHAR(30)` |  YES | Transient/Permanent/Ambiguous/Validation/Policy/Redaction/Unknown |
@@ -639,6 +640,9 @@ CK_AuditIngestion_AttemptCount
 CK_AuditIngestion_LastErrorClass
   LastErrorClass IS NULL OR LastErrorClass IN
   ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
+
+CK_AuditIngestion_DeadLetteredAtUtc
+  DeadLetteredAtUtc IS NULL OR DeadLetteredAtUtc >= FirstReceivedAtUtc
 ```
 
 ---

@@ -134,6 +134,7 @@ AttemptCount int [not null]               // consumer-side attempt count
 FirstReceivedAtUtc datetime2(3) [not null]
 LastAttemptAtUtc datetime2(3) [null]
 ProcessedAtUtc datetime2(3) [null]
+DeadLetteredAtUtc datetime2(3) [null]
 
 LastErrorCode nvarchar(100) [null]        // sanitized
 LastErrorMessage nvarchar(2000) [null]    // sanitized

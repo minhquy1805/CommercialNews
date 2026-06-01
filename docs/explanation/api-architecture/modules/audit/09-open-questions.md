@@ -177,6 +177,7 @@ Which consumer-side processing fields are required in V1?
 * `FirstReceivedAtUtc`
 * `LastAttemptAtUtc`
 * `ProcessedAtUtc`
+* `DeadLetteredAtUtc`
 * `LastErrorCode`
 * `LastErrorMessage`
 * `LastErrorClass`

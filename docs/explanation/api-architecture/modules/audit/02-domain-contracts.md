@@ -330,6 +330,7 @@ It is SQL-backed and append-only by default.
 | `SourcePriority`      | Optional source priority copied from Outbox                     |
 | `OccurredAtUtc`       | Time the producer says the event occurred                       |
 | `IngestedAtUtc`       | Time Audit persisted the record                                 |
+| `CreatedAtUtc`        | Row creation time                                               |
 | `Hash`                | Future tamper-evident hook                                      |
 | `PrevHash`            | Future tamper-evident hook                                      |
 
@@ -350,6 +351,7 @@ V1 requires:
 * `Summary`
 * `OccurredAtUtc`
 * `IngestedAtUtc`
+* `CreatedAtUtc`
 
 V1 should also preserve when available:
 
@@ -540,6 +542,7 @@ It exists to separate downstream Audit processing from producer-side Outbox publ
 | `FirstReceivedAtUtc`   | First time Audit saw the message                    |
 | `LastAttemptAtUtc`     | Last Audit processing attempt                       |
 | `ProcessedAtUtc`       | Time Audit completed processing, if completed       |
+| `DeadLetteredAtUtc`    | Time Audit moved the message to terminal failure handling |
 | `LastErrorCode`        | Sanitized last consumer-side error code             |
 | `LastErrorMessage`     | Sanitized last consumer-side error message          |
 | `LastErrorClass`       | Consumer-side error class                           |
