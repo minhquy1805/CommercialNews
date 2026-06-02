@@ -1000,7 +1000,8 @@ CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_UpsertProcessing]
     @ConsumerName          NVARCHAR(150),
 
     @AuditIngestionId      BIGINT OUTPUT,
-    @WasInserted           BIT OUTPUT
+    @WasInserted           BIT OUTPUT,
+    @CurrentStatus         VARCHAR(30) = NULL OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1063,7 +1064,9 @@ BEGIN
         WHERE [MessageId] = @MessageId
           AND [Status] IN ('Processing', 'Failed');
 
-        SELECT @AuditIngestionId = [AuditIngestionId]
+        SELECT
+            @AuditIngestionId = [AuditIngestionId],
+            @CurrentStatus = [Status]
         FROM [audit].[AuditIngestion]
         WHERE [MessageId] = @MessageId;
 
@@ -1112,6 +1115,7 @@ BEGIN
 
     SET @AuditIngestionId = CONVERT(BIGINT, SCOPE_IDENTITY());
     SET @WasInserted = 1;
+    SET @CurrentStatus = 'Processing';
 END;
 GO
 
