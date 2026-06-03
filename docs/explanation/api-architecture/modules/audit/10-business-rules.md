@@ -62,8 +62,9 @@ Audit records are created through the approved asynchronous pipeline:
 Source module truth change
     → Outbox message committed
     → Worker publishes to broker
-    → Audit consumer receives message
-    → Audit normalizes and stores AuditLog
+    → CommercialNews.Worker audit consumer receives message
+    → Worker sends IngestAuditEventCommand through MediatR
+    → Audit.Application normalizes and stores AuditLog
 ```
 
 A source module command succeeds when its own truth transaction and outbox intent commit. It does not wait for audit ingestion.
@@ -141,9 +142,10 @@ Audit records should preserve enough metadata to support investigation:
 * `Outcome`
 * `Severity`
 * `RiskLevel`
-* `RawPayloadJson`
+* `SanitizedPayloadJson`
 
-Raw payloads must be sanitized before storage.
+Raw input payloads from Outbox must be sanitized before storage. Stored or
+returned Audit payloads should use `SanitizedPayloadJson` naming.
 
 ### BR-AUD-009 — Slug is metadata, not identity
 

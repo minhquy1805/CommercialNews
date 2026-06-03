@@ -308,15 +308,23 @@ Persist durable audit evidence from an already-committed and broker-published pr
 ```text
 RabbitMQ delivers message
     ↓
-AuditRabbitMqConsumerService receives message
+CommercialNews.Worker audit consumer receives message
     ↓
-Message is deserialized into the Outbox integration envelope
+Worker deserializes message into the Outbox integration envelope
     ↓
-AuditEventNormalizerDispatcher selects normalizer by EventType
+Worker builds IngestAuditEventCommand
     ↓
-Concrete IAuditEventNormalizer maps envelope + payload to audit command
+Worker sends command through MediatR
     ↓
-AuditIngestionService starts consumer-side processing
+AuditValidationBehavior validates the command
+    ↓
+AuditTransactionBehavior opens a local transaction for transactional commands
+    ↓
+AuditIngestionApplicationService starts consumer-side processing
+    ↓
+IAuditEventNormalizerRegistry selects a normalizer by EventType
+    ↓
+Infrastructure normalizer maps the event schema into AuditNormalizedEvent
     ↓
 Audit checks MessageId dedupe
     ↓
@@ -331,12 +339,26 @@ Consumer ACKs after success or duplicate-safe processing
 
 Recommended V1 components:
 
-* `AuditRabbitMqConsumerService`
-* `AuditEventNormalizerDispatcher`
+* `CommercialNews.Worker` audit consumer
+* `IngestAuditEventCommand`
+* MediatR command handler and pipeline behaviors
+* `AuditIngestionApplicationService`
+* `IAuditEventNormalizerRegistry`
 * `IAuditEventNormalizer`
-* `AuditIngestionService`
 * `IAuditLogRepository`
 * `IAuditIngestionRepository`
+
+Concrete normalizers live in Audit.Infrastructure and are registered by
+Infrastructure DI:
+
+* `AuthorizationAuditEventNormalizer`
+* `IdentityAuditEventNormalizer`
+* `ContentAuditEventNormalizer`
+* `MediaAuditEventNormalizer`
+* `InteractionAuditEventNormalizer`
+
+If no concrete normalizer is registered for an `EventType`, the Application
+service treats the event as unsupported and records an ignored ingestion outcome.
 
 ### Mapping rules
 
@@ -359,7 +381,8 @@ Audit maps Outbox fields into Audit domain fields.
 
 ### Normalizer-derived fields
 
-The selected normalizer derives:
+`SourceModule` should be understood as event/normalizer metadata, not as a value
+that Application must always hard-code. The selected normalizer derives:
 
 * `SourceModule`
 * `Action`
@@ -379,6 +402,7 @@ The selected normalizer derives:
 * `BeforeJson`
 * `AfterJson`
 * `ChangesJson`
+* `SanitizedPayloadJson`
 
 ### ACK/NACK rules
 
@@ -549,11 +573,15 @@ Authorization writes OutboxMessage in same local transaction
     ↓
 Outbox worker publishes message
     ↓
-Audit consumer receives message
+CommercialNews.Worker audit consumer receives message
     ↓
-Authorization audit normalizer maps payload into AuditLog fields
+Worker builds IngestAuditEventCommand and sends it through MediatR
     ↓
-AuditIngestionService applies dedupe + redaction
+AuditIngestionApplicationService selects the Infrastructure normalizer
+    ↓
+Authorization audit normalizer maps payload into AuditNormalizedEvent
+    ↓
+Application applies dedupe + redaction
     ↓
 AuditLog is inserted
     ↓

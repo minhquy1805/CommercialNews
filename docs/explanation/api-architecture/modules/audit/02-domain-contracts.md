@@ -11,7 +11,7 @@ Audit V1 intentionally keeps the implementation scope simple:
 * `AuditLog`
 * `AuditIngestion`
 * `MessageId` deduplication
-* event normalizer strategies
+* event normalizer abstractions and registry
 * investigation query contracts
 * lightweight dashboard queries from `AuditLog`
 
@@ -321,7 +321,7 @@ It is SQL-backed and append-only by default.
 | `ChangesJson`         | Optional sanitized field-level changes                          |
 | `MetadataJson`        | Optional sanitized investigation metadata                       |
 | `HeadersJson`         | Optional sanitized Outbox headers                               |
-| `RawPayloadJson`      | Sanitized original payload or safe event subset                 |
+| `SanitizedPayloadJson` | Sanitized original payload or safe event subset                |
 | `CorrelationId`       | Cross-flow correlation identifier                               |
 | `CausationId`         | Optional causation identifier                                   |
 | `TraceId`             | Optional distributed trace identifier                           |
@@ -363,7 +363,7 @@ V1 should also preserve when available:
 * `ActorInternalId`
 * `ActorUserId`
 * `HeadersJson`
-* `RawPayloadJson`
+* `SanitizedPayloadJson`
 
 ### 5.3 MessageId uniqueness
 
@@ -381,12 +381,19 @@ UQ_AuditLog_MessageId
 
 The current Outbox table does not contain a dedicated `ProducerModule` column.
 
-Therefore, `SourceModule` is derived by the Audit normalizer from one or more of:
+Therefore, `SourceModule` is event/normalizer metadata. It may be derived from
+one or more of:
 
 * `EventType` prefix
 * `Headers`
 * payload convention
 * normalizer registration
+
+Audit.Application should not be described as the only place that hard-codes
+`SourceModule`. Worker builds `IngestAuditEventCommand`, then the Application use
+case resolves a normalizer through `IAuditEventNormalizerRegistry`; the selected
+normalizer understands the event schema and produces `AuditNormalizedEvent`,
+including `SourceModule`.
 
 Example:
 
@@ -492,11 +499,15 @@ Examples:
 * role permission granted for sensitive permission: `Critical`
 * refresh token reuse detected: `Critical`
 
-### 5.10 Raw payload and metadata
+### 5.10 Sanitized payload and metadata
 
-Audit may preserve the sanitized event payload for traceability.
+Audit may preserve a sanitized event payload for traceability.
 
-However, `RawPayloadJson`, `MetadataJson`, `HeadersJson`, `Summary`, `BeforeJson`, `AfterJson`, and `ChangesJson` must be sanitized and redacted.
+However, `SanitizedPayloadJson`, `MetadataJson`, `HeadersJson`, `Summary`,
+`BeforeJson`, `AfterJson`, and `ChangesJson` must be sanitized and redacted.
+
+The raw input payload from Outbox is an ingestion input. It must not be confused
+with the payload stored or returned from AuditLog detail after redaction.
 
 Audit must not store unrestricted domain data.
 
@@ -601,7 +612,7 @@ Audit consumes the shared Outbox integration envelope.
 | `AggregateId`       | `AggregateId`                                   |
 | `AggregatePublicId` | `AggregatePublicId`                             |
 | `AggregateVersion`  | `AggregateVersion`                              |
-| `Payload`           | `RawPayloadJson` and/or normalized audit fields |
+| `Payload`           | `SanitizedPayloadJson` and/or normalized audit fields |
 | `Headers`           | `HeadersJson` and/or metadata                   |
 | `CorrelationId`     | `CorrelationId`                                 |
 | `InitiatorUserId`   | `ActorInternalId`                               |
@@ -625,7 +636,24 @@ Audit consumes the shared Outbox integration envelope.
 
 ### 7.3 Normalizer-derived fields
 
-The Audit normalizer derives:
+Audit.Application keeps the abstraction `IAuditEventNormalizer` and the
+`IAuditEventNormalizerRegistry`. Concrete normalizers are Infrastructure
+components registered by Audit.Infrastructure, for example:
+
+* `AuthorizationAuditEventNormalizer`
+* `IdentityAuditEventNormalizer`
+* `ContentAuditEventNormalizer`
+* `MediaAuditEventNormalizer`
+* `InteractionAuditEventNormalizer`
+
+Worker reads the broker/Outbox message, builds `IngestAuditEventCommand`, and
+invokes the Application use case through MediatR. The Application service uses
+the registry to select a normalizer by `EventType`.
+
+If no normalizer is registered for the `EventType`, the event is treated as
+unsupported and is ignored through `AuditIngestion`.
+
+The selected normalizer derives:
 
 * `SourceModule`
 * `Action`
@@ -649,7 +677,7 @@ The Audit normalizer derives:
 The normalizer may use:
 
 * `EventType`
-* `Payload`
+* raw input payload from Outbox
 * `Headers`
 * `AggregateType`
 * `AggregateId`
@@ -711,7 +739,7 @@ Business-level duplicate detection may be added later for alerts, digests, repor
 
 Audit fields must not include secrets or unsafe sensitive data.
 
-The following must not be stored in `Summary`, `RawPayloadJson`, `HeadersJson`, `MetadataJson`, `BeforeJson`, `AfterJson`, or `ChangesJson`:
+The following must not be stored in `Summary`, `SanitizedPayloadJson`, `HeadersJson`, `MetadataJson`, `BeforeJson`, `AfterJson`, or `ChangesJson`:
 
 * passwords
 * password hashes
