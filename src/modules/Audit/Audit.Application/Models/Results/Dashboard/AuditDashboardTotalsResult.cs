@@ -4,5 +4,5 @@ public sealed record AuditDashboardTotalsResult(
     int AuditEvents,
     int HighRiskEvents,
     int CriticalEvents,
-    int FailedIngestions,
-    int DuplicateIngestions);
+    int FailedIngestion,
+    int DuplicateIngestion);

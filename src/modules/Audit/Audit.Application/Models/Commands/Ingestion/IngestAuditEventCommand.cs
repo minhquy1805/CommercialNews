@@ -1,3 +1,4 @@
+using Audit.Application.Behaviors;
 using Audit.Application.Models.Results.Ingestion;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using MediatR;
@@ -19,4 +20,5 @@ public sealed record IngestAuditEventCommand(
     DateTime OccurredAtUtc,
     DateTime? PublishedAtUtc,
     string ConsumerName)
-    : IRequest<Result<IngestAuditEventResult>>;
+    : IRequest<Result<IngestAuditEventResult>>,
+      IAuditTransactionalRequest;

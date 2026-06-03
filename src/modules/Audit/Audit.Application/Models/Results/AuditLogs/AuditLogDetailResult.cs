@@ -30,6 +30,4 @@ public sealed record AuditLogDetailResult(
     string? SanitizedPayloadJson,
     string? BeforeJson,
     string? AfterJson,
-    string? ChangesJson,
-    string? Hash,
-    string? PrevHash);
+    string? ChangesJson);
