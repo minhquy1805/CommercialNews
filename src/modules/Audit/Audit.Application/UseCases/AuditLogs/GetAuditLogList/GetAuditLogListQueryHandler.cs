@@ -33,6 +33,7 @@ public sealed class GetAuditLogListQueryHandler
         ArgumentNullException.ThrowIfNull(request);
 
         var searchQuery = new AuditLogSearchQuery(
+            MessageId: request.MessageId,
             SourceModule: request.SourceModule,
             EventType: request.EventType,
             Action: request.Action,

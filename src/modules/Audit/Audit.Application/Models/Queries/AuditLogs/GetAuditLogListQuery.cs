@@ -6,6 +6,7 @@ using MediatR;
 namespace Audit.Application.Models.Queries.AuditLogs;
 
 public sealed record GetAuditLogListQuery(
+    string? MessageId,
     string? SourceModule,
     string? EventType,
     string? Action,
