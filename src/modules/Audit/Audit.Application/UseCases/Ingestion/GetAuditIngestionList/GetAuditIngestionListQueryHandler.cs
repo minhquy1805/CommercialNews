@@ -34,6 +34,7 @@ public sealed class GetAuditIngestionListQueryHandler
 
         var searchQuery = new AuditIngestionSearchQuery(
             Status: request.Status,
+            MessageId: request.MessageId,
             EventType: request.EventType,
             AggregateType: request.AggregateType,
             AggregateId: request.AggregateId,

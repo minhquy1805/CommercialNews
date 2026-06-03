@@ -262,7 +262,7 @@ Recommended status:
 | `AUDIT.REDACTION_VIOLATION`       | Internal redaction policy violation detected              |
 | `AUDIT.RAW_PAYLOAD_ACCESS_DENIED` | Caller lacks permission to view sensitive payload details |
 | `AUDIT.SENSITIVE_FIELD_BLOCKED`   | Requested field is blocked by audit privacy policy        |
-| `AUDIT.PAYLOAD_NOT_AVAILABLE`     | Raw/sanitized payload is not available for this record    |
+| `AUDIT.PAYLOAD_NOT_AVAILABLE`     | Sanitized payload is not available for this record        |
 | `AUDIT.PAYLOAD_REDACTED`          | Payload exists but has been redacted by policy            |
 
 Rules:

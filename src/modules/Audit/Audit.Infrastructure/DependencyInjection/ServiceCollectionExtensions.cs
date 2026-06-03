@@ -1,7 +1,7 @@
-using Audit.Application.Ports.Persistence;
+using Audit.Application.Abstractions.Persistence;
+using Audit.Infrastructure.Persistence;
 using Audit.Infrastructure.Persistence.Exceptions;
 using Audit.Infrastructure.Persistence.Repositories;
-using Audit.Infrastructure.Persistence.Sql;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Audit.Infrastructure.DependencyInjection;
@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<AuditSqlExceptionTranslator>();
 
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+        services.AddScoped<IAuditIngestionRepository, AuditIngestionRepository>();
 
         return services;
     }

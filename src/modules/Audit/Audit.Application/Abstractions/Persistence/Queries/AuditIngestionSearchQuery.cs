@@ -2,6 +2,7 @@ namespace Audit.Application.Abstractions.Persistence.Queries;
 
 public sealed record AuditIngestionSearchQuery(
     string? Status,
+    string? MessageId,
     string? EventType,
     string? AggregateType,
     string? AggregateId,

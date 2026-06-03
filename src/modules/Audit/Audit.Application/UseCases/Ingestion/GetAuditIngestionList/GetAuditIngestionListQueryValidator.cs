@@ -22,7 +22,8 @@ public sealed class GetAuditIngestionListQueryValidator
             "AttemptCount",
             "Status",
             "EventType",
-            "ConsumerName"
+            "ConsumerName",
+            "LastErrorClass"
         };
 
     private static readonly HashSet<string> AllowedSortDirections =
@@ -37,6 +38,10 @@ public sealed class GetAuditIngestionListQueryValidator
         RuleFor(x => x.Status)
             .Must(value => value is null || AuditIngestionStatuses.IsValid(value))
             .WithMessage("Audit ingestion status is invalid.");
+
+        RuleFor(x => x.MessageId)
+            .Length(AuditConstants.MessageIdLength)
+            .When(x => !string.IsNullOrWhiteSpace(x.MessageId));
 
         RuleFor(x => x.EventType)
             .MaximumLength(AuditConstants.MaxEventTypeLength)

@@ -488,8 +488,12 @@ Search audit ingestion records with paging.
 | `status`        |       No | `Processing`, `Succeeded`, `Duplicate`, `Ignored`, `Failed`, `DeadLettered` |
 | `messageId`     |       No | Filter by message id                                                        |
 | `eventType`     |       No | Filter by event type                                                        |
+| `aggregateType` |       No | Filter by source aggregate type                                             |
+| `aggregateId`   |       No | Filter by source aggregate id                                               |
+| `aggregatePublicId` | No | Filter by source aggregate public id                                         |
 | `correlationId` |       No | Filter by correlation id                                                    |
 | `consumerName`  |       No | Filter by consumer name                                                     |
+| `lastErrorClass` |      No | Filter by last error class                                                  |
 | `sort`          |       No | Allowlisted sort                                                            |
 
 ### Response `200`
@@ -534,14 +538,20 @@ Return failed or dead-lettered ingestion records.
 
 ### Query parameters
 
-| Parameter  | Required | Description                               |
-| ---------- | -------: | ----------------------------------------- |
-| `page`     |       No | Page number                               |
-| `pageSize` |       No | Page size                                 |
-| `fromUtc`  |       No | Start time                                |
-| `toUtc`    |       No | End time                                  |
-| `status`   |       No | Defaults to failed/dead-lettered statuses |
-| `sort`     |       No | Allowlisted sort                          |
+| Parameter       | Required | Description                         |
+| --------------- | -------: | ----------------------------------- |
+| `page`          |       No | Page number                         |
+| `pageSize`      |       No | Page size                           |
+| `fromUtc`       |       No | First received start time           |
+| `toUtc`         |       No | First received end time             |
+| `eventType`     |       No | Filter by event type                |
+| `aggregateType` |       No | Filter by source aggregate type     |
+| `aggregateId`   |       No | Filter by source aggregate id       |
+| `aggregatePublicId` | No | Filter by source aggregate public id |
+| `correlationId` |       No | Filter by correlation id            |
+| `consumerName`  |       No | Filter by consumer name             |
+| `lastErrorClass` |      No | Filter by last error class          |
+| `sort`          |       No | Allowlisted sort                    |
 
 ### Response `200`
 
@@ -629,8 +639,8 @@ Return high-level audit dashboard summary.
     "auditEvents": 120,
     "highRiskEvents": 8,
     "criticalEvents": 2,
-    "failedIngestions": 1,
-    "duplicateIngestions": 4
+    "failedIngestion": 1,
+    "duplicateIngestion": 4
   },
   "byModule": [
     {
