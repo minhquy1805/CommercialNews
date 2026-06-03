@@ -50,6 +50,7 @@ public sealed class GetAuditDashboardSummaryQueryHandler
 
         var auditEvents = await _auditLogRepository.CountAsync(
             new AuditLogSearchQuery(
+                MessageId: null,
                 SourceModule: request.SourceModule,
                 EventType: null,
                 Action: null,

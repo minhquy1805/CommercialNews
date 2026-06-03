@@ -115,6 +115,10 @@ public sealed class GetAuditLogListQueryValidator
         RuleFor(x => x.SortDirection)
             .Must(value => value is null || AllowedSortDirections.Contains(value))
             .WithMessage("SortDirection must be either 'asc' or 'desc'.");
+
+        RuleFor(x => x.MessageId)
+            .Length(AuditConstants.MessageIdLength)
+            .When(x => !string.IsNullOrWhiteSpace(x.MessageId));
     }
 
     private static bool BeUtc(DateTime? value)
