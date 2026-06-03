@@ -1,52 +1,72 @@
+using Audit.Application.Abstractions.Normalization;
+using Audit.Application.Behaviors;
 using Audit.Application.Consumers.Authorization;
 using Audit.Application.Consumers.Content;
 using Audit.Application.Consumers.Identity;
 using Audit.Application.Consumers.Interaction;
 using Audit.Application.Consumers.Media;
-using Audit.Application.Services;
-using Audit.Application.UseCases.GetAuditLogByEventId;
-using Audit.Application.UseCases.GetAuditLogById;
-using Audit.Application.UseCases.GetAuditLogs;
-using Audit.Application.UseCases.GetAuditLogsByCorrelationId;
+using Audit.Application.Services.Evidence;
+using Audit.Application.Services.Ingestion;
+using Audit.Application.Services.Mapping;
+using Audit.Application.Services.Normalization;
+using Audit.Application.Services.Redaction;
+using FluentValidation;
+using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Audit.Application.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddAuditApplication(this IServiceCollection services)
+    public static IServiceCollection AddAuditApplication(
+        this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        // Query use cases
-        services.AddScoped<IGetAuditLogsUseCase, GetAuditLogsUseCase>();
-        services.AddScoped<IGetAuditLogByIdUseCase, GetAuditLogByIdUseCase>();
-        services.AddScoped<IGetAuditLogsByCorrelationIdUseCase, GetAuditLogsByCorrelationIdUseCase>();
-        services.AddScoped<IGetAuditLogByEventIdUseCase, GetAuditLogByEventIdUseCase>();
+        var assembly = typeof(ServiceCollectionExtensions).Assembly;
 
-        // Generic audit ingestion
-        services.AddScoped<IAuditIngestionService, AuditIngestionService>();
+        services.AddMediatR(configuration =>
+        {
+            configuration.RegisterServicesFromAssembly(assembly);
+        });
 
-        // Producer-specific audit ingestion mappers
+        services.AddValidatorsFromAssembly(
+            assembly,
+            includeInternalTypes: true);
+
+        services.AddTransient(
+            typeof(IPipelineBehavior<,>),
+            typeof(AuditValidationBehavior<,>));
+
+        services.AddTransient(
+            typeof(IPipelineBehavior<,>),
+            typeof(AuditTransactionBehavior<,>));
+
+        // Normalization
+        services.AddSingleton<
+            IAuditEventNormalizerRegistry,
+            AuditEventNormalizerRegistry>();
+
+        // Services
         services.AddScoped<
-            IAuthorizationAuditEventIngestionService,
-            AuthorizationAuditEventIngestionService>();
+            IAuditRedactionService,
+            AuditRedactionService>();
 
         services.AddScoped<
-            IIdentityAuditEventIngestionService,
-            IdentityAuditEventIngestionService>();
+            IAuditEvidenceBuilder,
+            AuditEvidenceBuilder>();
 
         services.AddScoped<
-            IContentAuditEventIngestionService,
-            ContentAuditEventIngestionService>();
+            IAuditIngestionApplicationService,
+            AuditIngestionApplicationService>();
 
         services.AddScoped<
-            IMediaAuditEventIngestionService,
-            MediaAuditEventIngestionService>();
+            IAuditIngestionFailureClassifier,
+            AuditIngestionFailureClassifier>();
 
         services.AddScoped<
-            IInteractionAuditEventIngestionService,
-            InteractionAuditEventIngestionService>();
+            IAuditResultMapper,
+            AuditResultMapper>();
 
         return services;
     }

@@ -107,7 +107,7 @@ public static class AuditErrors
                 message: "The audit outcome is not supported.");
     }
 
-    public static class Logs
+    public static class AuditLog
     {
         public static readonly Error NotFound =
             Error.NotFound(
@@ -130,7 +130,7 @@ public static class AuditErrors
                 message: "Audit log read failed.");
     }
 
-    public static class Ingestions
+    public static class Ingestion
     {
         public static readonly Error NotFound =
             Error.NotFound(
