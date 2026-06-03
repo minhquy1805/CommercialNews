@@ -7,6 +7,7 @@ namespace Audit.Application.Models.Queries.Ingestion;
 
 public sealed record GetAuditIngestionListQuery(
     string? Status,
+    string? MessageId,
     string? EventType,
     string? AggregateType,
     string? AggregateId,

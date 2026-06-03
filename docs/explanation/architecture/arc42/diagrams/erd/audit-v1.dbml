@@ -71,7 +71,7 @@ CreatedAtUtc datetime2(3) [not null]      // row creation time
 
 MetadataJson nvarchar(max) [null]         // sanitized safe metadata
 HeadersJson nvarchar(max) [null]          // sanitized safe headers
-RawPayloadJson nvarchar(max) [null]       // sanitized payload subset, not unsafe raw dump
+SanitizedPayloadJson nvarchar(max) [null] // sanitized payload subset, not unsafe raw dump
 BeforeJson nvarchar(max) [null]           // sanitized previous state snapshot
 AfterJson nvarchar(max) [null]            // sanitized new state snapshot
 ChangesJson nvarchar(max) [null]          // sanitized field-level changes

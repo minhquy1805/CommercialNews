@@ -485,7 +485,7 @@ They must not replace `AuditLog`.
 | `IngestedAtUtc`       |    `DATETIME2(3)` |   NO | Audit persistence time                                |
 | `MetadataJson`        |   `NVARCHAR(MAX)` |  YES | Sanitized safe metadata                               |
 | `HeadersJson`         |   `NVARCHAR(MAX)` |  YES | Sanitized safe headers                                |
-| `RawPayloadJson`      |   `NVARCHAR(MAX)` |  YES | Sanitized payload subset; avoid raw unsafe data       |
+| `SanitizedPayloadJson` |   `NVARCHAR(MAX)` |  YES | Sanitized payload subset; avoid raw unsafe data       |
 | `BeforeJson`          |   `NVARCHAR(MAX)` |  YES | Sanitized previous state snapshot                     |
 | `AfterJson`           |   `NVARCHAR(MAX)` |  YES | Sanitized new state snapshot                          |
 | `ChangesJson`         |   `NVARCHAR(MAX)` |  YES | Sanitized field changes                               |
@@ -606,9 +606,27 @@ Purpose:
 
 ### 10.4 Check constraints
 
-Recommended checks for `AuditLog`:
+Recommended checks for `AuditLog` matching the current table script:
 
 ```text
+CK_AuditLog_PublicId_NotBlank
+CK_AuditLog_MessageId_NotBlank
+CK_AuditLog_EventType_NotBlank
+CK_AuditLog_SourceModule_NotBlank
+CK_AuditLog_Action_NotBlank
+CK_AuditLog_ResourceType_NotBlank
+CK_AuditLog_ResourceId_NotBlank
+CK_AuditLog_Summary_NotBlank
+
+CK_AuditLog_EventVersion
+  EventVersion IS NULL OR EventVersion >= 1
+
+CK_AuditLog_AggregateVersion
+  AggregateVersion IS NULL OR AggregateVersion >= 1
+
+CK_AuditLog_SourcePriority
+  SourcePriority IS NULL OR SourcePriority BETWEEN 1 AND 9
+
 CK_AuditLog_Outcome
   Outcome IN ('Success', 'Failure', 'Denied', 'Ignored')
 
@@ -621,16 +639,28 @@ CK_AuditLog_RiskLevel
 CK_AuditLog_ActorType
   ActorType IN ('User', 'Admin', 'Moderator', 'System', 'Worker', 'Anonymous', 'External')
 
-CK_AuditLog_MessageId_NotEmpty
-CK_AuditLog_SourceModule_NotEmpty
-CK_AuditLog_Action_NotEmpty
-CK_AuditLog_ResourceType_NotEmpty
-CK_AuditLog_ResourceId_NotEmpty
+CK_AuditLog_MetadataJson_IsJson
+CK_AuditLog_HeadersJson_IsJson
+CK_AuditLog_SanitizedPayloadJson_IsJson
+CK_AuditLog_BeforeJson_IsJson
+CK_AuditLog_AfterJson_IsJson
+CK_AuditLog_ChangesJson_IsJson
 ```
 
-Recommended checks for `AuditIngestion`:
+Recommended checks for `AuditIngestion` matching the current table script:
 
 ```text
+CK_AuditIngestion_PublicId_NotBlank
+CK_AuditIngestion_MessageId_NotBlank
+CK_AuditIngestion_EventType_NotBlank
+CK_AuditIngestion_ConsumerName_NotBlank
+
+CK_AuditIngestion_AggregateVersion
+  AggregateVersion IS NULL OR AggregateVersion >= 1
+
+CK_AuditIngestion_SourcePriority
+  SourcePriority IS NULL OR SourcePriority BETWEEN 1 AND 9
+
 CK_AuditIngestion_Status
   Status IN ('Processing', 'Succeeded', 'Duplicate', 'Ignored', 'Failed', 'DeadLettered')
 
@@ -640,6 +670,15 @@ CK_AuditIngestion_AttemptCount
 CK_AuditIngestion_LastErrorClass
   LastErrorClass IS NULL OR LastErrorClass IN
   ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
+
+CK_AuditIngestion_SourcePublishedAtUtc
+  SourcePublishedAtUtc IS NULL OR SourcePublishedAtUtc >= SourceOccurredAtUtc
+
+CK_AuditIngestion_LastAttemptAtUtc
+  LastAttemptAtUtc IS NULL OR LastAttemptAtUtc >= FirstReceivedAtUtc
+
+CK_AuditIngestion_ProcessedAtUtc
+  ProcessedAtUtc IS NULL OR ProcessedAtUtc >= FirstReceivedAtUtc
 
 CK_AuditIngestion_DeadLetteredAtUtc
   DeadLetteredAtUtc IS NULL OR DeadLetteredAtUtc >= FirstReceivedAtUtc
@@ -661,6 +700,9 @@ IX_AuditLog_IngestedAtUtc
 IX_AuditLog_SourceModule_OccurredAtUtc
   (SourceModule, OccurredAtUtc DESC)
 
+IX_AuditLog_EventType_OccurredAtUtc
+  (EventType, OccurredAtUtc DESC)
+
 IX_AuditLog_Action_OccurredAtUtc
   (Action, OccurredAtUtc DESC)
 
@@ -679,9 +721,6 @@ IX_AuditLog_Resource_OccurredAtUtc
 IX_AuditLog_CorrelationId_OccurredAtUtc
   (CorrelationId, OccurredAtUtc DESC)
 
-IX_AuditLog_MessageId
-  (MessageId)
-
 IX_AuditLog_RiskLevel_OccurredAtUtc
   (RiskLevel, OccurredAtUtc DESC)
 
@@ -690,11 +729,14 @@ IX_AuditLog_Severity_OccurredAtUtc
 
 IX_AuditLog_Outcome_OccurredAtUtc
   (Outcome, OccurredAtUtc DESC)
+
+IX_AuditLog_Aggregate_Version
+  (AggregateType, AggregateId, AggregateVersion)
 ```
 
 ### Notes
 
-* `MessageId` also has a unique constraint, but a named lookup index can still be documented for API access pattern clarity.
+* `MessageId` lookup is covered by the unique constraint in `001_tables.sql`.
 * Query indexes should follow actual API access patterns.
 * Avoid over-indexing before real query pressure is measured.
 * JSON fields should not be used for high-volume filters in V1 unless a computed/indexed strategy is explicitly designed.
@@ -718,14 +760,14 @@ IX_AuditIngestion_EventType_FirstReceivedAtUtc
 IX_AuditIngestion_CorrelationId_FirstReceivedAtUtc
   (CorrelationId, FirstReceivedAtUtc DESC)
 
-IX_AuditIngestion_MessageId
-  (MessageId)
-
 IX_AuditIngestion_ConsumerName_Status
   (ConsumerName, Status)
 
 IX_AuditIngestion_SourceOccurredAtUtc
   (SourceOccurredAtUtc DESC)
+
+IX_AuditIngestion_SourcePublishedAtUtc
+  (SourcePublishedAtUtc DESC)
 
 IX_AuditIngestion_ProcessedAtUtc
   (ProcessedAtUtc DESC)

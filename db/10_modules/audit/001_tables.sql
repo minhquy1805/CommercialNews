@@ -102,7 +102,7 @@ BEGIN
 
         [MetadataJson]        NVARCHAR(MAX)        NULL,
         [HeadersJson]         NVARCHAR(MAX)        NULL,
-        [RawPayloadJson]      NVARCHAR(MAX)        NULL,
+        [SanitizedPayloadJson] NVARCHAR(MAX)        NULL,
         [BeforeJson]          NVARCHAR(MAX)        NULL,
         [AfterJson]           NVARCHAR(MAX)        NULL,
         [ChangesJson]         NVARCHAR(MAX)        NULL,
@@ -197,8 +197,8 @@ BEGIN
         CONSTRAINT [CK_AuditLog_HeadersJson_IsJson]
             CHECK ([HeadersJson] IS NULL OR ISJSON([HeadersJson]) = 1),
 
-        CONSTRAINT [CK_AuditLog_RawPayloadJson_IsJson]
-            CHECK ([RawPayloadJson] IS NULL OR ISJSON([RawPayloadJson]) = 1),
+        CONSTRAINT [CK_AuditLog_SanitizedPayloadJson_IsJson]
+            CHECK ([SanitizedPayloadJson] IS NULL OR ISJSON([SanitizedPayloadJson]) = 1),
 
         CONSTRAINT [CK_AuditLog_BeforeJson_IsJson]
             CHECK ([BeforeJson] IS NULL OR ISJSON([BeforeJson]) = 1),

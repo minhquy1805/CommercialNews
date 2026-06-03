@@ -112,7 +112,7 @@ CREATE OR ALTER PROCEDURE [audit].[AuditLog_Insert]
 
     @MetadataJson          NVARCHAR(MAX) = NULL,
     @HeadersJson           NVARCHAR(MAX) = NULL,
-    @RawPayloadJson        NVARCHAR(MAX) = NULL,
+    @SanitizedPayloadJson   NVARCHAR(MAX) = NULL,
     @BeforeJson            NVARCHAR(MAX) = NULL,
     @AfterJson             NVARCHAR(MAX) = NULL,
     @ChangesJson           NVARCHAR(MAX) = NULL,
@@ -197,8 +197,8 @@ BEGIN
     IF @HeadersJson IS NOT NULL AND ISJSON(@HeadersJson) <> 1
         THROW 56329, 'Audit headers json is invalid.', 1;
 
-    IF @RawPayloadJson IS NOT NULL AND ISJSON(@RawPayloadJson) <> 1
-        THROW 56330, 'Audit raw payload json is invalid.', 1;
+    IF @SanitizedPayloadJson IS NOT NULL AND ISJSON(@SanitizedPayloadJson) <> 1
+        THROW 56330, 'Audit sanitized payload json is invalid.', 1;
 
     IF @BeforeJson IS NOT NULL AND ISJSON(@BeforeJson) <> 1
         THROW 56331, 'Audit before json is invalid.', 1;
@@ -260,7 +260,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -303,7 +303,7 @@ BEGIN
         @CreatedAtUtc,
         @MetadataJson,
         @HeadersJson,
-        @RawPayloadJson,
+        @SanitizedPayloadJson,
         @BeforeJson,
         @AfterJson,
         @ChangesJson,
@@ -362,7 +362,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -420,7 +420,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -478,7 +478,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -540,7 +540,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -608,7 +608,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -675,7 +675,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -729,7 +729,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -787,7 +787,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -821,6 +821,9 @@ CREATE OR ALTER PROCEDURE [audit].[AuditLog_SelectSkipAndTakeWhereDynamic]
     @Severity           VARCHAR(30) = NULL,
     @RiskLevel          VARCHAR(30) = NULL,
 
+    @SortBy             NVARCHAR(100) = NULL,
+    @SortDirection      VARCHAR(4) = NULL,
+
     @Skip               INT = 0,
     @Take               INT = 20
 AS
@@ -843,6 +846,34 @@ BEGIN
     IF @MessageId IS NOT NULL
        AND NULLIF(LTRIM(RTRIM(@MessageId)), '') IS NULL
         SET @MessageId = NULL;
+
+    DECLARE @NormalizedSortBy NVARCHAR(100) = NULLIF(LTRIM(RTRIM(@SortBy)), N'');
+    DECLARE @NormalizedSortDirection VARCHAR(4) = LOWER(NULLIF(LTRIM(RTRIM(@SortDirection)), ''));
+
+    SET @NormalizedSortBy = ISNULL(@NormalizedSortBy, N'OccurredAtUtc');
+    SET @NormalizedSortDirection = ISNULL(@NormalizedSortDirection, 'desc');
+
+    IF @NormalizedSortBy NOT IN
+    (
+        N'OccurredAtUtc',
+        N'IngestedAtUtc',
+        N'CreatedAtUtc',
+        N'SourceModule',
+        N'EventType',
+        N'Action',
+        N'ActionCategory',
+        N'ResourceType',
+        N'ResourceId',
+        N'ActorUserId',
+        N'ActorInternalId',
+        N'Outcome',
+        N'Severity',
+        N'RiskLevel'
+    )
+        THROW 56337, 'Audit sort field is invalid.', 1;
+
+    IF @NormalizedSortDirection NOT IN ('asc', 'desc')
+        THROW 56338, 'Audit sort direction is invalid.', 1;
 
     SELECT
         [AuditLogId],
@@ -880,7 +911,7 @@ BEGIN
         [CreatedAtUtc],
         [MetadataJson],
         [HeadersJson],
-        [RawPayloadJson],
+        [SanitizedPayloadJson],
         [BeforeJson],
         [AfterJson],
         [ChangesJson],
@@ -903,7 +934,37 @@ BEGIN
         AND (@Outcome IS NULL OR [Outcome] = @Outcome)
         AND (@Severity IS NULL OR [Severity] = @Severity)
         AND (@RiskLevel IS NULL OR [RiskLevel] = @RiskLevel)
-    ORDER BY [OccurredAtUtc] DESC, [AuditLogId] DESC
+    ORDER BY
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'OccurredAtUtc' THEN [OccurredAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'IngestedAtUtc' THEN [IngestedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'CreatedAtUtc' THEN [CreatedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'ActorInternalId' THEN [ActorInternalId] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'SourceModule' THEN [SourceModule] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'EventType' THEN [EventType] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'Action' THEN [Action] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'ActionCategory' THEN [ActionCategory] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'ResourceType' THEN [ResourceType] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'ResourceId' THEN [ResourceId] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'ActorUserId' THEN [ActorUserId] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'Outcome' THEN [Outcome] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'Severity' THEN [Severity] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'RiskLevel' THEN [RiskLevel] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'OccurredAtUtc' THEN [OccurredAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'IngestedAtUtc' THEN [IngestedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'CreatedAtUtc' THEN [CreatedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'ActorInternalId' THEN [ActorInternalId] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'SourceModule' THEN [SourceModule] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'EventType' THEN [EventType] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'Action' THEN [Action] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'ActionCategory' THEN [ActionCategory] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'ResourceType' THEN [ResourceType] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'ResourceId' THEN [ResourceId] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'ActorUserId' THEN [ActorUserId] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'Outcome' THEN [Outcome] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'Severity' THEN [Severity] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'RiskLevel' THEN [RiskLevel] END DESC,
+        [OccurredAtUtc] DESC,
+        [AuditLogId] DESC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END;
 GO
@@ -974,6 +1035,162 @@ BEGIN
         AND (@Outcome IS NULL OR [Outcome] = @Outcome)
         AND (@Severity IS NULL OR [Severity] = @Severity)
         AND (@RiskLevel IS NULL OR [RiskLevel] = @RiskLevel);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditLog_SelectRecentRiskEvents]
+    @FromOccurredAtUtc  DATETIME2(3) = NULL,
+    @ToOccurredAtUtc    DATETIME2(3) = NULL,
+    @SourceModule       NVARCHAR(100) = NULL,
+    @RiskLevel          VARCHAR(30) = NULL,
+    @Limit              INT = 20
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Limit <= 0 SET @Limit = 20;
+    IF @Limit > 100 SET @Limit = 100;
+
+    IF @FromOccurredAtUtc IS NOT NULL
+       AND @ToOccurredAtUtc IS NOT NULL
+       AND @FromOccurredAtUtc > @ToOccurredAtUtc
+        THROW 56336, 'Audit time range is invalid.', 1;
+
+    IF @RiskLevel IS NOT NULL
+       AND @RiskLevel NOT IN ('Low', 'Medium', 'High', 'Critical')
+        THROW 56327, 'Audit risk level is invalid.', 1;
+
+    SELECT TOP (@Limit)
+        [AuditLogId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [EventVersion],
+        [SourceModule],
+        [Action],
+        [ActionCategory],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [ResourceType],
+        [ResourceId],
+        [ResourceDisplayName],
+        [ActorInternalId],
+        [ActorUserId],
+        [ActorEmail],
+        [ActorDisplayName],
+        [ActorType],
+        [Outcome],
+        [Severity],
+        [RiskLevel],
+        [Summary],
+        [CorrelationId],
+        [CausationId],
+        [TraceId],
+        [IpAddress],
+        [UserAgent],
+        [SourcePriority],
+        [OccurredAtUtc],
+        [IngestedAtUtc],
+        [CreatedAtUtc],
+        [MetadataJson],
+        [HeadersJson],
+        [SanitizedPayloadJson],
+        [BeforeJson],
+        [AfterJson],
+        [ChangesJson],
+        [Hash],
+        [PrevHash]
+    FROM [audit].[AuditLog]
+    WHERE
+        (@FromOccurredAtUtc IS NULL OR [OccurredAtUtc] >= @FromOccurredAtUtc)
+        AND (@ToOccurredAtUtc IS NULL OR [OccurredAtUtc] <= @ToOccurredAtUtc)
+        AND (@SourceModule IS NULL OR [SourceModule] = @SourceModule)
+        AND
+        (
+            (@RiskLevel IS NOT NULL AND [RiskLevel] = @RiskLevel)
+            OR (@RiskLevel IS NULL AND [RiskLevel] IN ('High', 'Critical'))
+        )
+    ORDER BY [OccurredAtUtc] DESC, [AuditLogId] DESC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditLog_CountByModule]
+    @FromOccurredAtUtc  DATETIME2(3) = NULL,
+    @ToOccurredAtUtc    DATETIME2(3) = NULL,
+    @SourceModule       NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromOccurredAtUtc IS NOT NULL
+       AND @ToOccurredAtUtc IS NOT NULL
+       AND @FromOccurredAtUtc > @ToOccurredAtUtc
+        THROW 56336, 'Audit time range is invalid.', 1;
+
+    SELECT
+        [SourceModule] AS [Value],
+        COUNT_BIG(1) AS [Count]
+    FROM [audit].[AuditLog]
+    WHERE
+        (@FromOccurredAtUtc IS NULL OR [OccurredAtUtc] >= @FromOccurredAtUtc)
+        AND (@ToOccurredAtUtc IS NULL OR [OccurredAtUtc] <= @ToOccurredAtUtc)
+        AND (@SourceModule IS NULL OR [SourceModule] = @SourceModule)
+    GROUP BY [SourceModule]
+    ORDER BY [Count] DESC, [Value] ASC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditLog_CountBySeverity]
+    @FromOccurredAtUtc  DATETIME2(3) = NULL,
+    @ToOccurredAtUtc    DATETIME2(3) = NULL,
+    @SourceModule       NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromOccurredAtUtc IS NOT NULL
+       AND @ToOccurredAtUtc IS NOT NULL
+       AND @FromOccurredAtUtc > @ToOccurredAtUtc
+        THROW 56336, 'Audit time range is invalid.', 1;
+
+    SELECT
+        [Severity] AS [Value],
+        COUNT_BIG(1) AS [Count]
+    FROM [audit].[AuditLog]
+    WHERE
+        (@FromOccurredAtUtc IS NULL OR [OccurredAtUtc] >= @FromOccurredAtUtc)
+        AND (@ToOccurredAtUtc IS NULL OR [OccurredAtUtc] <= @ToOccurredAtUtc)
+        AND (@SourceModule IS NULL OR [SourceModule] = @SourceModule)
+    GROUP BY [Severity]
+    ORDER BY [Count] DESC, [Value] ASC;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditLog_CountByRiskLevel]
+    @FromOccurredAtUtc  DATETIME2(3) = NULL,
+    @ToOccurredAtUtc    DATETIME2(3) = NULL,
+    @SourceModule       NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromOccurredAtUtc IS NOT NULL
+       AND @ToOccurredAtUtc IS NOT NULL
+       AND @FromOccurredAtUtc > @ToOccurredAtUtc
+        THROW 56336, 'Audit time range is invalid.', 1;
+
+    SELECT
+        [RiskLevel] AS [Value],
+        COUNT_BIG(1) AS [Count]
+    FROM [audit].[AuditLog]
+    WHERE
+        (@FromOccurredAtUtc IS NULL OR [OccurredAtUtc] >= @FromOccurredAtUtc)
+        AND (@ToOccurredAtUtc IS NULL OR [OccurredAtUtc] <= @ToOccurredAtUtc)
+        AND (@SourceModule IS NULL OR [SourceModule] = @SourceModule)
+    GROUP BY [RiskLevel]
+    ORDER BY [Count] DESC, [Value] ASC;
 END;
 GO
 
@@ -1064,6 +1281,134 @@ BEGIN
         WHERE [MessageId] = @MessageId
           AND [Status] IN ('Processing', 'Failed');
 
+        SELECT
+            @AuditIngestionId = [AuditIngestionId],
+            @CurrentStatus = [Status]
+        FROM [audit].[AuditIngestion]
+        WHERE [MessageId] = @MessageId;
+
+        SET @WasInserted = 0;
+        RETURN;
+    END
+
+    INSERT INTO [audit].[AuditIngestion]
+    (
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [CorrelationId],
+        [SourcePriority],
+        [SourceOccurredAtUtc],
+        [SourcePublishedAtUtc],
+        [ConsumerName],
+        [Status],
+        [AttemptCount],
+        [FirstReceivedAtUtc],
+        [LastAttemptAtUtc]
+    )
+    VALUES
+    (
+        @PublicId,
+        @MessageId,
+        @EventType,
+        @AggregateType,
+        @AggregateId,
+        @AggregatePublicId,
+        @AggregateVersion,
+        @CorrelationId,
+        @SourcePriority,
+        @SourceOccurredAtUtc,
+        @SourcePublishedAtUtc,
+        @ConsumerName,
+        'Processing',
+        1,
+        @NowUtc,
+        @NowUtc
+    );
+
+    SET @AuditIngestionId = CONVERT(BIGINT, SCOPE_IDENTITY());
+    SET @WasInserted = 1;
+    SET @CurrentStatus = 'Processing';
+END;
+GO
+
+/* =========================================================
+   3.1) AuditIngestion — upsert unsupported event
+   ========================================================= */
+
+CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_UpsertUnsupported]
+    @PublicId              CHAR(26),
+    @MessageId             CHAR(26),
+    @EventType             NVARCHAR(200),
+
+    @AggregateType         NVARCHAR(100) = NULL,
+    @AggregateId           NVARCHAR(100) = NULL,
+    @AggregatePublicId     CHAR(26) = NULL,
+    @AggregateVersion      INT = NULL,
+
+    @CorrelationId         NVARCHAR(100) = NULL,
+    @SourcePriority        TINYINT = NULL,
+
+    @SourceOccurredAtUtc   DATETIME2(3),
+    @SourcePublishedAtUtc  DATETIME2(3) = NULL,
+
+    @ConsumerName          NVARCHAR(150),
+
+    @AuditIngestionId      BIGINT OUTPUT,
+    @WasInserted           BIT OUTPUT,
+    @CurrentStatus         VARCHAR(30) = NULL OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    SET @PublicId = LTRIM(RTRIM(@PublicId));
+    SET @MessageId = LTRIM(RTRIM(@MessageId));
+
+    IF NULLIF(@PublicId, '') IS NULL
+        THROW 56350, 'Audit ingestion public id is required.', 1;
+
+    IF LEN(@PublicId) <> 26
+        THROW 56351, 'Audit ingestion public id must be 26 characters.', 1;
+
+    IF NULLIF(@MessageId, '') IS NULL
+        THROW 56352, 'Audit ingestion message id is required.', 1;
+
+    IF LEN(@MessageId) <> 26
+        THROW 56353, 'Audit ingestion message id must be 26 characters.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@EventType)), N'') IS NULL
+        THROW 56354, 'Audit ingestion event type is required.', 1;
+
+    IF NULLIF(LTRIM(RTRIM(@ConsumerName)), N'') IS NULL
+        THROW 56355, 'Audit ingestion consumer name is required.', 1;
+
+    IF @SourceOccurredAtUtc IS NULL
+        THROW 56356, 'Audit ingestion source occurredAtUtc is required.', 1;
+
+    IF @SourcePublishedAtUtc IS NOT NULL
+       AND @SourcePublishedAtUtc < @SourceOccurredAtUtc
+        THROW 56357, 'Audit ingestion source publishedAtUtc is invalid.', 1;
+
+    IF @AggregateVersion IS NOT NULL AND @AggregateVersion < 1
+        THROW 56358, 'Audit ingestion aggregate version must be >= 1.', 1;
+
+    IF @SourcePriority IS NOT NULL AND (@SourcePriority < 1 OR @SourcePriority > 9)
+        THROW 56359, 'Audit ingestion source priority must be between 1 and 9.', 1;
+
+    DECLARE @NowUtc DATETIME2(3) = SYSUTCDATETIME();
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [audit].[AuditIngestion]
+        WHERE [MessageId] = @MessageId
+    )
+    BEGIN
         SELECT
             @AuditIngestionId = [AuditIngestionId],
             @CurrentStatus = [Status]
@@ -1445,8 +1790,15 @@ CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_SelectSkipAndTakeWhereDynamic]
     @Status                 VARCHAR(30) = NULL,
     @MessageId              CHAR(26) = NULL,
     @EventType              NVARCHAR(200) = NULL,
+    @AggregateType          NVARCHAR(100) = NULL,
+    @AggregateId            NVARCHAR(100) = NULL,
+    @AggregatePublicId      CHAR(26) = NULL,
     @CorrelationId          NVARCHAR(100) = NULL,
     @ConsumerName           NVARCHAR(150) = NULL,
+    @LastErrorClass         VARCHAR(30) = NULL,
+
+    @SortBy                 NVARCHAR(100) = NULL,
+    @SortDirection          VARCHAR(4) = NULL,
 
     @Skip                   INT = 0,
     @Take                   INT = 20
@@ -1470,6 +1822,41 @@ BEGIN
     IF @MessageId IS NOT NULL
        AND NULLIF(LTRIM(RTRIM(@MessageId)), '') IS NULL
         SET @MessageId = NULL;
+
+    IF @AggregatePublicId IS NOT NULL
+       AND NULLIF(LTRIM(RTRIM(@AggregatePublicId)), '') IS NULL
+        SET @AggregatePublicId = NULL;
+
+    IF @LastErrorClass IS NOT NULL
+       AND @LastErrorClass NOT IN ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
+        THROW 56360, 'Audit ingestion error class is invalid.', 1;
+
+    DECLARE @NormalizedSortBy NVARCHAR(100) = NULLIF(LTRIM(RTRIM(@SortBy)), N'');
+    DECLARE @NormalizedSortDirection VARCHAR(4) = LOWER(NULLIF(LTRIM(RTRIM(@SortDirection)), ''));
+
+    SET @NormalizedSortBy = ISNULL(@NormalizedSortBy, N'FirstReceivedAtUtc');
+    SET @NormalizedSortDirection = ISNULL(@NormalizedSortDirection, 'desc');
+
+    IF @NormalizedSortBy NOT IN
+    (
+        N'SourceOccurredAtUtc',
+        N'SourcePublishedAtUtc',
+        N'FirstReceivedAtUtc',
+        N'LastAttemptAtUtc',
+        N'ProcessedAtUtc',
+        N'DeadLetteredAtUtc',
+        N'CreatedAtUtc',
+        N'UpdatedAtUtc',
+        N'AttemptCount',
+        N'Status',
+        N'EventType',
+        N'ConsumerName',
+        N'LastErrorClass'
+    )
+        THROW 56363, 'Audit ingestion sort field is invalid.', 1;
+
+    IF @NormalizedSortDirection NOT IN ('asc', 'desc')
+        THROW 56364, 'Audit ingestion sort direction is invalid.', 1;
 
     SELECT
         [AuditIngestionId],
@@ -1503,9 +1890,41 @@ BEGIN
         AND (@Status IS NULL OR [Status] = @Status)
         AND (@MessageId IS NULL OR [MessageId] = LTRIM(RTRIM(@MessageId)))
         AND (@EventType IS NULL OR [EventType] = @EventType)
+        AND (@AggregateType IS NULL OR [AggregateType] = @AggregateType)
+        AND (@AggregateId IS NULL OR [AggregateId] = @AggregateId)
+        AND (@AggregatePublicId IS NULL OR [AggregatePublicId] = LTRIM(RTRIM(@AggregatePublicId)))
         AND (@CorrelationId IS NULL OR [CorrelationId] = @CorrelationId)
         AND (@ConsumerName IS NULL OR [ConsumerName] = @ConsumerName)
-    ORDER BY [FirstReceivedAtUtc] DESC, [AuditIngestionId] DESC
+        AND (@LastErrorClass IS NULL OR [LastErrorClass] = @LastErrorClass)
+    ORDER BY
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'SourceOccurredAtUtc' THEN [SourceOccurredAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'SourcePublishedAtUtc' THEN [SourcePublishedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'FirstReceivedAtUtc' THEN [FirstReceivedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'LastAttemptAtUtc' THEN [LastAttemptAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'ProcessedAtUtc' THEN [ProcessedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'DeadLetteredAtUtc' THEN [DeadLetteredAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'CreatedAtUtc' THEN [CreatedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'UpdatedAtUtc' THEN [UpdatedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'AttemptCount' THEN [AttemptCount] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'Status' THEN [Status] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'EventType' THEN [EventType] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'ConsumerName' THEN [ConsumerName] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'LastErrorClass' THEN [LastErrorClass] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'SourceOccurredAtUtc' THEN [SourceOccurredAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'SourcePublishedAtUtc' THEN [SourcePublishedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'FirstReceivedAtUtc' THEN [FirstReceivedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'LastAttemptAtUtc' THEN [LastAttemptAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'ProcessedAtUtc' THEN [ProcessedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'DeadLetteredAtUtc' THEN [DeadLetteredAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'CreatedAtUtc' THEN [CreatedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'UpdatedAtUtc' THEN [UpdatedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'AttemptCount' THEN [AttemptCount] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'Status' THEN [Status] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'EventType' THEN [EventType] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'ConsumerName' THEN [ConsumerName] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'LastErrorClass' THEN [LastErrorClass] END DESC,
+        [FirstReceivedAtUtc] DESC,
+        [AuditIngestionId] DESC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END;
 GO
@@ -1517,8 +1936,12 @@ CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_GetRecordCountWhereDynamic]
     @Status                 VARCHAR(30) = NULL,
     @MessageId              CHAR(26) = NULL,
     @EventType              NVARCHAR(200) = NULL,
+    @AggregateType          NVARCHAR(100) = NULL,
+    @AggregateId            NVARCHAR(100) = NULL,
+    @AggregatePublicId      CHAR(26) = NULL,
     @CorrelationId          NVARCHAR(100) = NULL,
-    @ConsumerName           NVARCHAR(150) = NULL
+    @ConsumerName           NVARCHAR(150) = NULL,
+    @LastErrorClass         VARCHAR(30) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1536,6 +1959,14 @@ BEGIN
        AND NULLIF(LTRIM(RTRIM(@MessageId)), '') IS NULL
         SET @MessageId = NULL;
 
+    IF @AggregatePublicId IS NOT NULL
+       AND NULLIF(LTRIM(RTRIM(@AggregatePublicId)), '') IS NULL
+        SET @AggregatePublicId = NULL;
+
+    IF @LastErrorClass IS NOT NULL
+       AND @LastErrorClass NOT IN ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
+        THROW 56360, 'Audit ingestion error class is invalid.', 1;
+
     SELECT COUNT_BIG(1) AS [RecordCount]
     FROM [audit].[AuditIngestion]
     WHERE
@@ -1544,8 +1975,275 @@ BEGIN
         AND (@Status IS NULL OR [Status] = @Status)
         AND (@MessageId IS NULL OR [MessageId] = LTRIM(RTRIM(@MessageId)))
         AND (@EventType IS NULL OR [EventType] = @EventType)
+        AND (@AggregateType IS NULL OR [AggregateType] = @AggregateType)
+        AND (@AggregateId IS NULL OR [AggregateId] = @AggregateId)
+        AND (@AggregatePublicId IS NULL OR [AggregatePublicId] = LTRIM(RTRIM(@AggregatePublicId)))
         AND (@CorrelationId IS NULL OR [CorrelationId] = @CorrelationId)
-        AND (@ConsumerName IS NULL OR [ConsumerName] = @ConsumerName);
+        AND (@ConsumerName IS NULL OR [ConsumerName] = @ConsumerName)
+        AND (@LastErrorClass IS NULL OR [LastErrorClass] = @LastErrorClass);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_SelectFailedWhereDynamic]
+    @FromFirstReceivedAtUtc DATETIME2(3) = NULL,
+    @ToFirstReceivedAtUtc   DATETIME2(3) = NULL,
+
+    @EventType              NVARCHAR(200) = NULL,
+    @AggregateType          NVARCHAR(100) = NULL,
+    @AggregateId            NVARCHAR(100) = NULL,
+    @AggregatePublicId      CHAR(26) = NULL,
+    @CorrelationId          NVARCHAR(100) = NULL,
+    @ConsumerName           NVARCHAR(150) = NULL,
+    @LastErrorClass         VARCHAR(30) = NULL,
+
+    @SortBy                 NVARCHAR(100) = NULL,
+    @SortDirection          VARCHAR(4) = NULL,
+
+    @Skip                   INT = 0,
+    @Take                   INT = 20
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Skip < 0 SET @Skip = 0;
+    IF @Take <= 0 SET @Take = 20;
+    IF @Take > 200 SET @Take = 200;
+
+    IF @FromFirstReceivedAtUtc IS NOT NULL
+       AND @ToFirstReceivedAtUtc IS NOT NULL
+       AND @FromFirstReceivedAtUtc > @ToFirstReceivedAtUtc
+        THROW 56361, 'Audit ingestion time range is invalid.', 1;
+
+    IF @AggregatePublicId IS NOT NULL
+       AND NULLIF(LTRIM(RTRIM(@AggregatePublicId)), '') IS NULL
+        SET @AggregatePublicId = NULL;
+
+    IF @LastErrorClass IS NOT NULL
+       AND @LastErrorClass NOT IN ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
+        THROW 56360, 'Audit ingestion error class is invalid.', 1;
+
+    DECLARE @NormalizedSortBy NVARCHAR(100) = NULLIF(LTRIM(RTRIM(@SortBy)), N'');
+    DECLARE @NormalizedSortDirection VARCHAR(4) = LOWER(NULLIF(LTRIM(RTRIM(@SortDirection)), ''));
+
+    SET @NormalizedSortBy = ISNULL(@NormalizedSortBy, N'LastAttemptAtUtc');
+    SET @NormalizedSortDirection = ISNULL(@NormalizedSortDirection, 'desc');
+
+    IF @NormalizedSortBy NOT IN
+    (
+        N'SourceOccurredAtUtc',
+        N'SourcePublishedAtUtc',
+        N'FirstReceivedAtUtc',
+        N'LastAttemptAtUtc',
+        N'CreatedAtUtc',
+        N'UpdatedAtUtc',
+        N'AttemptCount',
+        N'EventType',
+        N'ConsumerName',
+        N'LastErrorClass'
+    )
+        THROW 56363, 'Audit ingestion sort field is invalid.', 1;
+
+    IF @NormalizedSortDirection NOT IN ('asc', 'desc')
+        THROW 56364, 'Audit ingestion sort direction is invalid.', 1;
+
+    SELECT
+        [AuditIngestionId],
+        [PublicId],
+        [MessageId],
+        [EventType],
+        [AggregateType],
+        [AggregateId],
+        [AggregatePublicId],
+        [AggregateVersion],
+        [CorrelationId],
+        [SourcePriority],
+        [SourceOccurredAtUtc],
+        [SourcePublishedAtUtc],
+        [ConsumerName],
+        [Status],
+        [AttemptCount],
+        [FirstReceivedAtUtc],
+        [LastAttemptAtUtc],
+        [ProcessedAtUtc],
+        [DeadLetteredAtUtc],
+        [LastErrorCode],
+        [LastErrorMessage],
+        [LastErrorClass],
+        [CreatedAtUtc],
+        [UpdatedAtUtc]
+    FROM [audit].[AuditIngestion]
+    WHERE
+        [Status] IN ('Failed', 'DeadLettered')
+        AND (@FromFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] >= @FromFirstReceivedAtUtc)
+        AND (@ToFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] <= @ToFirstReceivedAtUtc)
+        AND (@EventType IS NULL OR [EventType] = @EventType)
+        AND (@AggregateType IS NULL OR [AggregateType] = @AggregateType)
+        AND (@AggregateId IS NULL OR [AggregateId] = @AggregateId)
+        AND (@AggregatePublicId IS NULL OR [AggregatePublicId] = LTRIM(RTRIM(@AggregatePublicId)))
+        AND (@CorrelationId IS NULL OR [CorrelationId] = @CorrelationId)
+        AND (@ConsumerName IS NULL OR [ConsumerName] = @ConsumerName)
+        AND (@LastErrorClass IS NULL OR [LastErrorClass] = @LastErrorClass)
+    ORDER BY
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'SourceOccurredAtUtc' THEN [SourceOccurredAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'SourcePublishedAtUtc' THEN [SourcePublishedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'FirstReceivedAtUtc' THEN [FirstReceivedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'LastAttemptAtUtc' THEN [LastAttemptAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'CreatedAtUtc' THEN [CreatedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'UpdatedAtUtc' THEN [UpdatedAtUtc] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'AttemptCount' THEN [AttemptCount] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'EventType' THEN [EventType] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'ConsumerName' THEN [ConsumerName] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'asc' AND @NormalizedSortBy = N'LastErrorClass' THEN [LastErrorClass] END ASC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'SourceOccurredAtUtc' THEN [SourceOccurredAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'SourcePublishedAtUtc' THEN [SourcePublishedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'FirstReceivedAtUtc' THEN [FirstReceivedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'LastAttemptAtUtc' THEN [LastAttemptAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'CreatedAtUtc' THEN [CreatedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'UpdatedAtUtc' THEN [UpdatedAtUtc] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'AttemptCount' THEN [AttemptCount] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'EventType' THEN [EventType] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'ConsumerName' THEN [ConsumerName] END DESC,
+        CASE WHEN @NormalizedSortDirection = 'desc' AND @NormalizedSortBy = N'LastErrorClass' THEN [LastErrorClass] END DESC,
+        [LastAttemptAtUtc] DESC,
+        [AuditIngestionId] DESC
+    OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_GetFailedRecordCountWhereDynamic]
+    @FromFirstReceivedAtUtc DATETIME2(3) = NULL,
+    @ToFirstReceivedAtUtc   DATETIME2(3) = NULL,
+
+    @EventType              NVARCHAR(200) = NULL,
+    @AggregateType          NVARCHAR(100) = NULL,
+    @AggregateId            NVARCHAR(100) = NULL,
+    @AggregatePublicId      CHAR(26) = NULL,
+    @CorrelationId          NVARCHAR(100) = NULL,
+    @ConsumerName           NVARCHAR(150) = NULL,
+    @LastErrorClass         VARCHAR(30) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromFirstReceivedAtUtc IS NOT NULL
+       AND @ToFirstReceivedAtUtc IS NOT NULL
+       AND @FromFirstReceivedAtUtc > @ToFirstReceivedAtUtc
+        THROW 56361, 'Audit ingestion time range is invalid.', 1;
+
+    IF @AggregatePublicId IS NOT NULL
+       AND NULLIF(LTRIM(RTRIM(@AggregatePublicId)), '') IS NULL
+        SET @AggregatePublicId = NULL;
+
+    IF @LastErrorClass IS NOT NULL
+       AND @LastErrorClass NOT IN ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
+        THROW 56360, 'Audit ingestion error class is invalid.', 1;
+
+    SELECT COUNT_BIG(1) AS [RecordCount]
+    FROM [audit].[AuditIngestion]
+    WHERE
+        [Status] IN ('Failed', 'DeadLettered')
+        AND (@FromFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] >= @FromFirstReceivedAtUtc)
+        AND (@ToFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] <= @ToFirstReceivedAtUtc)
+        AND (@EventType IS NULL OR [EventType] = @EventType)
+        AND (@AggregateType IS NULL OR [AggregateType] = @AggregateType)
+        AND (@AggregateId IS NULL OR [AggregateId] = @AggregateId)
+        AND (@AggregatePublicId IS NULL OR [AggregatePublicId] = LTRIM(RTRIM(@AggregatePublicId)))
+        AND (@CorrelationId IS NULL OR [CorrelationId] = @CorrelationId)
+        AND (@ConsumerName IS NULL OR [ConsumerName] = @ConsumerName)
+        AND (@LastErrorClass IS NULL OR [LastErrorClass] = @LastErrorClass);
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_CountFailedForDashboard]
+    @FromFirstReceivedAtUtc DATETIME2(3) = NULL,
+    @ToFirstReceivedAtUtc   DATETIME2(3) = NULL,
+    @SourceModule           NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromFirstReceivedAtUtc IS NOT NULL
+       AND @ToFirstReceivedAtUtc IS NOT NULL
+       AND @FromFirstReceivedAtUtc > @ToFirstReceivedAtUtc
+        THROW 56361, 'Audit ingestion time range is invalid.', 1;
+
+    SELECT COUNT_BIG(1) AS [RecordCount]
+    FROM [audit].[AuditIngestion]
+    WHERE
+        [Status] IN ('Failed', 'DeadLettered')
+        AND (@FromFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] >= @FromFirstReceivedAtUtc)
+        AND (@ToFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] <= @ToFirstReceivedAtUtc)
+        AND
+        (
+            @SourceModule IS NULL
+            OR (LOWER(@SourceModule) = N'authorization' AND [EventType] LIKE N'authorization.%')
+            OR (LOWER(@SourceModule) = N'identity' AND [EventType] LIKE N'identity.%')
+            OR (LOWER(@SourceModule) = N'content' AND [EventType] LIKE N'content.%')
+            OR (LOWER(@SourceModule) = N'media' AND [EventType] LIKE N'media.%')
+            OR (LOWER(@SourceModule) = N'interaction' AND [EventType] LIKE N'interaction.%')
+            OR (LOWER(@SourceModule) = N'seo' AND [EventType] LIKE N'seo.%')
+            OR (LOWER(@SourceModule) = N'notifications' AND [EventType] LIKE N'notifications.%')
+            OR (LOWER(@SourceModule) = N'audit' AND [EventType] LIKE N'audit.%')
+            OR (LOWER(@SourceModule) = N'system' AND [EventType] LIKE N'system.%')
+        );
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_CountDuplicateForDashboard]
+    @FromFirstReceivedAtUtc DATETIME2(3) = NULL,
+    @ToFirstReceivedAtUtc   DATETIME2(3) = NULL,
+    @SourceModule           NVARCHAR(100) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @FromFirstReceivedAtUtc IS NOT NULL
+       AND @ToFirstReceivedAtUtc IS NOT NULL
+       AND @FromFirstReceivedAtUtc > @ToFirstReceivedAtUtc
+        THROW 56361, 'Audit ingestion time range is invalid.', 1;
+
+    SELECT COUNT_BIG(1) AS [RecordCount]
+    FROM [audit].[AuditIngestion]
+    WHERE
+        [Status] = 'Duplicate'
+        AND (@FromFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] >= @FromFirstReceivedAtUtc)
+        AND (@ToFirstReceivedAtUtc IS NULL OR [FirstReceivedAtUtc] <= @ToFirstReceivedAtUtc)
+        AND
+        (
+            @SourceModule IS NULL
+            OR (LOWER(@SourceModule) = N'authorization' AND [EventType] LIKE N'authorization.%')
+            OR (LOWER(@SourceModule) = N'identity' AND [EventType] LIKE N'identity.%')
+            OR (LOWER(@SourceModule) = N'content' AND [EventType] LIKE N'content.%')
+            OR (LOWER(@SourceModule) = N'media' AND [EventType] LIKE N'media.%')
+            OR (LOWER(@SourceModule) = N'interaction' AND [EventType] LIKE N'interaction.%')
+            OR (LOWER(@SourceModule) = N'seo' AND [EventType] LIKE N'seo.%')
+            OR (LOWER(@SourceModule) = N'notifications' AND [EventType] LIKE N'notifications.%')
+            OR (LOWER(@SourceModule) = N'audit' AND [EventType] LIKE N'audit.%')
+            OR (LOWER(@SourceModule) = N'system' AND [EventType] LIKE N'system.%')
+        );
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [audit].[AuditIngestion_GetOldestFailedIngestionAgeSeconds]
+    @NowUtc DATETIME2(3)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @NowUtc IS NULL
+        THROW 56365, 'Audit ingestion nowUtc is required.', 1;
+
+    DECLARE @OldestFailureAtUtc DATETIME2(3);
+
+    SELECT @OldestFailureAtUtc = MIN(ISNULL([LastAttemptAtUtc], [FirstReceivedAtUtc]))
+    FROM [audit].[AuditIngestion]
+    WHERE [Status] IN ('Failed', 'DeadLettered');
+
+    SELECT
+        CASE
+            WHEN @OldestFailureAtUtc IS NULL THEN NULL
+            ELSE DATEDIFF(SECOND, @OldestFailureAtUtc, @NowUtc)
+        END AS [OldestFailedIngestionAgeSeconds];
 END;
 GO
 
