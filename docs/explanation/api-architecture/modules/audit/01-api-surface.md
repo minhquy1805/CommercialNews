@@ -22,8 +22,11 @@ Audit ingestion itself is not exposed publicly.
 Audit write path happens through:
 
 ```text
-Outbox → RabbitMQ → Audit Consumer → AuditLog / AuditIngestion
+Outbox → RabbitMQ → CommercialNews.Worker → IngestAuditEventCommand → Audit.Application → AuditLog / AuditIngestion
 ```
+
+The Worker owns queue consumption and message-to-command mapping. Audit.Application
+does not read broker queues directly; it receives commands through MediatR.
 
 There are no public or admin APIs for manually inserting, updating, or deleting audit evidence in V1.
 
@@ -124,6 +127,10 @@ Search audit logs with paging.
 | `messageId`       |          No | Filter by Outbox message identity                     |
 | `eventType`       |          No | Filter by original event type                         |
 | `sort`            |          No | Allowlisted sort. Default: `-occurredAtUtc`           |
+
+`messageId` remains part of the `/logs` search contract. Application/Search
+contracts are expected to support this filter so callers can narrow list results
+without switching to `/logs/by-message/{messageId}`.
 
 ### Response `200`
 
@@ -876,14 +883,17 @@ Future permissions may include:
 * `Audit.Retention.Read`
 * `Audit.Retention.Manage`
 
-### 9.2 Raw payload policy
+### 9.2 Sanitized payload policy
 
-V1 should avoid exposing raw payload by default.
+V1 should avoid exposing raw input payload by default.
 
-If raw payload exposure is ever introduced:
+AuditLog detail may expose `sanitizedPayloadJson` only after redaction. The raw
+input payload from Outbox is an ingestion input, not a default API response field.
+
+If raw input payload exposure is ever introduced:
 
 * require `Audit.ReadSensitive`
-* return redacted payload only
+* return redacted/sanitized payload only
 * never return tokens, secrets, passwords, password hashes, refresh tokens, verification tokens, reset tokens, session cookies, or raw authorization headers
 
 ### 9.3 Privacy

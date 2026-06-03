@@ -115,9 +115,11 @@ OutboxMessage written in same local transaction
     ↓
 Outbox publisher sends message to RabbitMQ
     ↓
-Audit consumer receives message
+CommercialNews.Worker audit consumer receives message
     ↓
-Audit normalizes and stores evidence
+Worker sends IngestAuditEventCommand through MediatR
+    ↓
+Audit.Application selects a registered normalizer and stores evidence
 ```
 
 ### 3.2 Producer modules own
@@ -140,13 +142,31 @@ Producer modules own:
 
 After Audit receives the message, Audit owns:
 
-* normalizer selection
+* normalizer abstraction and registry selection
 * redaction
 * mapping to audit fields
 * `MessageId` dedupe
 * `AuditLog` persistence
 * `AuditIngestion` status
 * audit query visibility
+
+Runtime placement:
+
+* `CommercialNews.Worker` owns broker consumption and maps messages into `IngestAuditEventCommand`.
+* Audit.Application owns MediatR handlers, FluentValidation validators, pipeline behaviors, use-case orchestration, and normalizer abstractions.
+* Audit.Infrastructure owns concrete normalizers and persistence adapters.
+* Concrete normalizers are registered in Infrastructure DI.
+
+Expected concrete Infrastructure normalizers:
+
+* `AuthorizationAuditEventNormalizer`
+* `IdentityAuditEventNormalizer`
+* `ContentAuditEventNormalizer`
+* `MediaAuditEventNormalizer`
+* `InteractionAuditEventNormalizer`
+
+If no normalizer is registered for a received `EventType`, Audit treats the
+event as unsupported and records an ignored ingestion outcome.
 
 ### 3.4 Forbidden source-module coupling
 

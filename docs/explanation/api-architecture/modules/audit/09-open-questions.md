@@ -68,7 +68,7 @@ For each consumed `EventType`, which fields are allowed in:
 * `Summary`
 * `MetadataJson`
 * `HeadersJson`
-* `RawPayloadJson`
+* `SanitizedPayloadJson`
 * `BeforeJson`
 * `AfterJson`
 * `ChangesJson`
@@ -140,7 +140,7 @@ Candidate JSON fields:
 
 * `MetadataJson`
 * `HeadersJson`
-* `RawPayloadJson`
+* `SanitizedPayloadJson`
 * `BeforeJson`
 * `AfterJson`
 * `ChangesJson`
@@ -741,23 +741,23 @@ ADR — Audit Correction and Redaction Remediation Policy
 
 ### Question
 
-Should any admin be able to view redacted payload details?
+Should any admin be able to view sanitized payload details?
 
 ### Candidate approach
 
-* hide raw payload entirely in V1
+* hide raw input payload entirely in V1
 * expose only normalized metadata
 * future endpoint requires `Audit.ReadSensitive`
 * audit sensitive reads through audit-of-audit
 
 ### Decision needed
 
-Define whether V1 returns `RawPayloadJson` at all.
+Define whether V1 returns `SanitizedPayloadJson` at all.
 
 Recommended V1 posture:
 
 ```text
-Do not expose raw payload through API by default.
+Do not expose raw input payload through API by default.
 ```
 
 ---

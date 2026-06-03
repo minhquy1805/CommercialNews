@@ -115,12 +115,15 @@ Audit ingestion must not be exposed through HTTP public/admin endpoints in V1.
 Allowed ingestion path:
 
 ```text
-Outbox → RabbitMQ → Audit Consumer → AuditLog / AuditIngestion
+Outbox → RabbitMQ → CommercialNews.Worker → IngestAuditEventCommand → Audit.Application → AuditLog / AuditIngestion
 ```
 
 ### 4.2 Source trust boundary
 
-Audit consumers should only process messages from approved broker exchanges/queues and known event contracts.
+Worker consumers should only process messages from approved broker exchanges/queues and known event contracts.
+
+Audit.Application does not consume broker messages directly. Worker maps messages
+to `IngestAuditEventCommand` and calls the MediatR use case.
 
 Audit should reject, ignore, or dead-letter messages that are:
 
@@ -285,7 +288,7 @@ Authorization audit payloads must not include:
 
 Redaction must happen before writing:
 
-* `AuditLog.RawPayloadJson`
+* `AuditLog.SanitizedPayloadJson`
 * `AuditLog.MetadataJson`
 * `AuditLog.HeadersJson`
 * `AuditLog.BeforeJson`
@@ -293,7 +296,10 @@ Redaction must happen before writing:
 * `AuditLog.ChangesJson`
 * application logs
 
-Audit must not persist unsafe raw payload first and redact later.
+Audit must not persist unsafe raw input payload first and redact later.
+
+Payload stored or returned by AuditLog detail should be named
+`SanitizedPayloadJson` to make the redaction boundary explicit.
 
 ### 5.7 Redaction failure
 

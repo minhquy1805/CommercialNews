@@ -4,7 +4,10 @@ namespace Audit.Application.Abstractions.Normalization;
 
 public interface IAuditEventNormalizer
 {
-    bool CanHandle(string eventType);
+    string SourceModule { get; }
+
+    bool CanHandle(
+        string eventType);
 
     AuditNormalizedEvent Normalize(
         AuditEventNormalizationContext context);

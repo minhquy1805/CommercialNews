@@ -412,6 +412,12 @@ A typical Audit local transaction should atomically commit:
 
 This local transaction is separate from the source module transaction.
 
+In the refactored Application architecture, handlers do not manually open
+transactions. `AuditTransactionBehavior` wraps commands that need durable writes.
+Commands opt into this behavior by implementing `IAuditTransactionalRequest`.
+
+Queries do not require this transaction behavior.
+
 ### 5.3 Outside the Audit transaction
 
 The following are not part of the Audit persistence transaction:
@@ -488,6 +494,14 @@ Without such policy, AuditLog is append-only.
 ## 7. Consumer Processing Posture
 
 Audit is a pure asynchronous consumer.
+
+Consumer runtime lives outside Audit.Application. `CommercialNews.Worker`
+consumes Outbox/Broker messages, maps them to `IngestAuditEventCommand`, and
+invokes Audit.Application through MediatR.
+
+Audit.Application owns validation, transaction behavior, ingestion use cases,
+normalizer abstractions, and registry selection. It does not read queues or
+brokers directly.
 
 Audit consumes Outbox-published messages from modules such as:
 

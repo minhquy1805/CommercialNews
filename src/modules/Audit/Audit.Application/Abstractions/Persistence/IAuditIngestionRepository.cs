@@ -1,3 +1,4 @@
+using Audit.Application.Abstractions.Persistence.Commands;
 using Audit.Application.Abstractions.Persistence.Queries;
 using Audit.Application.Abstractions.Persistence.Results;
 using Audit.Domain.Entities;
@@ -10,6 +11,10 @@ public interface IAuditIngestionRepository
 {
     Task<AuditIngestionUpsertResult> UpsertProcessingAsync(
         AuditIngestion auditIngestion,
+        CancellationToken cancellationToken = default);
+
+    Task<AuditIngestionUpsertResult> UpsertUnsupportedAsync(
+        AuditUnsupportedIngestionUpsertCommand command,
         CancellationToken cancellationToken = default);
 
     Task MarkSucceededAsync(

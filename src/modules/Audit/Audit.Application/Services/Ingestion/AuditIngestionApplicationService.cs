@@ -7,13 +7,13 @@ using Audit.Application.Services.Evidence;
 using Audit.Application.Services.Normalization;
 using Audit.Application.Services.Redaction;
 using Audit.Domain.Constants.AuditIngestion;
-using Audit.Domain.Constants.Events;
 using Audit.Domain.Entities;
 using Audit.Domain.ValueObjects.Common;
 using Audit.Domain.ValueObjects.Ingestion;
 using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using CommercialNews.BuildingBlocks.SharedKernel.Time;
+using Audit.Application.Abstractions.Persistence.Commands;
 
 namespace Audit.Application.Services.Ingestion;
 
@@ -76,10 +76,10 @@ public sealed class AuditIngestionApplicationService
         {
             var nowUtc = _dateTimeProvider.UtcNow;
 
-            var sourceModule = AuditSourceModuleResolver.Resolve(
+            var normalizer = _normalizerRegistry.Resolve(
                 command.EventType);
 
-            if (sourceModule is null)
+            if (normalizer is null)
             {
                 return await MarkUnsupportedEventAsIgnoredAsync(
                     command,
@@ -90,7 +90,7 @@ public sealed class AuditIngestionApplicationService
                 messageId: command.MessageId,
                 eventType: command.EventType,
                 eventVersion: null,
-                sourceModule: sourceModule,
+                sourceModule: normalizer.SourceModule,
                 sourcePriority: command.Priority,
                 sourceOccurredAtUtc: command.OccurredAtUtc,
                 sourcePublishedAtUtc: command.PublishedAtUtc);
@@ -133,22 +133,6 @@ public sealed class AuditIngestionApplicationService
                         auditLogId: existingAuditLog?.AuditLogId,
                         currentStatus: upsertResult.CurrentStatus,
                         reason: "Audit message has already reached a terminal ingestion status."));
-            }
-
-            var normalizer = _normalizerRegistry.Resolve(
-                command.EventType);
-
-            if (normalizer is null)
-            {
-                await _auditIngestionRepository.MarkIgnoredAsync(
-                    command.MessageId,
-                    cancellationToken);
-
-                return Result<IngestAuditEventResult>.Success(
-                    IngestAuditEventResult.Ignored(
-                        messageId: command.MessageId,
-                        auditIngestionId: upsertResult.AuditIngestionId,
-                        reason: $"Audit event type '{command.EventType}' is not supported."));
             }
 
             var normalizationContext = new AuditEventNormalizationContext(
@@ -271,44 +255,41 @@ public sealed class AuditIngestionApplicationService
     {
         var nowUtc = _dateTimeProvider.UtcNow;
 
-        var fallbackSourceEvent = AuditSourceEvent.Create(
-            messageId: command.MessageId,
-            eventType: command.EventType,
-            eventVersion: null,
-            sourceModule: AuditSourceModules.System,
-            sourcePriority: command.Priority,
-            sourceOccurredAtUtc: command.OccurredAtUtc,
-            sourcePublishedAtUtc: command.PublishedAtUtc);
-
-        var aggregateRef = AuditAggregateRef.Create(
-            aggregateType: command.AggregateType,
-            aggregateId: command.AggregateId,
-            aggregatePublicId: command.AggregatePublicId,
-            aggregateVersion: command.AggregateVersion);
-
-        var traceContext = AuditTraceContext.Create(
-            correlationId: command.CorrelationId,
-            causationId: null,
-            traceId: null);
-
-        var ingestion = AuditIngestion.StartProcessing(
-            publicId: _publicIdGenerator.NewId(),
-            sourceEvent: fallbackSourceEvent,
-            aggregateRef: aggregateRef,
-            traceContext: traceContext,
-            consumerName: command.ConsumerName,
-            nowUtc: nowUtc);
-
-        var upsertResult = await _auditIngestionRepository.UpsertProcessingAsync(
-            ingestion,
+        var upsertResult = await _auditIngestionRepository.UpsertUnsupportedAsync(
+            new AuditUnsupportedIngestionUpsertCommand(
+                PublicId: _publicIdGenerator.NewId(),
+                MessageId: command.MessageId,
+                EventType: command.EventType,
+                AggregateType: command.AggregateType,
+                AggregateId: command.AggregateId,
+                AggregatePublicId: command.AggregatePublicId,
+                AggregateVersion: command.AggregateVersion,
+                CorrelationId: command.CorrelationId,
+                Priority: command.Priority,
+                OccurredAtUtc: command.OccurredAtUtc,
+                PublishedAtUtc: command.PublishedAtUtc,
+                ConsumerName: command.ConsumerName,
+                NowUtc: nowUtc),
             cancellationToken);
 
-        if (!AuditIngestionStatuses.IsTerminal(upsertResult.CurrentStatus))
+        if (AuditIngestionStatuses.IsTerminal(upsertResult.CurrentStatus))
         {
-            await _auditIngestionRepository.MarkIgnoredAsync(
+            var existingAuditLog = await _auditLogRepository.GetByMessageIdAsync(
                 command.MessageId,
                 cancellationToken);
+
+            return Result<IngestAuditEventResult>.Success(
+                IngestAuditEventResult.AlreadyProcessed(
+                    messageId: command.MessageId,
+                    auditIngestionId: upsertResult.AuditIngestionId,
+                    auditLogId: existingAuditLog?.AuditLogId,
+                    currentStatus: upsertResult.CurrentStatus,
+                    reason: "Audit message has already reached a terminal ingestion status."));
         }
+
+        await _auditIngestionRepository.MarkIgnoredAsync(
+            command.MessageId,
+            cancellationToken);
 
         return Result<IngestAuditEventResult>.Success(
             IngestAuditEventResult.Ignored(

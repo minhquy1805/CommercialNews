@@ -25,7 +25,7 @@ Audit V1 intentionally keeps the runtime scope simple:
 * `AuditLog`
 * `AuditIngestion`
 * `MessageId` deduplication
-* event normalizer strategies
+* event normalizer abstractions and registry
 * investigation APIs
 * lightweight dashboard queries from SQL
 
@@ -65,7 +65,7 @@ Audit records must be privacy-aware. Audit must not store or return raw secrets,
 
 Primary consumers of Audit are:
 
-* Worker audit ingestion consumer
+* `CommercialNews.Worker` audit ingestion consumer
 * Admin UI
 * operators
 * security/governance reviewers
@@ -76,6 +76,10 @@ Primary consumers of Audit are:
 Audit ingestion itself is not exposed publicly.
 
 Audit APIs are admin-only.
+
+Audit.Application does not read queues or brokers directly. Worker runtime consumes
+Outbox/Broker messages, maps them into `IngestAuditEventCommand`, and invokes the
+Application use case through MediatR.
 
 ---
 
@@ -224,9 +228,11 @@ Source module writes OutboxMessage in the same local transaction
     ↓
 Outbox publisher sends message to RabbitMQ
     ↓
-Audit consumer receives message at least once
+CommercialNews.Worker audit consumer receives message at least once
     ↓
-Audit normalizes event
+Worker sends IngestAuditEventCommand through MediatR
+    ↓
+Audit.Application selects a registered normalizer and normalizes event
     ↓
 Audit deduplicates by MessageId
     ↓
@@ -494,12 +500,21 @@ Safe non-progress is preferable to unsafe duplicate evidence or silent history m
 
 Recommended V1 runtime components:
 
-* `AuditRabbitMqConsumerService`
-* `AuditEventNormalizerDispatcher`
+* `CommercialNews.Worker` audit message consumer
+* `IngestAuditEventCommand`
+* MediatR command handler and pipeline behaviors
+* `AuditIngestionApplicationService`
+* `IAuditEventNormalizerRegistry`
 * `IAuditEventNormalizer`
-* `AuditIngestionService`
 * `IAuditLogRepository`
 * `IAuditIngestionRepository`
+
+Runtime placement:
+
+* Worker consumes RabbitMQ/Outbox messages and builds `IngestAuditEventCommand`.
+* Audit.Application owns the use case, validation, transaction behavior, normalizer abstraction, and registry.
+* Audit.Infrastructure owns concrete normalizers and persistence implementations.
+* Concrete normalizers are registered through Infrastructure DI.
 
 Recommended future extension components:
 
