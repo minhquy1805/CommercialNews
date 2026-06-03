@@ -1,10 +1,5 @@
 using Audit.Application.Abstractions.Normalization;
 using Audit.Application.Behaviors;
-using Audit.Application.Consumers.Authorization;
-using Audit.Application.Consumers.Content;
-using Audit.Application.Consumers.Identity;
-using Audit.Application.Consumers.Interaction;
-using Audit.Application.Consumers.Media;
 using Audit.Application.Services.Evidence;
 using Audit.Application.Services.Ingestion;
 using Audit.Application.Services.Mapping;
