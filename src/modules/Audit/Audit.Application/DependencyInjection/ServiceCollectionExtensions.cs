@@ -5,6 +5,7 @@ using Audit.Application.Services.Ingestion;
 using Audit.Application.Services.Mapping;
 using Audit.Application.Services.Normalization;
 using Audit.Application.Services.Redaction;
+using Audit.Domain.Policies.Evidence;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +37,15 @@ public static class ServiceCollectionExtensions
         services.AddTransient(
             typeof(IPipelineBehavior<,>),
             typeof(AuditTransactionBehavior<,>));
+
+        // Domain policies
+        services.AddSingleton<
+            IAuditActionClassificationPolicy,
+            DefaultAuditActionClassificationPolicy>();
+
+        services.AddSingleton<
+            IAuditRiskClassificationPolicy,
+            DefaultAuditRiskClassificationPolicy>();
 
         // Normalization
         services.AddSingleton<
