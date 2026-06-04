@@ -1,14 +1,7 @@
+using CommercialNews.Api.Api.Admin.Contracts.Audit.Common;
+
 namespace CommercialNews.Api.Api.Admin.Contracts.Audit.AuditLog.Responses;
 
-public sealed class GetAuditLogsHttpResponse
+public sealed class GetAuditLogsHttpResponse : AuditPagedHttpResponse<AuditLogListItemHttpResponse>
 {
-    public IReadOnlyList<AuditLogListItemHttpResponse> Items { get; init; } = Array.Empty<AuditLogListItemHttpResponse>();
-
-    public int Page { get; init; }
-
-    public int PageSize { get; init; }
-
-    public int TotalCount { get; init; }
-
-    public int TotalPages { get; init; }
 }

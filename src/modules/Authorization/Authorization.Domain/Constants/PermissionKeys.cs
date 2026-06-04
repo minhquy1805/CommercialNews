@@ -98,12 +98,28 @@ public static class PermissionKeys
 
     public static class Audit
     {
+        public static class Modules
+        {
+            public const string Read = "audit:modules:read";
+        }
+
         public static class Logs
         {
             public const string Read = "audit:logs:read";
             public const string ReadDetail = "audit:logs:read-detail";
             public const string ReadByCorrelation = "audit:logs:read-by-correlation";
-            public const string ReadByEvent = "audit:logs:read-by-event";
+            public const string ReadByMessage = "audit:logs:read-by-message";
+        }
+
+        public static class Ingestion
+        {
+            public const string Read = "audit:ingestion:read";
+            public const string ReadDetail = "audit:ingestion:read-detail";
+        }
+
+        public static class Dashboard
+        {
+            public const string Read = "audit:dashboard:read";
         }
     }
 

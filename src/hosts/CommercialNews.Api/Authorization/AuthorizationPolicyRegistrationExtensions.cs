@@ -279,6 +279,11 @@ public static class AuthorizationPolicyRegistrationExtensions
                     new PermissionRequirement(PermissionKeys.Seo.SlugGeneration.Generate)));
 
             options.AddPolicy(
+                AuthorizationPolicies.AuditModulesRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Audit.Modules.Read)));
+
+            options.AddPolicy(
                 AuthorizationPolicies.AuditLogsRead,
                 policy => policy.Requirements.Add(
                     new PermissionRequirement(PermissionKeys.Audit.Logs.Read)));
@@ -294,9 +299,24 @@ public static class AuthorizationPolicyRegistrationExtensions
                     new PermissionRequirement(PermissionKeys.Audit.Logs.ReadByCorrelation)));
 
             options.AddPolicy(
-                AuthorizationPolicies.AuditLogsReadByEvent,
+                AuthorizationPolicies.AuditLogsReadByMessage,
                 policy => policy.Requirements.Add(
-                    new PermissionRequirement(PermissionKeys.Audit.Logs.ReadByEvent)));
+                    new PermissionRequirement(PermissionKeys.Audit.Logs.ReadByMessage)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.AuditIngestionRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Audit.Ingestion.Read)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.AuditIngestionReadDetail,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Audit.Ingestion.ReadDetail)));
+
+            options.AddPolicy(
+                AuthorizationPolicies.AuditDashboardRead,
+                policy => policy.Requirements.Add(
+                    new PermissionRequirement(PermissionKeys.Audit.Dashboard.Read)));
 
             options.AddPolicy(
                 AuthorizationPolicies.IdentityUsersRead,
