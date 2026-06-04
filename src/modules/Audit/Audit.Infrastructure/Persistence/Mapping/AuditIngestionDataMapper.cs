@@ -19,7 +19,7 @@ internal static class AuditIngestionDataMapper
             eventType: reader.GetRequiredString("EventType"),
             eventVersion: null,
             sourceModule: ResolveSourceModule(reader.GetRequiredString("EventType")),
-            sourcePriority: reader.GetNullableInt32("SourcePriority"),
+            sourcePriority: reader.GetNullableInt32FromNumber("SourcePriority"),
             sourceOccurredAtUtc: reader.GetRequiredDateTime("SourceOccurredAtUtc"),
             sourcePublishedAtUtc: reader.GetNullableDateTime("SourcePublishedAtUtc"));
 
