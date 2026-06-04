@@ -76,7 +76,7 @@ internal static class AuditLogDataMapper
             action: reader.GetRequiredString("Action"),
             actionCategory: reader.GetNullableString("ActionCategory"),
             summary: reader.GetRequiredString("Summary"),
-            reason: null,
+            reason: reader.GetNullableString("Reason"),
             ingestedAtUtc: reader.GetRequiredDateTime("IngestedAtUtc"),
             createdAtUtc: reader.GetRequiredDateTime("CreatedAtUtc"));
     }

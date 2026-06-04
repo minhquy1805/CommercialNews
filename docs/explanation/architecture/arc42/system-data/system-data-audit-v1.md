@@ -475,6 +475,7 @@ They must not replace `AuditLog`.
 | `Severity`            |     `VARCHAR(30)` |   NO | Info/Warning/Error/Critical                           |
 | `RiskLevel`           |     `VARCHAR(30)` |   NO | Low/Medium/High/Critical                              |
 | `Summary`             |   `NVARCHAR(500)` |   NO | Safe human-readable summary                           |
+| `Reason`              |   `NVARCHAR(500)` |  YES | Optional event-specific reason from normalizer/source payload |
 | `CorrelationId`       |   `NVARCHAR(100)` |  YES | Trace correlation                                     |
 | `CausationId`         |   `NVARCHAR(100)` |  YES | Optional                                              |
 | `TraceId`             |   `NVARCHAR(100)` |  YES | Optional                                              |
@@ -617,6 +618,7 @@ CK_AuditLog_Action_NotBlank
 CK_AuditLog_ResourceType_NotBlank
 CK_AuditLog_ResourceId_NotBlank
 CK_AuditLog_Summary_NotBlank
+CK_AuditLog_Reason_NotBlank
 
 CK_AuditLog_EventVersion
   EventVersion IS NULL OR EventVersion >= 1

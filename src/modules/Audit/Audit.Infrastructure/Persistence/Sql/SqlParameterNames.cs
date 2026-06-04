@@ -74,6 +74,7 @@ internal static class SqlParameterNames
         public const string Action = "@Action";
         public const string ActionCategory = "@ActionCategory";
         public const string Summary = "@Summary";
+        public const string Reason = "@Reason";
 
         public const string IngestedAtUtc = "@IngestedAtUtc";
         public const string CreatedAtUtc = "@CreatedAtUtc";

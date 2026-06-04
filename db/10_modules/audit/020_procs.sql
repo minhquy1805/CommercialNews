@@ -98,6 +98,7 @@ CREATE OR ALTER PROCEDURE [audit].[AuditLog_Insert]
     @RiskLevel             VARCHAR(30),
 
     @Summary               NVARCHAR(500),
+    @Reason                NVARCHAR(500) = NULL,
 
     @CorrelationId         NVARCHAR(100) = NULL,
     @CausationId           NVARCHAR(100) = NULL,
@@ -136,6 +137,7 @@ BEGIN
     SET @MessageId = LTRIM(RTRIM(@MessageId));
     SET @IngestedAtUtc = ISNULL(@IngestedAtUtc, @NowUtc);
     SET @CreatedAtUtc = ISNULL(@CreatedAtUtc, @IngestedAtUtc);
+    SET @Reason = NULLIF(LTRIM(RTRIM(@Reason)), N'');
 
     IF NULLIF(@PublicId, '') IS NULL
         THROW 56310, 'Audit public id is required.', 1;
@@ -249,6 +251,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -292,6 +295,7 @@ BEGIN
         @Severity,
         @RiskLevel,
         @Summary,
+        @Reason,
         @CorrelationId,
         @CausationId,
         @TraceId,
@@ -351,6 +355,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -409,6 +414,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -467,6 +473,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -529,6 +536,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -597,6 +605,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -664,6 +673,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -718,6 +728,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -776,6 +787,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -900,6 +912,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],
@@ -1085,6 +1098,7 @@ BEGIN
         [Severity],
         [RiskLevel],
         [Summary],
+        [Reason],
         [CorrelationId],
         [CausationId],
         [TraceId],

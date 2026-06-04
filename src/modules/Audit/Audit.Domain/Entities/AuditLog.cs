@@ -91,7 +91,7 @@ public sealed class AuditLog
 
         var normalizedPublicId = NormalizeRequiredPublicId(publicId);
         var normalizedSummary = NormalizeRequiredSummary(summary);
-        var normalizedReason = NormalizeOptional(reason);
+        var normalizedReason = NormalizeOptionalReason(reason);
 
         EnsureValidIngestedAtUtc(ingestedAtUtc);
 
@@ -149,7 +149,7 @@ public sealed class AuditLog
         var normalizedPublicId = NormalizeRequiredPublicId(publicId);
         var normalizedActionClassification = AuditActionClassificationResult.Create(action, actionCategory);
         var normalizedSummary = NormalizeRequiredSummary(summary);
-        var normalizedReason = NormalizeOptional(reason);
+        var normalizedReason = NormalizeOptionalReason(reason);
 
         EnsureValidIngestedAtUtc(ingestedAtUtc);
         EnsureValidCreatedAtUtc(createdAtUtc);
@@ -214,6 +214,19 @@ public sealed class AuditLog
         return string.IsNullOrWhiteSpace(normalized)
             ? null
             : normalized;
+    }
+
+    private static string? NormalizeOptionalReason(string? reason)
+    {
+        var normalizedReason = NormalizeOptional(reason);
+
+        if (normalizedReason is not null &&
+            normalizedReason.Length > AuditConstants.MaxReasonLength)
+        {
+            throw AuditDomainException.ReasonTooLong();
+        }
+
+        return normalizedReason;
     }
 
     private static void EnsureValidIngestedAtUtc(DateTime ingestedAtUtc)

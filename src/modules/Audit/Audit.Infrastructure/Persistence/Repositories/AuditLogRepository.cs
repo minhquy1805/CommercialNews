@@ -329,6 +329,7 @@ public sealed class AuditLogRepository : IAuditLogRepository
             SqlParameterFactory.VarChar(SqlParameterNames.AuditLog.Severity, auditLog.Risk.Severity, 30),
             SqlParameterFactory.VarChar(SqlParameterNames.AuditLog.RiskLevel, auditLog.Risk.RiskLevel, 30),
             SqlParameterFactory.NVarChar(SqlParameterNames.AuditLog.Summary, auditLog.Summary, AuditConstants.MaxSummaryLength),
+            SqlParameterFactory.NVarChar(SqlParameterNames.AuditLog.Reason, auditLog.Reason, AuditConstants.MaxReasonLength),
             SqlParameterFactory.NVarChar(SqlParameterNames.Common.CorrelationId, auditLog.TraceContext.CorrelationId, AuditConstants.MaxCorrelationIdLength),
             SqlParameterFactory.NVarChar(SqlParameterNames.Common.CausationId, auditLog.TraceContext.CausationId, AuditConstants.MaxCausationIdLength),
             SqlParameterFactory.NVarChar(SqlParameterNames.Common.TraceId, auditLog.TraceContext.TraceId, AuditConstants.MaxTraceIdLength),

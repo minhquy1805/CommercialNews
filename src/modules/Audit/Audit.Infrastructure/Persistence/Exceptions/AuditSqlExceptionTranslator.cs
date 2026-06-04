@@ -60,6 +60,10 @@ public sealed class AuditSqlExceptionTranslator : SqlExceptionTranslatorBase
             "AUDIT.VALIDATION_FAILED",
             "Audit summary is required."),
         (
+            "CK_AuditLog_Reason_NotBlank",
+            "AUDIT.VALIDATION_FAILED",
+            "Audit reason must not be blank."),
+        (
             "CK_AuditLog_EventVersion",
             "AUDIT.VALIDATION_FAILED",
             "Audit event version is invalid."),

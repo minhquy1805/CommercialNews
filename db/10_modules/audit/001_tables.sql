@@ -83,6 +83,7 @@ BEGIN
         [RiskLevel]           VARCHAR(30)          NOT NULL,
 
         [Summary]             NVARCHAR(500)        NOT NULL,
+        [Reason]              NVARCHAR(500)        NULL,
 
         [CorrelationId]       NVARCHAR(100)        NULL,
         [CausationId]         NVARCHAR(100)        NULL,
@@ -142,6 +143,9 @@ BEGIN
 
         CONSTRAINT [CK_AuditLog_Summary_NotBlank]
             CHECK (LEN(LTRIM(RTRIM([Summary]))) > 0),
+
+        CONSTRAINT [CK_AuditLog_Reason_NotBlank]
+            CHECK ([Reason] IS NULL OR LEN(LTRIM(RTRIM([Reason]))) > 0),
 
         CONSTRAINT [CK_AuditLog_EventVersion]
             CHECK ([EventVersion] IS NULL OR [EventVersion] >= 1),

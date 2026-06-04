@@ -55,6 +55,7 @@ Severity varchar(30) [not null]           // Info/Warning/Error/Critical
 RiskLevel varchar(30) [not null]          // Low/Medium/High/Critical
 
 Summary nvarchar(500) [not null]          // short, safe investigation text
+Reason nvarchar(500) [null]               // optional event-specific reason from normalizer/source payload
 
 CorrelationId nvarchar(100) [null]        // request/workflow correlation id
 CausationId nvarchar(100) [null]          // optional causation id

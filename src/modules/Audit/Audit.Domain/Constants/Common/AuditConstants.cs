@@ -23,6 +23,7 @@ public static class AuditConstants
     public const int MaxActorDisplayNameLength = 200;
 
     public const int MaxSummaryLength = 500;
+    public const int MaxReasonLength = 500;
 
     public const int MaxCorrelationIdLength = 100;
     public const int MaxCausationIdLength = 100;

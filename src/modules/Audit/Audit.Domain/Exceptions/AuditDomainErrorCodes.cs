@@ -62,6 +62,7 @@ public static class AuditDomainErrorCodes
     // Summary
     public const string SummaryRequired = "AUDIT_DOMAIN.SUMMARY_REQUIRED";
     public const string SummaryTooLong = "AUDIT_DOMAIN.SUMMARY_TOO_LONG";
+    public const string ReasonTooLong = "AUDIT_DOMAIN.REASON_TOO_LONG";
 
     // Trace / request context
     public const string CorrelationIdTooLong = "AUDIT_DOMAIN.CORRELATION_ID_TOO_LONG";
