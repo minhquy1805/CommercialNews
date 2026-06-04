@@ -8,9 +8,6 @@ using CommercialNews.Worker.Authorization.Handlers;
 using CommercialNews.Worker.Authorization.Handlers.Identity;
 using CommercialNews.Worker.Audit.Consumers;
 using CommercialNews.Worker.Audit.Handlers;
-using CommercialNews.Worker.Audit.Handlers.Authorization;
-using CommercialNews.Worker.Audit.Handlers.Identity;
-using CommercialNews.Worker.Audit.Handlers.Interaction;
 using CommercialNews.Worker.Configuration;
 using CommercialNews.Worker.Interaction.Consumers;
 using CommercialNews.Worker.Interaction.Handlers;
@@ -31,14 +28,12 @@ using CommercialNews.Worker.Outbox.Handlers.Seo;
 using Notifications.Application.DependencyInjection;
 using Notifications.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Outbox.Handlers.Content;
-using CommercialNews.Worker.Audit.Handlers.Content;
 using CommercialNews.Worker.Seo.Handlers;
 using CommercialNews.Worker.Seo.Handlers.Content;
 using CommercialNews.Worker.Seo.Consumers;
 using Seo.Application.DependencyInjection;
 using Seo.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Outbox.Handlers.Media;
-using CommercialNews.Worker.Audit.Handlers.Media;
 using Reading.Application.DependencyInjection;
 using Reading.Infrastructure.DependencyInjection;
 using CommercialNews.Worker.Reading.Consumers;
@@ -214,55 +209,7 @@ public static class WorkerModuleRegistration
                 "Interaction view stats materialization batch ErrorDelaySeconds must be greater than zero when enabled.")
             .ValidateOnStart();
 
-        services.AddScoped<AuditIntegrationEventDispatcher>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationUserRoleAssignedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationUserRoleRevokedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRolePermissionGrantedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRolePermissionRevokedAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRoleCreatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRoleUpdatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRoleActivatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationRoleDeactivatedAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionCreatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionUpdatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionActivatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, AuthorizationPermissionDeactivatedAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, IdentityEmailVerifiedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, IdentityPasswordChangedAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserActivatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserDisabledAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserLockedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserUnlockedAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, IdentityEmailMarkedVerifiedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, IdentityUserSessionsRevokedAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleCreatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleUpdatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, ContentArticlePublishedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleUnpublishedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleArchivedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, ContentArticleSoftDeletedAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetRegisteredAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetUpdatedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetSoftDeletedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, MediaAssetRestoredAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaAttachedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaDetachedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, ArticleMediaReorderedAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, ArticlePrimaryMediaSetAuditHandler>();
-
-        services.AddScoped<IAuditIntegrationEventHandler, CommentHiddenAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, CommentRestoredAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, CommentDeletedByAuthorAuditHandler>();
-        services.AddScoped<IAuditIntegrationEventHandler, CommentReportsDismissedAuditHandler>();
+        services.AddScoped<AuditMessageHandler>();
 
         services.AddScoped<SeoIntegrationEventDispatcher>();
 

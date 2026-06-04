@@ -413,6 +413,12 @@ public static class SystemPermissions
             Description: "Read effective permissions for a user"),
 
         new(
+            Key: PermissionKeys.Audit.Modules.Read,
+            Module: "Audit",
+            Action: "ReadModules",
+            Description: "Read audit source modules and supported audit actions"),
+
+        new(
             Key: PermissionKeys.Audit.Logs.Read,
             Module: "Audit",
             Action: "Read",
@@ -431,9 +437,27 @@ public static class SystemPermissions
             Description: "Read audit logs by correlation id"),
 
         new(
-            Key: PermissionKeys.Audit.Logs.ReadByEvent,
+            Key: PermissionKeys.Audit.Logs.ReadByMessage,
             Module: "Audit",
-            Action: "ReadByEvent",
-            Description: "Read audit logs by audit event id")
+            Action: "ReadByMessage",
+            Description: "Read audit logs by outbox message id"),
+
+        new(
+            Key: PermissionKeys.Audit.Ingestion.Read,
+            Module: "Audit",
+            Action: "ReadIngestion",
+            Description: "Read audit ingestion records"),
+
+        new(
+            Key: PermissionKeys.Audit.Ingestion.ReadDetail,
+            Module: "Audit",
+            Action: "ReadIngestionDetail",
+            Description: "Read audit ingestion record details"),
+
+        new(
+            Key: PermissionKeys.Audit.Dashboard.Read,
+            Module: "Audit",
+            Action: "ReadDashboard",
+            Description: "Read audit dashboard summaries and risk events")
     ];
 }

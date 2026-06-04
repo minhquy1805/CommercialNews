@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using CommercialNews.BuildingBlocks.Outbox.IntegrationEvents;
+using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using CommercialNews.Worker.Audit.Handlers;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
@@ -37,21 +38,26 @@ public sealed class AuditRabbitMqConsumerService : BackgroundService
 
     private AuditRabbitMqConsumerOptions Options => _optionsMonitor.CurrentValue;
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
     {
         AuditRabbitMqConsumerOptions options = Options;
-        ValidateRoutingKeys(options.RoutingKeys);
+
+        ValidateOptions(options);
 
         _logger.LogInformation(
-            "Audit RabbitMQ consumer starting. Exchange={ExchangeName}, Queue={QueueName}, ConsumerTag={ConsumerTag}, PrefetchCount={PrefetchCount}",
+            "Audit RabbitMQ consumer starting. Exchange={ExchangeName}, Queue={QueueName}, ConsumerTag={ConsumerTag}, ConsumerName={ConsumerName}, PrefetchCount={PrefetchCount}",
             options.ExchangeName,
             options.QueueName,
             options.ConsumerTag,
+            options.ConsumerName,
             options.PrefetchCount);
 
         try
         {
-            await StartConsumerAsync(options, stoppingToken);
+            await StartConsumerAsync(
+                options,
+                stoppingToken);
 
             _logger.LogInformation(
                 "Audit RabbitMQ consumer started. Exchange={ExchangeName}, Queue={QueueName}, RoutingKeys={RoutingKeys}",
@@ -59,7 +65,9 @@ public sealed class AuditRabbitMqConsumerService : BackgroundService
                 options.QueueName,
                 string.Join(", ", options.RoutingKeys));
 
-            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+            await Task.Delay(
+                Timeout.InfiniteTimeSpan,
+                stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -75,15 +83,84 @@ public sealed class AuditRabbitMqConsumerService : BackgroundService
         {
             await DisposeRabbitMqAsync();
 
-            _logger.LogInformation("Audit RabbitMQ consumer stopped.");
+            _logger.LogInformation(
+                "Audit RabbitMQ consumer stopped.");
         }
     }
 
-    private static void ValidateRoutingKeys(
-        string[]? routingKeys)
+    private static void ValidateOptions(
+        AuditRabbitMqConsumerOptions options)
     {
-        if (routingKeys is null
-            || !routingKeys.Any(static routingKey => !string.IsNullOrWhiteSpace(routingKey)))
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (string.IsNullOrWhiteSpace(options.HostName))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer HostName is required.");
+        }
+
+        if (options.Port <= 0)
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer Port must be greater than zero.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.UserName))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer UserName is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.Password))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer Password is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.VirtualHost))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer VirtualHost is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ExchangeName))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer ExchangeName is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ExchangeType))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer ExchangeType is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.QueueName))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer QueueName is required.");
+        }
+
+        if (options.PrefetchCount == 0)
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer PrefetchCount must be greater than zero.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ConsumerTag))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer ConsumerTag is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.ConsumerName))
+        {
+            throw new InvalidOperationException(
+                "Audit RabbitMQ consumer ConsumerName is required.");
+        }
+
+        if (options.RoutingKeys is null ||
+            !options.RoutingKeys.Any(static routingKey => !string.IsNullOrWhiteSpace(routingKey)))
         {
             throw new InvalidOperationException(
                 "Audit RabbitMQ consumer requires at least one routing key.");
@@ -104,7 +181,8 @@ public sealed class AuditRabbitMqConsumerService : BackgroundService
             ClientProvidedName = options.ClientProvidedName
         };
 
-        _connection = await factory.CreateConnectionAsync(cancellationToken);
+        _connection = await factory.CreateConnectionAsync(
+            cancellationToken);
 
         _channel = await _connection.CreateChannelAsync(
             cancellationToken: cancellationToken);
@@ -206,11 +284,12 @@ public sealed class AuditRabbitMqConsumerService : BackgroundService
             await using AsyncServiceScope scope =
                 _serviceScopeFactory.CreateAsyncScope();
 
-            var dispatcher =
-                scope.ServiceProvider.GetRequiredService<AuditIntegrationEventDispatcher>();
+            var handler =
+                scope.ServiceProvider.GetRequiredService<AuditMessageHandler>();
 
-            var result = await dispatcher.DispatchAsync(
+            Result result = await handler.HandleAsync(
                 envelope,
+                consumerName: options.ConsumerName,
                 cancellationToken);
 
             if (result.IsSuccess)
@@ -229,20 +308,25 @@ public sealed class AuditRabbitMqConsumerService : BackgroundService
                 return;
             }
 
-            var error = result.Error!;
+            Error error = result.Error!;
 
             _logger.LogWarning(
-                "Audit event processing failed. MessageId={MessageId}, EventType={EventType}, RoutingKey={RoutingKey}, ErrorCode={ErrorCode}, ErrorMessage={ErrorMessage}",
+                "Audit event processing failed. MessageId={MessageId}, EventType={EventType}, RoutingKey={RoutingKey}, ErrorCode={ErrorCode}, ErrorMessage={ErrorMessage}, ErrorType={ErrorType}",
                 envelope.MessageId,
                 envelope.EventType,
                 eventArgs.RoutingKey,
                 error.Code,
-                error.Message);
+                error.Message,
+                error.Type);
+
+            bool shouldRequeue = ShouldRequeue(
+                error,
+                options);
 
             await _channel.BasicNackAsync(
                 deliveryTag: eventArgs.DeliveryTag,
                 multiple: false,
-                requeue: options.RequeueOnFailure,
+                requeue: shouldRequeue,
                 cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -289,11 +373,24 @@ public sealed class AuditRabbitMqConsumerService : BackgroundService
             return null;
         }
 
-        string json = Encoding.UTF8.GetString(eventArgs.Body.ToArray());
+        string json = Encoding.UTF8.GetString(
+            eventArgs.Body.ToArray());
 
         return JsonSerializer.Deserialize<OutboxIntegrationEventEnvelope>(
             json,
             JsonOptions);
+    }
+
+    private static bool ShouldRequeue(
+        Error error,
+        AuditRabbitMqConsumerOptions options)
+    {
+        if (error.Type == ErrorType.Validation)
+        {
+            return false;
+        }
+
+        return options.RequeueOnFailure;
     }
 
     private async Task DisposeRabbitMqAsync()

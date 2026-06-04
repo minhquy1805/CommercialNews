@@ -1,0 +1,25 @@
+namespace Audit.Application.Models.Results.Ingestion;
+
+public sealed record AuditIngestionListItemResult(
+    string PublicId,
+    string MessageId,
+    string EventType,
+    string? AggregateType,
+    string? AggregateId,
+    string? AggregatePublicId,
+    int? AggregateVersion,
+    string? CorrelationId,
+    int? SourcePriority,
+    DateTime SourceOccurredAtUtc,
+    DateTime? SourcePublishedAtUtc,
+    string ConsumerName,
+    string Status,
+    int AttemptCount,
+    DateTime FirstReceivedAtUtc,
+    DateTime? LastAttemptAtUtc,
+    DateTime? ProcessedAtUtc,
+    DateTime? DeadLetteredAtUtc,
+    string? LastErrorCode,
+    string? LastErrorClass,
+    DateTime CreatedAtUtc,
+    DateTime UpdatedAtUtc);

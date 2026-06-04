@@ -13,4 +13,6 @@ public sealed record OutboxIntegrationEventEnvelope(
     JsonElement? Headers,
     string? CorrelationId,
     long? InitiatorUserId,
-    DateTime OccurredAtUtc);
+    int Priority,
+    DateTime OccurredAtUtc,
+    DateTime? PublishedAtUtc);

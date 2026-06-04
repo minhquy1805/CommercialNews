@@ -70,10 +70,14 @@ public static class AuthorizationPolicies
     public const string SeoSlugAvailabilityRead = SeoSlugRoutesRead;
     public const string SeoSlugGenerate = SeoSlugRoutesGenerate;
 
+    public const string AuditModulesRead = "Permission:audit:modules:read";
     public const string AuditLogsRead = "Permission:audit:logs:read";
     public const string AuditLogsReadDetail = "Permission:audit:logs:read-detail";
     public const string AuditLogsReadByCorrelation = "Permission:audit:logs:read-by-correlation";
-    public const string AuditLogsReadByEvent = "Permission:audit:logs:read-by-event";
+    public const string AuditLogsReadByMessage = "Permission:audit:logs:read-by-message";
+    public const string AuditIngestionRead = "Permission:audit:ingestion:read";
+    public const string AuditIngestionReadDetail = "Permission:audit:ingestion:read-detail";
+    public const string AuditDashboardRead = "Permission:audit:dashboard:read";
 
     public const string IdentityUsersRead = "Permission:identity:users:read";
     public const string IdentityUsersReadSecurity = "Permission:identity:users:read-security";

@@ -54,10 +54,14 @@ public static class DefaultRolePermissions
                 PermissionKeys.Seo.SlugRoutes.Deactivate,
                 PermissionKeys.Seo.SlugGeneration.Generate,
 
+                PermissionKeys.Audit.Modules.Read,
                 PermissionKeys.Audit.Logs.Read,
                 PermissionKeys.Audit.Logs.ReadDetail,
                 PermissionKeys.Audit.Logs.ReadByCorrelation,
-                PermissionKeys.Audit.Logs.ReadByEvent,
+                PermissionKeys.Audit.Logs.ReadByMessage,
+                PermissionKeys.Audit.Ingestion.Read,
+                PermissionKeys.Audit.Ingestion.ReadDetail,
+                PermissionKeys.Audit.Dashboard.Read,
 
                 PermissionKeys.Identity.Users.Read,
                 PermissionKeys.Identity.Users.ReadSecurity,

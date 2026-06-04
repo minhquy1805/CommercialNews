@@ -32,6 +32,8 @@ public sealed class AuditRabbitMqConsumerOptions
 
     public string ClientProvidedName { get; init; } = "CommercialNews.Audit.Consumer";
 
+    public string ConsumerName { get; init; } = "CommercialNews.Audit.Consumer";
+
     public bool RequeueOnFailure { get; init; } = true;
 
     public string[] RoutingKeys { get; init; } = [];

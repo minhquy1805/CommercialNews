@@ -4,6 +4,7 @@ using CommercialNews.BuildingBlocks.Outbox.Enums;
 using CommercialNews.BuildingBlocks.Outbox.IntegrationEvents;
 using CommercialNews.BuildingBlocks.Outbox.Models;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
+using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 
@@ -14,13 +15,16 @@ public sealed class RabbitMqOutboxEventPublisher : IOutboxEventPublisher
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly OutboxRabbitMqOptions _options;
+    private readonly IDateTimeProvider _dateTimeProvider;
     private readonly ILogger<RabbitMqOutboxEventPublisher> _logger;
 
     public RabbitMqOutboxEventPublisher(
         IOptions<OutboxRabbitMqOptions> options,
+        IDateTimeProvider dateTimeProvider,
         ILogger<RabbitMqOutboxEventPublisher> logger)
     {
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -127,7 +131,10 @@ public sealed class RabbitMqOutboxEventPublisher : IOutboxEventPublisher
             arguments: null,
             cancellationToken: cancellationToken);
 
-        OutboxIntegrationEventEnvelope envelope = CreateEnvelope(message);
+        DateTime publishedAtUtc = EnsureUtc(_dateTimeProvider.UtcNow);
+        OutboxIntegrationEventEnvelope envelope = CreateEnvelope(
+            message,
+            publishedAtUtc);
 
         string json = JsonSerializer.Serialize(envelope, JsonOptions);
         byte[] body = Encoding.UTF8.GetBytes(json);
@@ -140,7 +147,7 @@ public sealed class RabbitMqOutboxEventPublisher : IOutboxEventPublisher
             ContentEncoding = "utf-8",
             CorrelationId = message.CorrelationId,
             Timestamp = new AmqpTimestamp(
-                new DateTimeOffset(message.OccurredAt).ToUnixTimeSeconds()),
+                new DateTimeOffset(publishedAtUtc).ToUnixTimeSeconds()),
             DeliveryMode = _options.PersistentMessages
                 ? DeliveryModes.Persistent
                 : DeliveryModes.Transient
@@ -164,7 +171,8 @@ public sealed class RabbitMqOutboxEventPublisher : IOutboxEventPublisher
     }
 
     private static OutboxIntegrationEventEnvelope CreateEnvelope(
-        OutboxMessage message)
+        OutboxMessage message,
+        DateTime publishedAtUtc)
     {
         JsonElement payload =
             JsonSerializer.Deserialize<JsonElement>(message.Payload);
@@ -184,6 +192,26 @@ public sealed class RabbitMqOutboxEventPublisher : IOutboxEventPublisher
             Headers: headers,
             CorrelationId: message.CorrelationId,
             InitiatorUserId: message.InitiatorUserId,
-            OccurredAtUtc: message.OccurredAt);
+            Priority: message.Priority,
+            OccurredAtUtc: EnsureUtc(message.OccurredAt),
+            PublishedAtUtc: EnsureUtc(publishedAtUtc));
+    }
+
+    private static DateTime EnsureUtc(
+        DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Utc)
+        {
+            return value;
+        }
+
+        if (value.Kind == DateTimeKind.Unspecified)
+        {
+            return DateTime.SpecifyKind(
+                value,
+                DateTimeKind.Utc);
+        }
+
+        return value.ToUniversalTime();
     }
 }

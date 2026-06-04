@@ -1,397 +1,1019 @@
 # System Data Model — Audit (V1)
 
-> **Recommended file:** `explanation/architecture/arc42/system-data/system-data-audit-v1.md`  
-> **Module:** Audit Trail  
-> **Purpose:** Append-only logging for sensitive actions across modules, designed for investigations, governance, and operational forensics.
+> **Recommended file:** `explanation/architecture/arc42/system-data/system-data-audit-v1.md`
+> **Module:** Audit
+> **Purpose:** SQL-backed append-only evidence for important actions across modules, designed for investigation, governance, security review, and operational diagnostics.
 
 ---
 
-## 0) Data System fit (V1)
+## 0. Data System Fit
 
-Audit is a **governance-critical** subsystem, but it must be **non-blocking** for core flows.
+Audit is a governance-critical subsystem, but it must remain non-blocking for core business flows.
 
-- **Truth store:** append-only `AuditLog` (investigation-ready)
-- **Ingestion:** async via Outbox + Worker (recommended)
-- **Idempotency:** required (at-least-once delivery is assumed)
-- **Privacy:** minimum necessary data; no secrets/tokens; safe logging
+Audit V1 is intentionally simple:
 
-**Non-negotiables (from Quality Requirements)**
-- Admin actions must be traceable (publish/unpublish, RBAC changes, deletes/restores)
-- Audit ingestion failures must not break core writes
-- Backlog/lag must be observable and recoverable
+* SQL-backed `AuditLog`
+* SQL-backed `AuditIngestion`
+* asynchronous ingestion through Outbox → RabbitMQ → Audit Consumer
+* durable `MessageId` deduplication
+* redaction before persistence
+* investigation-ready query indexes
+* lightweight dashboard queries from SQL
 
----
-
-## 1) Capability → Entity mapping
-
-### 1.1 Sensitive actions logging (audit trail)
-**Entity**
-- `AuditLog` (append-only, investigation-ready)
-
-**Reliability & ingestion**
-- Audit events should flow through a shared Outbox mechanism where possible.
-- Consumers must be idempotent (dedup on `AuditEventId`).
-- V2 can add consumer checkpoints and gap detection for stronger guarantees.
+Audit V1 is not a full compliance/reporting platform. More advanced capabilities such as alerting, replay, reconciliation, archival, materialized summaries, cache acceleration, and partitioning are future extension paths.
 
 ---
 
-## 2) Identify entities (V1)
+## 1. Data Ownership
 
-### V1 must-have
+### 1.1 Audit-owned truth
+
+Audit owns:
+
+* append-only audit evidence
+* consumer-side ingestion state
+* message-level dedupe outcome
+* audit redaction policy
+* audit investigation query contracts
+* audit operational visibility data
+
+Audit-owned truth tables in V1:
+
+* `audit.AuditLog`
+* `audit.AuditIngestion`
+
+### 1.2 Not owned by Audit
+
+Audit does not own:
+
+* Identity account truth
+* Authorization role/permission truth
+* Content publication truth
+* Media attachment truth
+* Interaction comment/report truth
+* SEO routing truth
+* Notifications delivery truth
+* producer-side Outbox state
+* RabbitMQ broker state
+
+Audit records evidence about source-module events. It does not determine current source-module business state.
+
+---
+
+## 2. Data System Posture
+
+### 2.1 Truth store
+
+Audit truth is stored in SQL Server.
+
+`AuditLog` is append-only evidence truth.
+
+`AuditIngestion` is consumer-side processing truth.
+
+### 2.2 Derived outputs
+
+The following are derived and not required in V1:
+
+* dashboard cache
+* recent-risk panels cache
+* audit summaries
+* digests
+* reports
+* alerts
+* reconciliation outputs
+* replay candidate sets
+* archive indexes
+* search projections
+
+Derived outputs may lag and may be rebuilt. They must not replace `AuditLog`.
+
+### 2.3 Redis posture
+
+Audit V1 does not require Redis.
+
+Future Redis usage may be introduced only as optional acceleration for:
+
+* dashboard summary cache
+* recent high-risk panel cache
+* module/action metadata cache
+* TTL-bound alert dedupe hints
+
+Redis must not be used as:
+
+* AuditLog truth
+* AuditIngestion truth
+* the only dedupe mechanism for critical audit evidence
+* replacement for SQL investigation detail queries
+
+---
+
+## 3. Capability to Entity Mapping
+
+### 3.1 Audit evidence ingestion
+
+Capability:
+
+* consume audit-relevant messages from Outbox/RabbitMQ
+* normalize event into audit evidence
+* redact unsafe fields
+* persist append-only evidence
+
+Entity:
+
+* `AuditLog`
+
+### 3.2 Consumer-side processing tracking
+
+Capability:
+
+* track whether Audit has seen a `MessageId`
+* distinguish success, duplicate, ignored, failed, and dead-lettered processing
+* support operator diagnostics
+
+Entity:
+
+* `AuditIngestion`
+
+### 3.3 Investigation queries
+
+Capability:
+
+* search by time range
+* search by module/action
+* search by actor
+* search by resource
+* search by `MessageId`
+* search by `CorrelationId`
+* view actor/resource timelines
+
+Entity:
+
+* `AuditLog`
+
+### 3.4 Operational diagnostics
+
+Capability:
+
+* inspect failed ingestions
+* inspect duplicate processing
+* inspect lag and retry pressure
+* support lightweight dashboard panels
+
+Entities:
+
+* `AuditIngestion`
+* `AuditLog`
+
+---
+
+## 4. Entities
+
+### 4.1 V1 must-have entities
+
+V1 requires:
+
 1. `AuditLog`
+2. `AuditIngestion`
 
-### V2 hooks
-- `AuditIngestionCheckpoint` (consumer checkpoints)
-- `AuditRedactionRule` (policy-driven redaction)
-- `AuditGapDetection` (signals/alerts for missing events)
+### 4.2 Future entities
 
----
+Future extension candidates:
 
-## 3) Dataflows (V1) — REST / DB / Broker (DDIA Ch4)
+* `AuditAlert`
+* `AuditDigest`
+* `AuditDailySummary`
+* `AuditReportRun`
+* `AuditArchiveRun`
+* `AuditReplayRun`
+* `AuditReconciliationRun`
+* `AuditCorrection`
+* `AuditRedactionRule`
 
-### 3.1 Producer side (core modules)
-Core modules emit audit intents as events, but do not persist audit synchronously:
-
-- Content: Publish/Unpublish/Archive/Delete/Restore
-- Authorization: Role/Permission grants/revokes
-- Identity: Email verified, password changed (policy-defined)
-
-**Sync boundary**
-- Core write succeeds even if audit is delayed.
-
-### 3.2 Ingestion side (Worker)
-- Worker consumes audit events from broker (or pulls from Outbox)
-- Writes an immutable `AuditLog` row
-- Dedup by `AuditEventId` (unique)
-
-**Failure behavior**
-- Retry with backoff; poison messages go to DLQ/manual intervention
-- Backlog is observable (success/failure rates, lag)
+These are not required for V1 core delivery.
 
 ---
 
-## 4) Relationships (V1)
+## 5. Dataflows
 
-AuditLog references:
-- `ActorUserId` (Identity) — nullable for system actions
-- Target resource: `(ResourceType, ResourceId)` stored as strings (no hard FK)
-  - supports multi-module targets
-  - supports future split DBs and mixed ID types
+## 5.1 Producer side
 
-> Design intent: audit must survive schema/ID evolution without being tightly coupled to each module’s physical DB.
+Source modules commit their own business truth and write Outbox messages in the same local transaction.
 
----
+Examples of source modules:
 
-## 5) Invariants (V1 rules)
+* Authorization
+* Identity
+* Content
+* Media
+* Interaction
+* SEO
+* Notifications
 
-### 5.1 Append-only immutability
-- AuditLog is immutable after insert (no UPDATE/DELETE) unless explicit retention rules exist.
+Source module success means:
 
-### 5.2 Mandatory fields (investigation-ready)
-- Always capture:
-  - actor (who) — may be null for system actions
-  - action (what)
-  - target resource type/id (which)
-  - occurredAt (when)
-  - correlationId (traceability)
-- **Reason is required** when policy demands it (e.g., unpublish, RBAC changes).
+* source truth committed
+* Outbox message committed when async work is required
 
-### 5.3 Privacy / redaction (hard rule)
-- Never store:
-  - passwords, password hashes
-  - raw verification/reset/refresh tokens
-  - secrets/API keys
-- Minimize PII; keep IP/UserAgent optional and policy-controlled.
-- JSON payloads must be redacted/minimized (store only what investigations need).
+It does not mean:
 
-### 5.4 Reliable under retries (idempotent ingestion)
-- Same `AuditEventId` must not be written twice.
+* RabbitMQ has already received the message
+* Audit has already processed the message
+* AuditLog is immediately queryable
 
-### 5.5 Queryable for investigations
-Audit must be efficiently queryable by:
-- time range
-- actor
-- resource
-- action
-- correlationId
+### Source contract
 
----
+Audit consumes messages based on the shared Outbox contract:
 
-## 6) Fields (Logical schema) — SQL Server (V1)
+```text
+[outbox].[OutboxMessage]
+```
 
-### 6.1 `AuditLog`
-| Field | Type | Null | Default | Notes |
-|---|---|---:|---|---|
-| AuditId | BIGINT IDENTITY | NO |  | PK |
-| AuditEventId | UNIQUEIDENTIFIER | NO | NEWID() | idempotency key |
-| ActorUserId | BIGINT | YES |  | nullable if system |
-| Action | NVARCHAR(120) | NO |  | e.g. `Content.Publish`, `Auth.RoleGrant` |
-| ResourceType | NVARCHAR(60) | NO |  | `Article`, `User`, `Comment`, ... |
-| ResourceId | NVARCHAR(100) | NO |  | stored as string |
-| Reason | NVARCHAR(500) | YES |  | required by policy for some actions |
-| OccurredAt | DATETIME2(3) | NO | SYSUTCDATETIME() | when |
-| CorrelationId | NVARCHAR(100) | YES |  | trace |
-| IpAddress | NVARCHAR(45) | YES |  | optional PII |
-| UserAgent | NVARCHAR(300) | YES |  | optional PII |
-| OldValuesJson | NVARCHAR(MAX) | YES |  | redacted/minimized |
-| NewValuesJson | NVARCHAR(MAX) | YES |  | redacted/minimized |
-| MetadataJson | NVARCHAR(MAX) | YES |  | module info, policy version |
+Relevant fields:
 
-**V2 hooks**
-- `RedactionVersion`, `TenantId`
-- `IngestedAt`, `IngestionStatus`
+* `MessageId`
+* `EventType`
+* `AggregateType`
+* `AggregateId`
+* `AggregatePublicId`
+* `AggregateVersion`
+* `Payload`
+* `Headers`
+* `CorrelationId`
+* `InitiatorUserId`
+* `Priority`
+* `OccurredAt`
+* `PublishedAt`
 
 ---
 
-## 7) Constraints & indexes — Audit (V1)
+## 5.2 Ingestion side
 
-### 7.1 PK / UNIQUE (idempotency)
-- `PK_AuditLog(AuditId)`
-- `UQ_AuditLog_AuditEventId(AuditEventId)` ✅ prevents duplicates under retries
+Audit Worker consumes messages from RabbitMQ.
 
-### 7.2 CHECK (optional)
-- `Action` not empty
-- `ResourceType` not empty
-- `ResourceId` not empty
+Runtime shape:
 
-### 7.3 Indexes (investigation readiness)
-- `IX_AuditLog_OccurredAt` on `(OccurredAt DESC)`
-- `IX_AuditLog_ActorUserId_OccurredAt` on `(ActorUserId, OccurredAt DESC)`
-- `IX_AuditLog_Resource_OccurredAt` on `(ResourceType, ResourceId, OccurredAt DESC)`
-- `IX_AuditLog_Action_OccurredAt` on `(Action, OccurredAt DESC)`
-- `IX_AuditLog_CorrelationId` on `(CorrelationId)` (optional)
+```text
+RabbitMQ delivers message
+    ↓
+Audit consumer receives message
+    ↓
+Audit creates/loads AuditIngestion by MessageId
+    ↓
+Audit normalizer maps event to audit fields
+    ↓
+Audit redacts unsafe payload fields
+    ↓
+Audit checks MessageId dedupe
+    ↓
+Audit inserts AuditLog if not already present
+    ↓
+Audit updates AuditIngestion status
+    ↓
+Consumer ACKs after success or duplicate-safe processing
+```
 
-### 7.4 Append-only enforcement (policy)
-Enforce immutability via:
-- DB permissions (deny UPDATE/DELETE), and/or
-- a trigger that blocks modifications
+### Failure behavior
 
----
+Audit ingestion must tolerate:
 
-## 8) Retention & operational jobs (V1 policy)
+* duplicate delivery
+* consumer crash before ACK
+* worker restart
+* timeout during DB insert
+* retry after ambiguous failure
+* out-of-order delivery
+* invalid payload
+* unsupported event type
+* redaction failure
+* DLQ/poison messages
 
-- Define retention windows for audit logs (policy-level).
-- Provide purge/archive jobs that:
-  - do not break investigation requirements
-  - are observable (job success/failure + records purged)
-- Consider periodic “audit completeness” checks in V2 (gap detection).
+Rules:
 
----
-
-## 9) ADR candidates
-- Outbox → Audit event taxonomy (action naming conventions)
-- What counts as “sensitive action” in V1 vs V2 (scope)
-- PII policy for `IpAddress/UserAgent` retention
-- Redaction policy and schema for Old/New JSON values
-
----
-
-## 10) Partitioning Readiness (V1/V2)
-
-> This section captures **partitioning and ingestion/workload-partitioning readiness** for Audit Trail.
-> V1 remains **non-sharded by default**; priority is append-only ingestion reliability, investigation queryability, and non-blocking core flows.
-
-### 10.1 Why Audit is a partitioning-risk module
-
-Audit is a **governance-critical append-only** subsystem with two competing needs:
-
-* high-volume async ingestion (especially during admin bursts / policy changes)
-* efficient investigation queries (time range, actor, resource, action, correlationId)
-
-**V1 principle:** optimize for **reliable ingestion + investigation indexes** before introducing shard complexity.
+* same `MessageId` must not create duplicate `AuditLog`
+* timeout is ambiguous
+* retry relies on SQL uniqueness
+* poison messages must be visible through `AuditIngestion` and/or DLQ
+* consumer-side failure must not be written back as producer-side Outbox failure
 
 ---
 
-### 10.2 Primary access patterns (V1)
+## 6. Relationships
 
-**Hot path (worker ingestion)**
+### 6.1 AuditLog references source data by stable identifiers
 
-* consume audit events asynchronously
-* insert immutable `AuditLog` rows
-* dedup by `AuditEventId`
+`AuditLog` references source resources through strings, not hard foreign keys.
 
-**Investigation reads**
+Recommended fields:
 
-* by time range (`OccurredAt`)
-* by actor + time
-* by resource + time
-* by action + time
-* by `CorrelationId`
+* `SourceModule`
+* `AggregateType`
+* `AggregateId`
+* `AggregatePublicId`
+* `AggregateVersion`
+* `ResourceType`
+* `ResourceId`
 
-**Dependency rule**
+Design intent:
 
-* core writes must not block on audit ingestion success
-* delayed audit is acceptable only if backlog/lag is visible and recoverable
+* avoid tight coupling to producer modules’ physical schemas
+* support future module split or separate databases
+* preserve evidence even if source schema evolves
+* support stable investigation APIs
 
----
+### 6.2 Actor references
 
-### 10.3 Secondary-index-heavy queries (present and future)
+Outbox currently provides:
 
-**V1**
+```text
+InitiatorUserId BIGINT NULL
+```
 
-* investigation filters using combinations of:
+Audit may store this as:
 
-  * `OccurredAt`
-  * `ActorUserId`
-  * `(ResourceType, ResourceId)`
-  * `Action`
-  * `CorrelationId`
+* `ActorInternalId`
 
-**V2+**
+If the payload or headers provide a public actor id, Audit should also store:
 
-* completeness/gap investigation
-* richer JSON field search (metadata/old/new values)
-* redaction-version / tenant / policy-version queries
+* `ActorUserId`
 
-**Implication**
+Audit should prefer stable opaque identifiers for API-facing actor filters when available.
 
-* Audit is append-only for writes, but **secondary-index-heavy for investigations**.
-* V2+ may need dedicated investigation/search projections before truth-store sharding.
+### 6.3 No hard cross-module foreign keys
 
----
+AuditLog should not require hard FK constraints into source module tables.
 
-### 10.4 Candidate partitioning strategy (future)
+Reason:
 
-Audit partitioning should follow **append-only + investigation time-window** behavior.
-
-#### A) `AuditLog` (append-only truth)
-
-**Likely fit (future):** **range/hybrid**
-
-* time-based range partitioning (natural fit for retention and investigation windows)
-* hybrid option (bucket/module/actor prefix + time) if ingestion hotspots emerge
-
-**Why range/hybrid is attractive**
-
-* investigation queries are strongly time-oriented
-* retention/archive jobs are time-oriented
-* replay/reconciliation often use time windows
-
-**Risk**
-
-* pure time-range partitioning can create a hot “current” partition under bursts
-
-#### B) Investigation/search paths (V2+)
-
-**Likely fit:** dedicated projection/search path
-
-* keep `AuditLog` as append-only truth
-* offload heavy search/filtering to projection/index if query complexity grows
+* Audit must survive source schema evolution
+* Audit may reference resources that were deleted, archived, or moved
+* Audit must remain queryable during partial module failures
+* future module extraction or database split should not break evidence history
 
 ---
 
-### 10.5 Hotspot and skew risks (V1)
+## 7. Invariants
 
-#### A) Ingestion bursts
+### 7.1 Append-only evidence
 
-* admin bulk actions / scripts / migrations / policy changes can create short spikes
-* retries after downstream outages can create replay bursts
+`AuditLog` is append-only by default.
 
-#### B) Current-range hotspot (future partitioning risk)
+Normal business workflows must not update or delete audit evidence.
 
-* if partitioned purely by time, newest partition may become hot
+Exceptions require explicit policy:
 
-#### C) Investigation read skew
+* retention policy
+* legal/compliance purge
+* redaction remediation policy
+* append-only correction model
 
-* incident investigations repeatedly query recent time windows and same `CorrelationId` / resource
+### 7.2 MessageId dedupe
 
----
+`MessageId` is the canonical idempotency key.
 
-### 10.6 V1 mitigations (no sharding yet)
+Rules:
 
-CommercialNews V1 already has the correct baseline mitigations for Audit:
+* `AuditLog.MessageId` must be unique
+* `AuditIngestion.MessageId` should be unique
+* same `MessageId` must not create duplicate evidence
+* replay of the same `MessageId` must be safe
 
-* **Async ingestion** (core writes remain non-blocking)
-* **Idempotent inserts** via `AuditEventId` unique key
-* **Append-only policy** (immutability + governance safety)
-* **Investigation-ready indexes** on time/actor/resource/action/correlation
-* **Retry/backoff + observability** for ingestion failures/backlog
-* **Privacy/redaction rules** to keep payloads safe and minimal
+### 7.3 Different MessageIds are not collapsed by default
 
-These tactics are preferred before introducing shard complexity.
+Audit V1 does not collapse different `MessageId` values by business intent.
 
----
+Reason:
 
-### 10.7 V2+ scale options (selective)
+* different messages may represent different attempts
+* repeated governance actions may be useful evidence
+* raw audit evidence should preserve distinct emitted messages
 
-Introduce stronger partitioning only when signals justify it.
+Future business-level dedupe may be introduced only for derived outputs such as alerts, reports, digests, or noisy dashboard views.
 
-#### Option A — Ingestion lanes / ownership partitioning (recommended first)
+### 7.4 Mandatory evidence fields
 
-Partition ingestion work by logical lane, for example:
+Each `AuditLog` should capture enough information for investigation:
 
-* event family / source module
-* hash bucket on `AuditEventId` or `CorrelationId`
-* priority lane (if policy differentiates)
+* who: actor fields where available
+* what: action and event type
+* where: source module
+* which resource: resource type and id
+* when: occurred and ingested timestamps
+* result: outcome
+* sensitivity: severity and risk level
+* traceability: message id and correlation id
 
-**Why first**
+### 7.5 Privacy and redaction
 
-* directly addresses worker throughput and backlog control
-* lower complexity than truth-store sharding
-* aligns with API + Worker topology
+Audit must never store or return:
 
-#### Option B — Time-based or hybrid partitioning for `AuditLog`
+* passwords
+* password hashes
+* access tokens
+* refresh tokens
+* verification tokens
+* reset tokens
+* API keys
+* session cookies
+* raw authorization headers
+* private signing keys
+* connection strings
+* unsafe sensitive PII
 
-Use when:
+Redaction must happen before persistence.
 
-* retention/archive operations become too expensive
-* recent-window investigations degrade despite indexes
-* audit volume materially impacts recovery/replay operations
+### 7.6 Out-of-order tolerance
 
-#### Option C — Investigation/search projection
+Audit does not require ordered arrival to remain correct.
 
-Introduce a derived search/read path for complex investigations while keeping `AuditLog` as immutable truth.
+Older source events may arrive after newer events.
 
----
+Audit may still append them as historical evidence if they have distinct `MessageId` values.
 
-### 10.8 Rebalancing and routing readiness (future)
+Investigation views may sort by:
 
-Audit will likely need **workload rebalancing** before truth-store sharding.
+* `OccurredAtUtc`
+* `IngestedAtUtc`
+* `AggregateVersion` where available
 
-**Likely rebalance unit**
+### 7.7 Derived outputs are not evidence truth
 
-* ingestion lane / worker ownership shard
-* later: time bucket or hybrid partition ranges
+Dashboards, summaries, reports, alerts, digests, reconciliation outputs, cache entries, and archive indexes are derived.
 
-**Routing requirement**
-
-* authoritative mapping for `lane -> worker owner`
-* safe reassignment with throttling and observability
-
-**Guardrail**
-
-* rebalance/scale changes must not cause sustained backlog growth that threatens audit completeness expectations
-
----
-
-### 10.9 Partition-readiness observability signals (Audit)
-
-Use existing V1 measurement signals to decide when stronger partitioning is needed:
-
-* audit ingestion success/failure rate
-* queue backlog/lag trend for audit consumers
-* consumer processing latency P95/P99
-* retry rate and DLQ rate/age (if enabled)
-* dedupe hits / duplicate-prevention indicators (`AuditEventId`)
-* investigation query latency on recent windows (if measured)
-* backlog recovery time after bursts/incidents
-
-**Scale trigger (policy-level)**
-Consider stronger workload/data partitioning when sustained pressure causes:
-
-* backlog/lag that does not self-recover
-* investigation query performance degradation despite current indexes
-* replay/recovery/archive jobs becoming operationally unsafe
-* incident investigations repeatedly stressing the same recent-window queries
+They must not replace `AuditLog`.
 
 ---
 
-## 11) ERD (dbdiagram.io)
+## 8. Logical Schema — `audit.AuditLog`
 
-See: `../diagrams/erd/audit-v1.dbml`
+`AuditLog` stores append-only normalized audit evidence.
+
+### 8.1 Recommended V1 columns
+
+| Field                 |              Type | Null | Notes                                                 |
+| --------------------- | ----------------: | ---: | ----------------------------------------------------- |
+| `AuditLogId`          | `BIGINT IDENTITY` |   NO | Internal primary key                                  |
+| `PublicId`            |        `CHAR(26)` |   NO | Audit-owned API identifier                            |
+| `MessageId`           |        `CHAR(26)` |   NO | Copied from Outbox; canonical dedupe key              |
+| `EventType`           |   `NVARCHAR(200)` |   NO | Original integration event type                       |
+| `EventVersion`        |             `INT` |  YES | Source event contract version if available            |
+| `SourceModule`        |   `NVARCHAR(100)` |   NO | Derived from event type/header/normalizer             |
+| `Action`              |   `NVARCHAR(120)` |   NO | Normalized action                                     |
+| `ActionCategory`      |   `NVARCHAR(100)` |  YES | e.g. Authorization, IdentitySecurity, Moderation      |
+| `AggregateType`       |   `NVARCHAR(100)` |  YES | From Outbox                                           |
+| `AggregateId`         |   `NVARCHAR(100)` |  YES | From Outbox                                           |
+| `AggregatePublicId`   |        `CHAR(26)` |  YES | From Outbox when available                            |
+| `AggregateVersion`    |             `INT` |  YES | From Outbox when available                            |
+| `ResourceType`        |   `NVARCHAR(100)` |   NO | Normalized resource type                              |
+| `ResourceId`          |   `NVARCHAR(100)` |   NO | Prefer AggregatePublicId if available                 |
+| `ResourceDisplayName` |   `NVARCHAR(300)` |  YES | Safe display value                                    |
+| `ActorInternalId`     |          `BIGINT` |  YES | From Outbox InitiatorUserId or payload                |
+| `ActorUserId`         |        `CHAR(26)` |  YES | Public actor id when available                        |
+| `ActorEmail`          |   `NVARCHAR(320)` |  YES | Optional; use cautiously                              |
+| `ActorDisplayName`    |   `NVARCHAR(200)` |  YES | Optional                                              |
+| `ActorType`           |     `VARCHAR(30)` |   NO | User/Admin/Moderator/System/Worker/Anonymous/External |
+| `Outcome`             |     `VARCHAR(30)` |   NO | Success/Failure/Denied/Ignored                        |
+| `Severity`            |     `VARCHAR(30)` |   NO | Info/Warning/Error/Critical                           |
+| `RiskLevel`           |     `VARCHAR(30)` |   NO | Low/Medium/High/Critical                              |
+| `Summary`             |   `NVARCHAR(500)` |   NO | Safe human-readable summary                           |
+| `CorrelationId`       |   `NVARCHAR(100)` |  YES | Trace correlation                                     |
+| `CausationId`         |   `NVARCHAR(100)` |  YES | Optional                                              |
+| `TraceId`             |   `NVARCHAR(100)` |  YES | Optional                                              |
+| `IpAddress`           |    `NVARCHAR(45)` |  YES | Optional PII                                          |
+| `UserAgent`           |   `NVARCHAR(500)` |  YES | Optional PII                                          |
+| `SourcePriority`      |         `TINYINT` |  YES | Copied from Outbox priority                           |
+| `OccurredAtUtc`       |    `DATETIME2(3)` |   NO | Source event occurrence time                          |
+| `IngestedAtUtc`       |    `DATETIME2(3)` |   NO | Audit persistence time                                |
+| `MetadataJson`        |   `NVARCHAR(MAX)` |  YES | Sanitized safe metadata                               |
+| `HeadersJson`         |   `NVARCHAR(MAX)` |  YES | Sanitized safe headers                                |
+| `SanitizedPayloadJson` |   `NVARCHAR(MAX)` |  YES | Sanitized payload subset; avoid raw unsafe data       |
+| `BeforeJson`          |   `NVARCHAR(MAX)` |  YES | Sanitized previous state snapshot                     |
+| `AfterJson`           |   `NVARCHAR(MAX)` |  YES | Sanitized new state snapshot                          |
+| `ChangesJson`         |   `NVARCHAR(MAX)` |  YES | Sanitized field changes                               |
+| `Hash`                |        `CHAR(64)` |  YES | Future tamper-evident hook                            |
+| `PrevHash`            |        `CHAR(64)` |  YES | Future tamper-evident hook                            |
+| `CreatedAtUtc`        |    `DATETIME2(3)` |   NO | Row creation time                                     |
+
+### 8.2 Required V1 query columns
+
+The following should be physical columns rather than JSON-only because they support V1 APIs:
+
+* `PublicId`
+* `MessageId`
+* `SourceModule`
+* `EventType`
+* `Action`
+* `ActionCategory`
+* `ActorInternalId`
+* `ActorUserId`
+* `ResourceType`
+* `ResourceId`
+* `Outcome`
+* `Severity`
+* `RiskLevel`
+* `CorrelationId`
+* `OccurredAtUtc`
+* `IngestedAtUtc`
+
+---
+
+## 9. Logical Schema — `audit.AuditIngestion`
+
+`AuditIngestion` stores consumer-side processing state for incoming messages.
+
+### 9.1 Recommended V1 columns
+
+| Field                  |              Type | Null | Notes                                                             |
+| ---------------------- | ----------------: | ---: | ----------------------------------------------------------------- |
+| `AuditIngestionId`     | `BIGINT IDENTITY` |   NO | Internal primary key                                              |
+| `PublicId`             |        `CHAR(26)` |   NO | Audit-owned API identifier                                        |
+| `MessageId`            |        `CHAR(26)` |   NO | Copied from Outbox; consumer-side dedupe key                      |
+| `EventType`            |   `NVARCHAR(200)` |   NO | Original event type                                               |
+| `AggregateType`        |   `NVARCHAR(100)` |  YES | From Outbox                                                       |
+| `AggregateId`          |   `NVARCHAR(100)` |  YES | From Outbox                                                       |
+| `AggregatePublicId`    |        `CHAR(26)` |  YES | From Outbox                                                       |
+| `AggregateVersion`     |             `INT` |  YES | From Outbox                                                       |
+| `CorrelationId`        |   `NVARCHAR(100)` |  YES | Trace correlation                                                 |
+| `SourcePriority`       |         `TINYINT` |  YES | From Outbox priority                                              |
+| `SourceOccurredAtUtc`  |    `DATETIME2(3)` |   NO | From Outbox OccurredAt                                            |
+| `SourcePublishedAtUtc` |    `DATETIME2(3)` |  YES | From Outbox PublishedAt when available                            |
+| `ConsumerName`         |   `NVARCHAR(150)` |   NO | Audit consumer/handler name                                       |
+| `Status`               |     `VARCHAR(30)` |   NO | Processing/Succeeded/Duplicate/Ignored/Failed/DeadLettered        |
+| `AttemptCount`         |             `INT` |   NO | Consumer-side attempt count                                       |
+| `FirstReceivedAtUtc`   |    `DATETIME2(3)` |   NO | First time Audit saw the message                                  |
+| `LastAttemptAtUtc`     |    `DATETIME2(3)` |  YES | Last processing attempt                                           |
+| `ProcessedAtUtc`       |    `DATETIME2(3)` |  YES | Completion time                                                   |
+| `DeadLetteredAtUtc`    |    `DATETIME2(3)` |  YES | Terminal dead-letter handling time                                |
+| `LastErrorCode`        |   `NVARCHAR(100)` |  YES | Sanitized consumer-side error code                                |
+| `LastErrorMessage`     |  `NVARCHAR(2000)` |  YES | Sanitized consumer-side error message                             |
+| `LastErrorClass`       |     `VARCHAR(30)` |  YES | Transient/Permanent/Ambiguous/Validation/Policy/Redaction/Unknown |
+| `CreatedAtUtc`         |    `DATETIME2(3)` |   NO | Row creation time                                                 |
+| `UpdatedAtUtc`         |    `DATETIME2(3)` |   NO | Row update time                                                   |
+
+### 9.2 Status values
+
+Allowed values:
+
+* `Processing`
+* `Succeeded`
+* `Duplicate`
+* `Ignored`
+* `Failed`
+* `DeadLettered`
+
+Rule:
+
+Do not use `Published` as an AuditIngestion status.
+
+`Published` belongs to producer-side `OutboxMessage.Status`.
+
+---
+
+## 10. Constraints and Indexes
+
+## 10.1 Primary keys
+
+Recommended primary keys:
+
+```text
+PK_AuditLog(AuditLogId)
+PK_AuditIngestion(AuditIngestionId)
+```
+
+### 10.2 PublicId uniqueness
+
+Recommended unique constraints:
+
+```text
+UQ_AuditLog_PublicId(PublicId)
+UQ_AuditIngestion_PublicId(PublicId)
+```
+
+### 10.3 MessageId uniqueness
+
+Recommended unique constraints:
+
+```text
+UQ_AuditLog_MessageId(MessageId)
+UQ_AuditIngestion_MessageId(MessageId)
+```
+
+Purpose:
+
+* prevent duplicate audit evidence under retries
+* support idempotent ingestion
+* support lookup by message id
+* support replay safety
+
+### 10.4 Check constraints
+
+Recommended checks for `AuditLog` matching the current table script:
+
+```text
+CK_AuditLog_PublicId_NotBlank
+CK_AuditLog_MessageId_NotBlank
+CK_AuditLog_EventType_NotBlank
+CK_AuditLog_SourceModule_NotBlank
+CK_AuditLog_Action_NotBlank
+CK_AuditLog_ResourceType_NotBlank
+CK_AuditLog_ResourceId_NotBlank
+CK_AuditLog_Summary_NotBlank
+
+CK_AuditLog_EventVersion
+  EventVersion IS NULL OR EventVersion >= 1
+
+CK_AuditLog_AggregateVersion
+  AggregateVersion IS NULL OR AggregateVersion >= 1
+
+CK_AuditLog_SourcePriority
+  SourcePriority IS NULL OR SourcePriority BETWEEN 1 AND 9
+
+CK_AuditLog_Outcome
+  Outcome IN ('Success', 'Failure', 'Denied', 'Ignored')
+
+CK_AuditLog_Severity
+  Severity IN ('Info', 'Warning', 'Error', 'Critical')
+
+CK_AuditLog_RiskLevel
+  RiskLevel IN ('Low', 'Medium', 'High', 'Critical')
+
+CK_AuditLog_ActorType
+  ActorType IN ('User', 'Admin', 'Moderator', 'System', 'Worker', 'Anonymous', 'External')
+
+CK_AuditLog_MetadataJson_IsJson
+CK_AuditLog_HeadersJson_IsJson
+CK_AuditLog_SanitizedPayloadJson_IsJson
+CK_AuditLog_BeforeJson_IsJson
+CK_AuditLog_AfterJson_IsJson
+CK_AuditLog_ChangesJson_IsJson
+```
+
+Recommended checks for `AuditIngestion` matching the current table script:
+
+```text
+CK_AuditIngestion_PublicId_NotBlank
+CK_AuditIngestion_MessageId_NotBlank
+CK_AuditIngestion_EventType_NotBlank
+CK_AuditIngestion_ConsumerName_NotBlank
+
+CK_AuditIngestion_AggregateVersion
+  AggregateVersion IS NULL OR AggregateVersion >= 1
+
+CK_AuditIngestion_SourcePriority
+  SourcePriority IS NULL OR SourcePriority BETWEEN 1 AND 9
+
+CK_AuditIngestion_Status
+  Status IN ('Processing', 'Succeeded', 'Duplicate', 'Ignored', 'Failed', 'DeadLettered')
+
+CK_AuditIngestion_AttemptCount
+  AttemptCount >= 0
+
+CK_AuditIngestion_LastErrorClass
+  LastErrorClass IS NULL OR LastErrorClass IN
+  ('Transient', 'Permanent', 'Ambiguous', 'Validation', 'Policy', 'Redaction', 'Unknown')
+
+CK_AuditIngestion_SourcePublishedAtUtc
+  SourcePublishedAtUtc IS NULL OR SourcePublishedAtUtc >= SourceOccurredAtUtc
+
+CK_AuditIngestion_LastAttemptAtUtc
+  LastAttemptAtUtc IS NULL OR LastAttemptAtUtc >= FirstReceivedAtUtc
+
+CK_AuditIngestion_ProcessedAtUtc
+  ProcessedAtUtc IS NULL OR ProcessedAtUtc >= FirstReceivedAtUtc
+
+CK_AuditIngestion_DeadLetteredAtUtc
+  DeadLetteredAtUtc IS NULL OR DeadLetteredAtUtc >= FirstReceivedAtUtc
+```
+
+---
+
+## 10.5 Investigation indexes — AuditLog
+
+Recommended V1 indexes:
+
+```text
+IX_AuditLog_OccurredAtUtc
+  (OccurredAtUtc DESC)
+
+IX_AuditLog_IngestedAtUtc
+  (IngestedAtUtc DESC)
+
+IX_AuditLog_SourceModule_OccurredAtUtc
+  (SourceModule, OccurredAtUtc DESC)
+
+IX_AuditLog_EventType_OccurredAtUtc
+  (EventType, OccurredAtUtc DESC)
+
+IX_AuditLog_Action_OccurredAtUtc
+  (Action, OccurredAtUtc DESC)
+
+IX_AuditLog_ActionCategory_OccurredAtUtc
+  (ActionCategory, OccurredAtUtc DESC)
+
+IX_AuditLog_ActorUserId_OccurredAtUtc
+  (ActorUserId, OccurredAtUtc DESC)
+
+IX_AuditLog_ActorInternalId_OccurredAtUtc
+  (ActorInternalId, OccurredAtUtc DESC)
+
+IX_AuditLog_Resource_OccurredAtUtc
+  (ResourceType, ResourceId, OccurredAtUtc DESC)
+
+IX_AuditLog_CorrelationId_OccurredAtUtc
+  (CorrelationId, OccurredAtUtc DESC)
+
+IX_AuditLog_RiskLevel_OccurredAtUtc
+  (RiskLevel, OccurredAtUtc DESC)
+
+IX_AuditLog_Severity_OccurredAtUtc
+  (Severity, OccurredAtUtc DESC)
+
+IX_AuditLog_Outcome_OccurredAtUtc
+  (Outcome, OccurredAtUtc DESC)
+
+IX_AuditLog_Aggregate_Version
+  (AggregateType, AggregateId, AggregateVersion)
+```
+
+### Notes
+
+* `MessageId` lookup is covered by the unique constraint in `001_tables.sql`.
+* Query indexes should follow actual API access patterns.
+* Avoid over-indexing before real query pressure is measured.
+* JSON fields should not be used for high-volume filters in V1 unless a computed/indexed strategy is explicitly designed.
+
+---
+
+## 10.6 Operational indexes — AuditIngestion
+
+Recommended V1 indexes:
+
+```text
+IX_AuditIngestion_Status_FirstReceivedAtUtc
+  (Status, FirstReceivedAtUtc DESC)
+
+IX_AuditIngestion_Status_LastAttemptAtUtc
+  (Status, LastAttemptAtUtc DESC)
+
+IX_AuditIngestion_EventType_FirstReceivedAtUtc
+  (EventType, FirstReceivedAtUtc DESC)
+
+IX_AuditIngestion_CorrelationId_FirstReceivedAtUtc
+  (CorrelationId, FirstReceivedAtUtc DESC)
+
+IX_AuditIngestion_ConsumerName_Status
+  (ConsumerName, Status)
+
+IX_AuditIngestion_SourceOccurredAtUtc
+  (SourceOccurredAtUtc DESC)
+
+IX_AuditIngestion_SourcePublishedAtUtc
+  (SourcePublishedAtUtc DESC)
+
+IX_AuditIngestion_ProcessedAtUtc
+  (ProcessedAtUtc DESC)
+```
+
+---
+
+## 11. Append-only Enforcement
+
+AuditLog is append-only by policy.
+
+Possible enforcement options:
+
+1. DB permissions:
+
+   * application role may INSERT and SELECT
+   * UPDATE/DELETE denied for normal application path
+
+2. Trigger-based protection:
+
+   * block UPDATE/DELETE on `audit.AuditLog`
+
+3. Service-level policy:
+
+   * repositories expose insert/read only
+   * no update/delete methods for AuditLog
+
+Recommended V1 approach:
+
+* service/repository-level insert-only contract
+* SQL constraints for identity and dedupe
+* optional DB permission hardening later
+
+If retention, purge, redaction remediation, or correction is introduced, it must be documented separately.
+
+---
+
+## 12. Retention and Operational Jobs
+
+### 12.1 V1 posture
+
+V1 does not require archive or purge jobs.
+
+Early V1 may keep all audit evidence in primary SQL.
+
+### 12.2 Future retention questions
+
+Future policy must define:
+
+* how long `AuditLog` stays in primary SQL
+* how long `AuditIngestion` stays in primary SQL
+* whether older evidence is archived
+* whether archived evidence is queryable
+* whether purge is allowed
+* who can approve purge
+* whether purge creates audit-of-audit evidence
+
+### 12.3 Future jobs
+
+Future jobs may include:
+
+* archive job
+* purge job
+* redaction remediation job
+* summary build job
+* digest generation job
+* replay/remediation job
+* reconciliation job
+
+These jobs must be bounded, observable, and rerun-safe.
+
+---
+
+## 13. Partitioning Readiness
+
+Audit V1 is partition-ready but not physically partitioned by default.
+
+V1 priority:
+
+* reliable ingestion
+* investigation-ready indexes
+* bounded queries
+* observable lag/failure
+* non-blocking source flows
+
+### 13.1 Why Audit is a partitioning-risk module
+
+Audit is append-only and may grow quickly.
+
+Risk sources:
+
+* admin bulk actions
+* authorization policy migrations
+* content moderation bursts
+* interaction/moderation event spikes
+* replay/retry bursts after outage
+* incident investigations repeatedly querying recent windows
+
+### 13.2 V1 access patterns
+
+Worker ingestion:
+
+* insert `AuditLog`
+* upsert/update `AuditIngestion`
+* dedupe by `MessageId`
+
+Admin investigation reads:
+
+* time range
+* source module + time
+* actor + time
+* resource + time
+* action + time
+* risk/severity + time
+* correlation id + time
+* message id lookup
+
+### 13.3 V1 mitigations
+
+V1 mitigations before partitioning:
+
+* async ingestion
+* durable MessageId dedupe
+* focused SQL indexes
+* bounded query windows
+* allowlisted sort/filter fields
+* consumer retry/backoff
+* DLQ visibility
+* query latency monitoring
+* queue lag monitoring
+
+### 13.4 Future partitioning options
+
+Future partitioning may include:
+
+#### Option A — Worker lane partitioning
+
+Partition ingestion by:
+
+* source module
+* risk priority
+* event category
+* queue/lane
+
+Example lanes:
+
+* security/governance lane
+* content/media lane
+* interaction/moderation lane
+* retry/dead-letter lane
+
+#### Option B — Time-range partitioning for AuditLog
+
+Useful when:
+
+* `AuditLog` grows large
+* retention/archive becomes expensive
+* recent-window query performance degrades
+* purge/archive windows need operational isolation
+
+#### Option C — Hybrid partitioning
+
+Possible future strategy:
+
+* time range + source module
+* time range + risk priority
+* time range + hash bucket
+
+Use only when metrics justify it.
+
+#### Option D — Search/investigation projection
+
+If investigation queries become too complex, introduce a derived search/read projection.
+
+Guardrail:
+
+`AuditLog` remains append-only evidence truth.
+
+### 13.5 Partitioning signals
+
+Consider stronger partitioning when sustained signals show:
+
+* audit query P95/P99 degradation
+* growing AuditLog table/index pressure
+* audit consumer lag does not self-recover
+* oldest uningested message age grows
+* retry/DLQ pressure grows
+* security audit delayed by high-volume non-security events
+* archive/report windows become too slow
+
+---
+
+## 14. ADR Candidates
+
+Future ADR candidates:
+
+* Audit payload shape and redaction policy per event type
+* Audit retention, archive, and purge policy
+* Audit tamper-evident evidence strategy
+* Audit replay and remediation control policy
+* Audit completeness reconciliation policy
+* Audit alerting and admin notification policy
+* Audit digest and summary materialization policy
+* Audit storage and indexing evolution
+* Audit Redis dashboard cache policy
+* Audit partitioning and worker lane strategy
+* Audit correction and redaction remediation policy
+* Audit export policy
+* Audit-of-audit policy
+
+---
+
+## 15. ERD
+
+See:
+
+```text
+../diagrams/erd/audit-v1.dbml
+```
 
 How to render:
 
-1. Open dbdiagram.io
-2. Copy DBML content from the file above
-3. Paste into dbdiagram.io to view/export
+1. Open dbdiagram.io.
+2. Copy DBML content from the file above.
+3. Paste into dbdiagram.io to view/export.
+
+---
+
+## 16. Summary
+
+Audit V1 system data model is based on two core tables:
+
+```text
+AuditLog
+AuditIngestion
+```
+
+The most important data rules are:
+
+1. `AuditLog` is append-only evidence truth.
+2. `AuditIngestion` is consumer-side processing state.
+3. `MessageId` is the canonical idempotency key.
+4. `PublicId` is the API-facing Audit-owned identifier.
+5. Source resources are referenced by stable string identifiers, preferably source PublicIds.
+6. Source module truth remains with source modules.
+7. SQL is the source of Audit evidence truth.
+8. Redis, dashboards, alerts, reports, digests, archives, and summaries are derived.
+9. V1 is not physically partitioned, but it is partition-ready.
+10. Future workflows must be bounded, observable, idempotent, and rerun-safe.
