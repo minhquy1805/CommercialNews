@@ -18,7 +18,7 @@ internal static class AuditLogDataMapper
             eventType: reader.GetRequiredString("EventType"),
             eventVersion: reader.GetNullableInt32("EventVersion"),
             sourceModule: reader.GetRequiredString("SourceModule"),
-            sourcePriority: reader.GetNullableInt32("SourcePriority"),
+            sourcePriority: reader.GetNullableInt32FromNumber("SourcePriority"),
             sourceOccurredAtUtc: reader.GetRequiredDateTime("OccurredAtUtc"),
             sourcePublishedAtUtc: null);
 

@@ -41,6 +41,17 @@ internal static class SqlDataReaderExtensions
             : reader.GetInt32(ordinal);
     }
 
+    public static int? GetNullableInt32FromNumber(
+        this SqlDataReader reader,
+        string columnName)
+    {
+        var ordinal = reader.GetOrdinal(columnName);
+
+        return reader.IsDBNull(ordinal)
+            ? null
+            : Convert.ToInt32(reader.GetValue(ordinal));
+    }
+
     public static int GetRequiredInt32(
         this SqlDataReader reader,
         string columnName)
