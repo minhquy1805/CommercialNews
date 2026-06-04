@@ -93,9 +93,9 @@ public sealed class OutboxMessage
             throw new ArgumentException("Payload is required.", nameof(payload));
         }
 
-        if (priority is < 1 or > 10)
+        if (priority is < 1 or > 9)
         {
-            throw new ArgumentOutOfRangeException(nameof(priority), "Priority must be between 1 and 10.");
+            throw new ArgumentOutOfRangeException(nameof(priority), "Priority must be between 1 and 9.");
         }
 
         return new OutboxMessage
