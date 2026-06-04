@@ -49,7 +49,8 @@ services:
     volumes:
       - cn_api_uploads:/app/wwwroot/uploads
     depends_on:
-      - cn-mssql
+      cn-mssql:
+        condition: service_healthy
     restart: unless-stopped
 
   nginx:
@@ -190,6 +191,7 @@ services:
       RabbitMq__AuditConsumer__PrefetchCount: "${RABBITMQ_AUDIT_PREFETCH_COUNT}"
       RabbitMq__AuditConsumer__ConsumerTag: "${RABBITMQ_AUDIT_CONSUMER_TAG}"
       RabbitMq__AuditConsumer__ClientProvidedName: "${RABBITMQ_AUDIT_CLIENT_PROVIDED_NAME}"
+      RabbitMq__AuditConsumer__ConsumerName: "${RABBITMQ_AUDIT_CONSUMER_NAME:-CommercialNews.Audit.Consumer}"
       RabbitMq__AuditConsumer__RequeueOnFailure: "${RABBITMQ_AUDIT_REQUEUE_ON_FAILURE}"
 
       RabbitMq__AuditConsumer__RoutingKeys__0: "authorization.user_role_assigned"
@@ -330,8 +332,10 @@ services:
       RabbitMq__InteractionStatsConsumer__RoutingKeys__4: "interaction.comment_restored"
       RabbitMq__InteractionStatsConsumer__RoutingKeys__5: "interaction.comment_deleted_by_author"
     depends_on:
-      - cn-mssql
-      - rabbitmq
+      cn-mssql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
 
   cn-mssql:
@@ -345,6 +349,12 @@ services:
       SA_PASSWORD: "${SA_PASSWORD}"
     volumes:
       - cn_mssql_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/1433' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 30s
     restart: unless-stopped
 
   rabbitmq:
@@ -356,8 +366,15 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: "${RABBITMQ_USERNAME}"
       RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD}"
+      RABBITMQ_DEFAULT_VHOST: "${RABBITMQ_VIRTUAL_HOST}"
     volumes:
       - cn_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
 
 volumes:
