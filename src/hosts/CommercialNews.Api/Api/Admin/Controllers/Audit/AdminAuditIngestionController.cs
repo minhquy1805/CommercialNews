@@ -1,9 +1,9 @@
 using Audit.Application.Models.Queries.Ingestion;
 using Audit.Application.Models.Results.Ingestion;
-using CommercialNews.Api.Api.Admin.Contracts.Audit.Common;
 using CommercialNews.Api.Api.Admin.Contracts.Audit.Ingestion.Mapping;
 using CommercialNews.Api.Api.Admin.Contracts.Audit.Ingestion.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Audit.Ingestion.Responses;
+using CommercialNews.Api.Api.Common.Contracts;
 using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
 using CommercialNews.Api.Authorization;
@@ -29,7 +29,7 @@ public sealed class AdminAuditIngestionController : ControllerBase
 
     [HttpGet]
     [Authorize(Policy = AuthorizationPolicies.AuditIngestionRead)]
-    [ProducesResponseType(typeof(GetAuditIngestionListHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResponse<AuditIngestionListItemHttpResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -45,24 +45,20 @@ public sealed class AdminAuditIngestionController : ControllerBase
         if (result.IsFailure)
         {
             return this.ToActionResult(
-                Result<GetAuditIngestionListHttpResponse>.Failure(result.Error!));
+                Result<PagedResponse<AuditIngestionListItemHttpResponse>>.Failure(result.Error!));
         }
 
-        var response = new GetAuditIngestionListHttpResponse
-        {
-            Items = result.Value.Items
-                .Select(AuditIngestionHttpMapper.ToListItem)
-                .ToArray(),
-            PageInfo = PageInfoHttpMapper.ToPageInfo(result.Value)
-        };
+        var response = PagedResponse<AuditIngestionListItemHttpResponse>.From(
+            result.Value,
+            AuditIngestionHttpMapper.ToListItem);
 
         return this.ToActionResult(
-            Result<GetAuditIngestionListHttpResponse>.Success(response));
+            Result<PagedResponse<AuditIngestionListItemHttpResponse>>.Success(response));
     }
 
     [HttpGet("failed")]
     [Authorize(Policy = AuthorizationPolicies.AuditIngestionRead)]
-    [ProducesResponseType(typeof(GetFailedAuditIngestionListHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResponse<AuditIngestionListItemHttpResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -78,19 +74,15 @@ public sealed class AdminAuditIngestionController : ControllerBase
         if (result.IsFailure)
         {
             return this.ToActionResult(
-                Result<GetFailedAuditIngestionListHttpResponse>.Failure(result.Error!));
+                Result<PagedResponse<AuditIngestionListItemHttpResponse>>.Failure(result.Error!));
         }
 
-        var response = new GetFailedAuditIngestionListHttpResponse
-        {
-            Items = result.Value.Items
-                .Select(AuditIngestionHttpMapper.ToListItem)
-                .ToArray(),
-            PageInfo = PageInfoHttpMapper.ToPageInfo(result.Value)
-        };
+        var response = PagedResponse<AuditIngestionListItemHttpResponse>.From(
+            result.Value,
+            AuditIngestionHttpMapper.ToListItem);
 
         return this.ToActionResult(
-            Result<GetFailedAuditIngestionListHttpResponse>.Success(response));
+            Result<PagedResponse<AuditIngestionListItemHttpResponse>>.Success(response));
     }
 
     [HttpGet("{publicId}")]

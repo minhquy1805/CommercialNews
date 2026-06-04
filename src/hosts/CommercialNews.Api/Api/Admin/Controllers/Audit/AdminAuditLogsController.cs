@@ -3,7 +3,7 @@ using Audit.Application.Models.Results.AuditLogs;
 using CommercialNews.Api.Api.Admin.Contracts.Audit.AuditLog.Mapping;
 using CommercialNews.Api.Api.Admin.Contracts.Audit.AuditLog.Requests;
 using CommercialNews.Api.Api.Admin.Contracts.Audit.AuditLog.Responses;
-using CommercialNews.Api.Api.Admin.Contracts.Audit.Common;
+using CommercialNews.Api.Api.Common.Contracts;
 using CommercialNews.Api.Api.Common.ErrorHandling;
 using CommercialNews.Api.Api.ErrorHandling;
 using CommercialNews.Api.Authorization;
@@ -29,7 +29,7 @@ public sealed class AdminAuditLogsController : ControllerBase
 
     [HttpGet("logs")]
     [Authorize(Policy = AuthorizationPolicies.AuditLogsRead)]
-    [ProducesResponseType(typeof(GetAuditLogsHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResponse<AuditLogListItemHttpResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -81,7 +81,7 @@ public sealed class AdminAuditLogsController : ControllerBase
 
     [HttpGet("logs/by-correlation/{correlationId}")]
     [Authorize(Policy = AuthorizationPolicies.AuditLogsReadByCorrelation)]
-    [ProducesResponseType(typeof(GetAuditLogsByCorrelationIdHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResponse<AuditLogListItemHttpResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -103,24 +103,20 @@ public sealed class AdminAuditLogsController : ControllerBase
         if (result.IsFailure)
         {
             return this.ToActionResult(
-                Result<GetAuditLogsByCorrelationIdHttpResponse>.Failure(result.Error!));
+                Result<PagedResponse<AuditLogListItemHttpResponse>>.Failure(result.Error!));
         }
 
-        var response = new GetAuditLogsByCorrelationIdHttpResponse
-        {
-            Items = result.Value.Items
-                .Select(AuditLogHttpMapper.ToListItem)
-                .ToArray(),
-            PageInfo = PageInfoHttpMapper.ToPageInfo(result.Value)
-        };
+        var response = PagedResponse<AuditLogListItemHttpResponse>.From(
+            result.Value,
+            AuditLogHttpMapper.ToListItem);
 
         return this.ToActionResult(
-            Result<GetAuditLogsByCorrelationIdHttpResponse>.Success(response));
+            Result<PagedResponse<AuditLogListItemHttpResponse>>.Success(response));
     }
 
     [HttpGet("modules/{sourceModule}/logs")]
     [Authorize(Policy = AuthorizationPolicies.AuditLogsRead)]
-    [ProducesResponseType(typeof(GetAuditLogsHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResponse<AuditLogListItemHttpResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -141,7 +137,7 @@ public sealed class AdminAuditLogsController : ControllerBase
 
     [HttpGet("resources/{resourceType}/{resourceId}/timeline")]
     [Authorize(Policy = AuthorizationPolicies.AuditLogsRead)]
-    [ProducesResponseType(typeof(GetAuditLogsHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResponse<AuditLogListItemHttpResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -163,7 +159,7 @@ public sealed class AdminAuditLogsController : ControllerBase
 
     [HttpGet("actors/{actorUserId}/timeline")]
     [Authorize(Policy = AuthorizationPolicies.AuditLogsRead)]
-    [ProducesResponseType(typeof(GetAuditLogsHttpResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(PagedResponse<AuditLogListItemHttpResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiErrorResponse), StatusCodes.Status403Forbidden)]
@@ -192,19 +188,15 @@ public sealed class AdminAuditLogsController : ControllerBase
         if (result.IsFailure)
         {
             return this.ToActionResult(
-                Result<GetAuditLogsHttpResponse>.Failure(result.Error!));
+                Result<PagedResponse<AuditLogListItemHttpResponse>>.Failure(result.Error!));
         }
 
-        var response = new GetAuditLogsHttpResponse
-        {
-            Items = result.Value.Items
-                .Select(AuditLogHttpMapper.ToListItem)
-                .ToArray(),
-            PageInfo = PageInfoHttpMapper.ToPageInfo(result.Value)
-        };
+        var response = PagedResponse<AuditLogListItemHttpResponse>.From(
+            result.Value,
+            AuditLogHttpMapper.ToListItem);
 
         return this.ToActionResult(
-            Result<GetAuditLogsHttpResponse>.Success(response));
+            Result<PagedResponse<AuditLogListItemHttpResponse>>.Success(response));
     }
 
     private async Task<IActionResult> GetLogDetailAsync<TQuery>(
