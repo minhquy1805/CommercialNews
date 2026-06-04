@@ -3,8 +3,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Audit.Application\Audit.Application.csproj" />
     <ProjectReference Include="..\Audit.Domain\Audit.Domain.csproj" />
-    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
-  </ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Core\CommercialNews.BuildingBlocks.Core.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Persistence.Sql\CommercialNews.BuildingBlocks.Persistence.Sql.csproj" />
+    </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>

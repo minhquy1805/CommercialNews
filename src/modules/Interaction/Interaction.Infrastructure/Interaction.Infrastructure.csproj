@@ -3,7 +3,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Interaction.Domain\Interaction.Domain.csproj" />
     <ProjectReference Include="..\Interaction.Application\Interaction.Application.csproj" />
-    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Core\CommercialNews.BuildingBlocks.Core.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Persistence.Sql\CommercialNews.BuildingBlocks.Persistence.Sql.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Outbox\CommercialNews.BuildingBlocks.Outbox.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -1,9 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
-    <ProjectReference Include="..\Authorization.Application\Authorization.Application.csproj" />
+<ProjectReference Include="..\Authorization.Application\Authorization.Application.csproj" />
     <ProjectReference Include="..\Authorization.Domain\Authorization.Domain.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Core\CommercialNews.BuildingBlocks.Core.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Persistence.Sql\CommercialNews.BuildingBlocks.Persistence.Sql.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Outbox\CommercialNews.BuildingBlocks.Outbox.csproj" />
   </ItemGroup>
 
   <ItemGroup>

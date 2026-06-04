@@ -24,9 +24,7 @@
   </ItemGroup>
 
     <ItemGroup>
-    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
-
-    <ProjectReference Include="..\..\modules\Identity\Identity.Application\Identity.Application.csproj" />
+<ProjectReference Include="..\..\modules\Identity\Identity.Application\Identity.Application.csproj" />
     <ProjectReference Include="..\..\modules\Identity\Identity.Infrastructure\Identity.Infrastructure.csproj" />
 
     <ProjectReference Include="..\..\modules\Authorization\Authorization.Application\Authorization.Application.csproj" />
@@ -52,6 +50,8 @@
 
     <ProjectReference Include="..\..\modules\Audit\Audit.Application\Audit.Application.csproj" />
     <ProjectReference Include="..\..\modules\Audit\Audit.Infrastructure\Audit.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks.Core\CommercialNews.BuildingBlocks.Core.csproj" />
+    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks.Outbox\CommercialNews.BuildingBlocks.Outbox.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -22,7 +22,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
     <ProjectReference Include="..\..\modules\Identity\Identity.Application\Identity.Application.csproj" />
     <ProjectReference Include="..\..\modules\Identity\Identity.Infrastructure\Identity.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\Authorization\Authorization.Application\Authorization.Application.csproj" />
@@ -41,7 +40,9 @@
     <ProjectReference Include="..\..\modules\Notifications\Notifications.Infrastructure\Notifications.Infrastructure.csproj" />
     <ProjectReference Include="..\..\modules\Audit\Audit.Application\Audit.Application.csproj" />
     <ProjectReference Include="..\..\modules\Audit\Audit.Infrastructure\Audit.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks.Infrastructure\CommercialNews.BuildingBlocks.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks.Core\CommercialNews.BuildingBlocks.Core.csproj" />
+    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks.Outbox\CommercialNews.BuildingBlocks.Outbox.csproj" />
+    <ProjectReference Include="..\..\building-blocks\CommercialNews.BuildingBlocks.Storage.Infrastructure\CommercialNews.BuildingBlocks.Storage.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

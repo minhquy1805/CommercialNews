@@ -2,14 +2,6 @@ namespace CommercialNews.BuildingBlocks.Initialization;
 
 /// <summary>
 /// Base contract for startup data initialization.
-/// 
-/// Intended for future cross-module use when the application has multiple
-/// data initializers that should be executed in a deterministic order.
-/// 
-/// Current note:
-/// - This contract is introduced early to make later refactoring easier.
-/// - Existing module-specific initializers can continue to use their own
-///   dedicated interfaces for now.
 /// </summary>
 public interface IDataInitializer
 {

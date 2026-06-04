@@ -19,9 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
-    <ProjectReference Include="..\Identity.Application\Identity.Application.csproj" />
+<ProjectReference Include="..\Identity.Application\Identity.Application.csproj" />
     <ProjectReference Include="..\Identity.Domain\Identity.Domain.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Core\CommercialNews.BuildingBlocks.Core.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Persistence.Sql\CommercialNews.BuildingBlocks.Persistence.Sql.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Outbox\CommercialNews.BuildingBlocks.Outbox.csproj" />
   </ItemGroup>
 
 </Project>

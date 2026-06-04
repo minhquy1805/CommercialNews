@@ -13,7 +13,11 @@ The goal is to support:
 
 src/
 ├─ building-blocks/
-│  └─ CommercialNews.BuildingBlocks/
+│  ├─ CommercialNews.BuildingBlocks.Core/
+│  ├─ CommercialNews.BuildingBlocks.Persistence.Sql/
+│  ├─ CommercialNews.BuildingBlocks.Outbox/
+│  ├─ CommercialNews.BuildingBlocks.Storage/
+│  └─ CommercialNews.BuildingBlocks.Storage.Infrastructure/
 │
 ├─ modules/
 │  ├─ Content/
@@ -69,7 +73,7 @@ namespaces keep the `CommercialNews.*` / `{Module}.*` casing.
 
 ## 3) Building blocks (shared foundations)
 
-### 3.1 `src/building-blocks/CommercialNews.BuildingBlocks`
+### 3.1 `src/building-blocks/CommercialNews.BuildingBlocks.Core`
 Purpose: stable primitives used across modules without importing business logic.
 
 Typical contents:
@@ -78,29 +82,58 @@ Typical contents:
 - Time abstraction: `IClock`
 - Pagination/filter primitives: `PageRequest`, `SortSpec` (generic)
 - Domain event envelope primitives (if shared): `EventEnvelope`
-- SQL persistence foundations
-- Outbox primitives and integration event envelopes
 
 Rules:
 - Must remain **small** and **stable**.
 - No module-specific rules (no `Content` logic here).
 
-### 3.2 Messaging and outbox foundations
-Purpose: shared abstractions/primitives for publishing and consuming events.
+### 3.2 `src/building-blocks/CommercialNews.BuildingBlocks.Persistence.Sql`
+Purpose: reusable SQL Server foundations.
 
 Typical contents:
-- `IEventPublisher`
-- `IEventConsumer<TEvent>`
-- `EventEnvelope` + metadata (CorrelationId, OccurredAt, ActorUserId)
-- Retry/DLQ abstractions (policy-level; implementation in Infrastructure/Host)
+- SQL connection factory
+- SQL options
+- transaction/unit-of-work base abstractions
+- persistence exception and SQL exception translation base
 
 Rules:
-- Messaging layer should not import module domain models.
+- May depend on SQL client packages.
+- Must not contain module-specific repositories.
+
+### 3.3 `src/building-blocks/CommercialNews.BuildingBlocks.Outbox`
+Purpose: reliable integration-event publication and worker processing support.
+
+Typical contents:
+- Outbox message model and integration envelope
+- Outbox ports, use cases, validation, runtime processors
+- Outbox SQL repository/writer/unit of work
+- Outbox exception translator
+
+Rules:
+- Uses `CommercialNews.BuildingBlocks.Core`.
+- Uses `CommercialNews.BuildingBlocks.Persistence.Sql`.
+- Must not import module domain models.
 - Events should use minimal payloads and be versionable.
 
-### 3.3 Optional building blocks
-- `Observability/`: logging/metrics conventions, correlation helpers
-- `Security/`: common auth helpers, redaction utilities
+### 3.4 `src/building-blocks/CommercialNews.BuildingBlocks.Storage`
+Purpose: storage abstraction and storage request/result contracts.
+
+Typical contents:
+- `IFileStorageService`
+- upload/delete request and result models
+- provider and purpose constants
+
+### 3.5 `src/building-blocks/CommercialNews.BuildingBlocks.Storage.Infrastructure`
+Purpose: concrete file storage providers and DI wiring.
+
+Typical contents:
+- Local file storage provider
+- Google Cloud Storage provider
+- storage options and registration extensions
+
+Rules:
+- May depend on provider SDKs.
+- Application modules should reference `Storage`, not `Storage.Infrastructure`.
 
 ---
 

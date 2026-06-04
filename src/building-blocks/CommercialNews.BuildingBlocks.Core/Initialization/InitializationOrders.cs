@@ -1,14 +1,7 @@
 namespace CommercialNews.BuildingBlocks.Initialization;
 
 /// <summary>
-/// Suggested initialization order values for future unified startup orchestration.
-/// 
-/// These values are intentionally lightweight and can evolve as more modules
-/// introduce initialization steps.
-/// 
-/// Current note:
-/// - This file is added in advance for consistency.
-/// - It does not force immediate adoption.
+/// Shared startup data initialization order values.
 /// </summary>
 public static class InitializationOrders
 {

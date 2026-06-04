@@ -2,6 +2,7 @@ using CommercialNews.BuildingBlocks.Outbox.Exceptions;
 using CommercialNews.BuildingBlocks.Outbox.Persistence;
 using CommercialNews.BuildingBlocks.Outbox.Ports;
 using CommercialNews.BuildingBlocks.Outbox.Runtime;
+using CommercialNews.BuildingBlocks.Initialization;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Connections;
 using CommercialNews.BuildingBlocks.Persistence.Sql.Options;
 using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
@@ -27,6 +28,8 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         services.AddSingleton<IPublicIdGenerator, UlidPublicIdGenerator>();
+
+        services.AddScoped<DataInitializationOrchestrator>();
 
         services.AddSingleton<OutboxSqlExceptionTranslator>();
 

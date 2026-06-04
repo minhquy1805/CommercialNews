@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -7,11 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
+    <ProjectReference Include="..\CommercialNews.BuildingBlocks.Core\CommercialNews.BuildingBlocks.Core.csproj" />
+    <ProjectReference Include="..\CommercialNews.BuildingBlocks.Persistence.Sql\CommercialNews.BuildingBlocks.Persistence.Sql.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Google.Cloud.Storage.V1" Version="4.14.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.5" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.5" />

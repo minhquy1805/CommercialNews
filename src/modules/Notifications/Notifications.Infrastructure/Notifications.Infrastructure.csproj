@@ -3,8 +3,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Notifications.Application\Notifications.Application.csproj" />
     <ProjectReference Include="..\Notifications.Domain\Notifications.Domain.csproj" />
-    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks\CommercialNews.BuildingBlocks.csproj" />
-  </ItemGroup>
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Core\CommercialNews.BuildingBlocks.Core.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Persistence.Sql\CommercialNews.BuildingBlocks.Persistence.Sql.csproj" />
+    <ProjectReference Include="..\..\..\building-blocks\CommercialNews.BuildingBlocks.Outbox\CommercialNews.BuildingBlocks.Outbox.csproj" />
+    </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="MailKit" Version="4.16.0" />

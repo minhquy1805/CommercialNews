@@ -1,3 +1,4 @@
+using CommercialNews.BuildingBlocks.Initialization;
 using CommercialNews.BuildingBlocks.SharedKernel.Identifiers;
 using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Identity.Application.Ports.Persistence;
@@ -8,7 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace Identity.Infrastructure.Seeding;
 
-public sealed class DefaultAdminInitializer : IIdentityDataInitializer
+public sealed class DefaultAdminInitializer : IDataInitializer
 {
     private readonly IUserAccountRepository _userAccountRepository;
     private readonly IIdentityUnitOfWork _unitOfWork;
@@ -38,6 +39,8 @@ public sealed class DefaultAdminInitializer : IIdentityDataInitializer
         _defaultAdminSettings = defaultAdminOptions?.Value
             ?? throw new ArgumentNullException(nameof(defaultAdminOptions));
     }
+
+    public int Order => InitializationOrders.Identity;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {

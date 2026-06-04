@@ -1,5 +1,6 @@
 using Authorization.Application.Ports.Persistence;
 using Authorization.Application.Ports.Services;
+using CommercialNews.BuildingBlocks.Initialization;
 using Authorization.Infrastructure.Configuration;
 using Authorization.Infrastructure.Persistence.Exceptions;
 using Authorization.Infrastructure.Persistence.Repositories;
@@ -44,7 +45,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<RolePermissionSeederService>();
         services.AddScoped<UserRoleSeederService>();
 
-        services.AddScoped<IAuthorizationDataInitializer, AuthorizationDataInitializer>();
+        services.AddScoped<IDataInitializer, AuthorizationDataInitializer>();
 
         return services;
     }

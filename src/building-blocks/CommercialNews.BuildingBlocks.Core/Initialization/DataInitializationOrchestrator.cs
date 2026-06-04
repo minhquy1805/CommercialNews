@@ -3,16 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace CommercialNews.BuildingBlocks.Initialization;
 
 /// <summary>
-/// Temporary shared orchestrator for ordered startup data initialization.
-/// 
-/// This orchestrator is added early as a reusable building block so the system
-/// can later migrate to a unified initialization pipeline when more modules
-/// introduce their own data initializers.
-/// 
-/// Current note:
-/// - It may remain unused for now.
-/// - Identity and Authorization can continue to be initialized explicitly
-///   from host startup composition until broader adoption is needed.
+/// Runs registered startup data initializers in deterministic order.
 /// </summary>
 public sealed class DataInitializationOrchestrator
 {

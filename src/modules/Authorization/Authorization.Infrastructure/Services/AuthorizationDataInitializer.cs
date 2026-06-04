@@ -1,8 +1,8 @@
-using Authorization.Application.Ports.Services;
+using CommercialNews.BuildingBlocks.Initialization;
 
 namespace Authorization.Infrastructure.Seeding;
 
-public sealed class AuthorizationDataInitializer : IAuthorizationDataInitializer
+public sealed class AuthorizationDataInitializer : IDataInitializer
 {
     private readonly RoleSeederService _roleSeederService;
     private readonly PermissionSeederService _permissionSeederService;
@@ -24,6 +24,8 @@ public sealed class AuthorizationDataInitializer : IAuthorizationDataInitializer
         _userRoleSeederService = userRoleSeederService
             ?? throw new ArgumentNullException(nameof(userRoleSeederService));
     }
+
+    public int Order => InitializationOrders.Authorization;
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {

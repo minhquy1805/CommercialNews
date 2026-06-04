@@ -1,4 +1,5 @@
-﻿using Identity.Application.Ports.Persistence;
+﻿using CommercialNews.BuildingBlocks.Initialization;
+using Identity.Application.Ports.Persistence;
 using Identity.Application.Ports.Services;
 using Identity.Infrastructure.Configuration;
 using Identity.Infrastructure.Persistence.Exceptions;
@@ -46,7 +47,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAccessTokenGenerator, JwtAccessTokenGenerator>();
 
         services.AddScoped<IIdentityOutboxWriter, IdentityOutboxWriter>();
-        services.AddScoped<IIdentityDataInitializer, DefaultAdminInitializer>();
+        services.AddScoped<IDataInitializer, DefaultAdminInitializer>();
 
         return services;
     }
