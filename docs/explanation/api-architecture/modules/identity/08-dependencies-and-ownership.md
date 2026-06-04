@@ -381,7 +381,7 @@ Identity may expect:
 - Authorization to remain a separate governance truth owner
 - Authorization/Host policy layer to enforce explicit admin permission policies before Identity Admin use cases mutate truth
 - Notifications to protect secret-bearing delivery-trigger payloads according to delivery-token policy
-- Audit to dedupe Identity admin events by `MessageId` or equivalent `AuditEventId`
+- Audit to dedupe Identity admin events by canonical `MessageId`
 - cleanup/reconciliation/reporting to be normal operational tools for derived outputs
 
 ### 10.2 What others may expect from Identity

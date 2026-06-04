@@ -134,3 +134,36 @@ It is used to derive:
 - New-article notification policy (who receives, opt-out/unsubscribe in V2).
 
 ---
+
+## I) Audit
+
+### Domain concerns
+- **Append-only evidence:** `AuditLog` records canonical audit evidence and must not gain update/delete semantics in V1.
+- **Canonical idempotency:** `MessageId` copied from Outbox is the audit idempotency key.
+- **Public vs internal identity:** `AuditLogId`/`AuditIngestionId` are internal DB identities; `PublicId` is API/admin-facing.
+- **Consumer-side ingestion state:** `AuditIngestion` tracks Audit consumer processing separately from producer-side Outbox publication state.
+- **Redaction boundary:** stored and returned payloads must be sanitized; raw sensitive payloads must not be exposed by Audit detail responses.
+- **Normalizer ownership:** Application owns normalizer abstractions and registry usage; Infrastructure owns concrete normalizers; Worker owns broker consumption.
+
+### Key decision points (likely ADRs)
+- Audit retention and archival policy.
+- Tamper-evidence/hash-chain policy depth for V1 vs V2.
+- Which event payload fields are allowed in sanitized audit evidence.
+
+---
+
+## J) Outbox & Integration Delivery
+
+### Domain concerns
+- **Atomic async intent:** required integration messages must commit in the same local transaction as the owning module truth change.
+- **At-least-once delivery:** consumers must be idempotent and replay-safe.
+- **Producer vs consumer state:** Outbox publication status must not be confused with downstream consumer completion.
+- **Envelope consistency:** messages carry stable identity, event type, aggregate identity, priority, occurred time, and published time.
+- **Operational recovery:** failed publication, redelivery, and replay must be observable and repairable.
+
+### Key decision points (likely ADRs)
+- Outbox retention window and replay procedure.
+- DLQ handling and poison-message policy.
+- Priority semantics across publishers and consumers.
+
+---

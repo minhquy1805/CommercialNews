@@ -244,7 +244,7 @@ Internal logging may retain safe diagnostic categorization.
 
 ---
 
-## 6. Public Query Abuse Controls
+## 6. Reading Abuse Controls
 
 List, search and related endpoints are scrape-prone and may become query-expensive.
 

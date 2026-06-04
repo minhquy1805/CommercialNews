@@ -49,7 +49,7 @@ CommercialNews cohesion posture:
 - Content owns lifecycle and taxonomy (source of truth).
 - SEO owns slug/canonical/meta policy (reacts to publication state).
 - Media owns attachments + primary/ordering rules.
-- Reading (Public Query) owns read facade/caching policy (V1) and projections (V2+).
+- Reading owns read facade/caching policy (V1) and projections (V2+).
 - Interaction owns views/likes/comments (non-blocking by policy).
 - Notifications and Audit are consumers (side effects only).
 
@@ -135,11 +135,11 @@ CommercialNews guardrail:
   - audit ingestion
   - notifications (email)
   - interaction aggregation
-- Public Query is a **read facade** (bounded queries + caching policy)
+- Reading is a **read facade** (bounded queries + caching policy)
 
 ### 5.2 V2 (next step)
 Primary upgrades:
-- convert Public Query into a **Read Model**:
+- convert Reading into a **Read Model**:
   - subscribe to domain events
   - build projections / denormalized read stores
 - introduce full-text search or managed search

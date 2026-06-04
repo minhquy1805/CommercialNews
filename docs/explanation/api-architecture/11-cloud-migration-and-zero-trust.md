@@ -164,7 +164,7 @@ These guardrails map to:
 - centralize metrics/logs and validate SLO baselines
 
 ### Phase 2 — Introduce read models/projections
-- Public Query evolves into read model component
+- Reading evolves into a read model component
 - event-driven projections reduce read pressure on transactional stores
 
 ### Phase 3 — Slice out hot domains

@@ -296,7 +296,7 @@ Consumer expectations:
 
 - delivery is at-least-once
 - consumers must dedupe by `MessageId`
-- Audit must dedupe by `MessageId` or equivalent `AuditEventId`
+- Audit must dedupe by canonical `MessageId`
 - Notifications must use durable delivery tracking
 - Notifications must use message-level and business-level idempotency where duplicate user-visible delivery is harmful
 - cache/projection consumers must not let stale events overwrite fresher Identity truth

@@ -73,7 +73,7 @@ Related:
 
 - `GET /api/v1/seo/resolve` returns `200` only when SEO can safely resolve the route.
 - public not-found is a safe `404`; it must not leak whether content exists but is non-public
-- Reading/Public Query must validate Content truth before returning public content
+- Reading must validate Content truth before returning public content
 - a stale active route must not expose draft, unpublished, archived, or soft-deleted content
 - cache hits and derived route artifacts are never enough authority for public exposure
 - safe not-found or safe degradation is preferable to incorrect public exposure

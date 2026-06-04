@@ -226,7 +226,7 @@ SEO-owned cutover must ensure:
 
 ---
 
-## 8) Public Query / Reading rule (V1)
+## 8) Reading rule (V1)
 
 Reading may use SEO as the routing sidecar.
 

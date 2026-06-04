@@ -15,7 +15,7 @@ Rules:
 - Public responses must not reveal whether a target article exists but is non-public.
 - Public routing responses must expose stable public identifiers only, never internal database primary keys.
 - Public metadata must not be treated as publication authority.
-- Reading/Public Query must still validate Content truth before exposing content.
+- Reading must still validate Content truth before exposing content.
 
 ---
 

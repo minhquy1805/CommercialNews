@@ -1,142 +1,226 @@
-## 1) Business Capabilities — CommercialNews
+# Business Capabilities - CommercialNews
 
-### A) Content Management (Product Core)
+This document describes the business capabilities that shape CommercialNews
+modules and runtime boundaries. It is intentionally capability-focused, not
+class-focused.
 
-1. **Create Articles**
-   - Input: title, body/content, summary, cover/thumbnail
-   - Select: category, tags
-   - Set status: **Draft / Published / Archived**
-   - Output: article with minimum **metadata** (author, timestamps, status)
+## A) Content Management
 
-2. **Edit Articles**
-   - Save drafts and update content
-   - Maintain an **edit history** (who edited, when, what changed)
+Purpose: manage editorial truth and article lifecycle.
 
-3. **Publish / Unpublish**
-   - Publish immediately
-   - Unpublish when necessary (policy violations, content issues)
-   - Record reasons (for auditability & administration)
+Capabilities:
 
-4. **Category Management**
-   - CRUD categories
-   - (Optional) hierarchical categories aligned with the content strategy
+- Create articles and drafts.
+- Edit articles and preserve revision/lifecycle history.
+- Publish, unpublish, archive, and soft delete articles.
+- Record reasons for governance-sensitive transitions.
+- Manage categories and tags.
+- Attach tags to articles.
+- Emit article lifecycle events for downstream consumers.
 
-5. **Tag Management**
-   - CRUD tags
-   - Attach/detach tags to/from articles
+Key output:
 
-> **Key output:** a clear article **lifecycle**, reliable edit tracking, and sufficient metadata for operating the system.
+- A correct article lifecycle.
+- Stable public article identity.
+- Traceable editorial changes.
 
----
+## B) SEO and Discoverability
 
-### B) SEO & Discoverability
+Purpose: control how public content is discovered and routed.
 
-1. **Slug & Canonical**
-   - Generate slugs from titles
-   - Ensure slug **uniqueness**
-   - Define clear canonical URLs per article
+Capabilities:
 
-2. **Meta Title / Description**
-   - Optimize for search engine snippets
-   - Provide sensible defaults when not explicitly set by admins
+- Manage slug routes.
+- Ensure slug uniqueness.
+- Manage canonical URLs.
+- Manage meta title and description.
+- Manage social preview data.
+- React to content lifecycle events.
+- Support future sitemap, robots, redirects, and alias policies.
 
-3. **Social Sharing**
-   - Control preview data when shared (title, description, thumbnail)
+Key output:
 
-4. **Sitemap & Robots (V2)**
-   - Mechanism to publish important URLs for indexing
+- Stable public routes.
+- Search-friendly metadata.
+- Safe behavior when content is unpublished or archived.
 
----
+## C) Media
 
-### C) Media (Images / Videos / Files)
+Purpose: manage media assets and article-media composition.
 
-1. **Media Management**
-   - Store: URL/path, alt text, media type
+Capabilities:
 
-2. **Attach Media to Articles**
-   - Select a primary image (cover)
-   - Reorder media items
+- Register media assets.
+- Store media metadata such as type, dimensions, duration, alt text, and storage location.
+- Update media metadata.
+- Soft delete and restore media assets.
+- Attach and detach media from articles.
+- Reorder article media.
+- Set one primary media item per article.
 
-3. **Delete / Restore**
-   - Support soft-delete and restore based on operational policy
+Key output:
 
----
+- Reliable media metadata.
+- Deterministic article media presentation.
+- Recoverable media lifecycle.
 
-### D) Reading Experience (Public)
+## D) Reading Experience
 
-1. **Article Listing**
-   - Pagination
-   - Filter by category/tag
-   - Sort by time / popularity (scope-dependent)
+Purpose: serve public readers quickly and safely.
 
-2. **Article Details**
-   - Render content + metadata + media
-   - Show related articles (category/tag based)
+Capabilities:
 
-3. **Search (V1/V2 depending on scope)**
-   - Keyword-based article search
+- Serve article lists.
+- Serve article details.
+- Resolve public routes through projected data.
+- Filter by publication visibility.
+- Include public-safe SEO, media, and interaction counter data.
+- Support basic search and related content where in scope.
+- Converge from source-module events through projections.
 
----
+Key output:
 
-### E) Interaction (High Traffic, “Hot” Features)
+- Fast public reads.
+- Public-safe derived state.
+- A read path that does not synchronously depend on every source module.
 
-1. **View Tracking**
-   - Record views on read
-   - (V2) unique view counting based on measurement policy
+## E) Interaction
 
-2. **Likes**
-   - Like/unlike
-   - Track total likes per article
+Purpose: handle high-volume public engagement and moderation signals.
 
-3. **Comments**
-   - Create / edit / delete comments
-   - (V2) moderation and anti-spam controls
+Capabilities:
 
----
+- Track views.
+- Like and unlike articles.
+- Create, hide, restore, and delete comments.
+- Report comments and dismiss report groups.
+- Publish public counter snapshots to Reading.
+- Trigger moderation-related notifications where needed.
 
-### F) Identity & Access
+Key output:
 
-1. **Sign Up / Sign In**
-   - Email + password
-   - (Optional) third-party login integrations
+- Engagement state.
+- Moderation workflow state.
+- Public counter projections.
 
-2. **Email Verification**
-   - Mark accounts as verified
-   - Allow resend verification emails (rate-limited)
+## F) Identity
 
-3. **Session Management**
-   - Refresh tokens / logout
-   - Rotate/revoke based on security policy
+Purpose: manage accounts, credentials, and sessions.
 
-4. **Forgot / Reset Password**
-   - Secure password reset flow
+Capabilities:
 
-5. **Profile**
-   - Update personal information
-   - Change password
+- Register and authenticate users.
+- Verify email addresses.
+- Resend verification emails.
+- Manage refresh tokens and logout.
+- Request and complete password reset.
+- Change password.
+- Update public profile data.
+- Emit identity events for notifications, authorization setup, reading projections, and audit.
 
----
+Key output:
 
-### G) Admin Governance & Authorization
+- Secure user identity.
+- Stable user public identity.
+- Session and credential lifecycle.
 
-1. **Roles / Permissions**
-   - Manage roles and permissions; assign/revoke access
+## G) Authorization
 
-2. **Admin Panel (Content & User Administration)**
-   - CRUD content
-   - User management
-   - Hide/approve comments (scope-dependent)
+Purpose: control what admins and users can do.
 
-3. **Audit Trail**
-   - Log sensitive actions: publish/unpublish, delete/restore, role assignment, etc.
+Capabilities:
 
----
+- Manage roles.
+- Manage permissions.
+- Assign and revoke user roles.
+- Grant and revoke role permissions.
+- Evaluate permissions for API policy enforcement.
+- Emit governance events for audit.
 
-### H) Notifications
+Key output:
 
-1. **System Email**
-   - Email verification, password reset
-   - (Optional) new-article notifications
+- Least-privilege access control.
+- Explicit permission catalog.
+- Traceable role and permission changes.
 
-2. **Abuse Prevention**
-   - Rate-limit email sending for sensitive flows (register/forgot/resend, etc.)
+## H) Audit and Compliance
+
+Purpose: preserve canonical evidence for sensitive actions and operational ingestion state.
+
+Capabilities:
+
+- Ingest audit-relevant events from RabbitMQ through Worker.
+- Normalize module-specific event payloads.
+- Classify action and risk.
+- Redact sensitive payloads before evidence storage.
+- Store append-only audit evidence.
+- Track consumer-side ingestion state and idempotency by message ID.
+- Expose admin investigation APIs and dashboard summaries.
+
+Key output:
+
+- Append-only audit log.
+- Operational audit ingestion tracking.
+- Admin-facing investigation tools.
+
+## I) Notifications
+
+Purpose: deliver system messages reliably after truth changes commit.
+
+Capabilities:
+
+- Send verification emails.
+- Send password reset emails.
+- Send password changed and email verified notifications.
+- Send moderation alert emails.
+- Track email delivery state.
+- Retry transient failures.
+- Avoid duplicate harmful sends.
+
+Key output:
+
+- Reliable non-blocking notification delivery.
+- Delivery history and operational visibility.
+
+## J) Outbox and Integration Runtime
+
+Purpose: connect modules without making core workflows depend on immediate side effects.
+
+Capabilities:
+
+- Store outbox messages atomically with owner-module truth changes.
+- Publish outbox messages to RabbitMQ.
+- Carry envelope metadata such as message ID, event type, aggregate identity, priority, occurred time, and published time.
+- Support at-least-once delivery.
+- Support idempotent consumers.
+- Expose backlog, retry, and failure visibility.
+
+Key output:
+
+- Reliable event publication.
+- Async module integration.
+- Recoverable side-effect processing.
+
+## Capability-To-Module Map
+
+| Capability | Primary module |
+| --- | --- |
+| Content Management | Content |
+| SEO and Discoverability | SEO |
+| Media | Media |
+| Reading Experience | Reading |
+| Interaction | Interaction |
+| Identity | Identity |
+| Authorization | Authorization |
+| Audit and Compliance | Audit |
+| Notifications | Notifications |
+| Outbox and Integration Runtime | Outbox + Worker |
+
+## Cross-Capability Rule
+
+Business capabilities may collaborate, but ownership stays local:
+
+- Source truth lives in the owning module.
+- Derived state lives in the consuming module.
+- Cross-module contracts use stable IDs and events.
+- Async side effects must not define whether the original business action succeeded.

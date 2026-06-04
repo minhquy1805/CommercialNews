@@ -1,128 +1,200 @@
 # Architecture Quantum (Reference)
 
-This note explains **architecture quantum** and how we use it in CommercialNews to reason about:
-- the scope of architecture characteristics (system vs quantum)
-- sync vs async coupling boundaries
-- independent deployment and evolution
+This note explains how CommercialNews uses architecture quantum thinking to
+reason about deployability, cohesion, runtime coupling, and future splits.
 
 > Reading flow:
 > - `docs/explanation/architecture/arc42/03-building-blocks-modularity.md`
 > - `docs/explanation/architecture/arc42/04-runtime-view-v1.md`
+> - `docs/explanation/architecture/arc42/09-architecture-style.md`
 > - `docs/reference/connascence-and-contract-coupling.md`
-> - `docs/explanation/decisions/` (ADRs)
-
----
+> - `docs/explanation/decisions/`
 
 ## 1) Definition
 
-**Architecture quantum** = an independently deployable artifact with:
-- **high functional cohesion**, and
-- **synchronous connascence** (runtime coupling through call-and-wait interactions).
+An architecture quantum is an independently deployable artifact with:
 
-Practical interpretation:
-- A quantum is the smallest meaningful unit that can **run and evolve independently**,
-  while containing cohesive functionality.
-- Inside a quantum, synchronous wiring is acceptable because components share operational fate.
-- Between quanta, prefer async integration to reduce call-time coupling.
+- high functional cohesion
+- synchronous connascence inside the boundary
+- its own operational fate
 
----
+Practical meaning:
 
-## 2) The three parts (and what they imply)
+- Inside a quantum, synchronous wiring can be acceptable because components
+  succeed or fail together.
+- Between quanta, synchronous coupling should be minimized.
+- Async integration helps keep independently evolving parts from becoming one
+  operational unit.
 
-### 2.1 Independently deployable
-A quantum contains everything required to run “for real”.
+## 2) CommercialNews V1 Reality
 
-**Implication**
-- If a component requires a database to function, the database is part of the quantum.
-- Sharing a DB/schema across “independent services” often forces coordinated releases.
+CommercialNews V1 is a modular monolith backend with two runtime hosts:
 
-**CommercialNews note**
-- V1 is a modular monolith with a shared DB but **owned schema per module**.
-  This keeps logical independence and preserves the option to split later.
+- `CommercialNews.Api`
+- `CommercialNews.Worker`
 
----
+It uses:
 
-### 2.2 High functional cohesion
-A quantum should serve a clear business capability, not be a “misc bucket”.
+- one SQL Server database with module-owned schemas
+- RabbitMQ for event delivery
+- Outbox for reliable publication
+- Docker Compose for local and production-style packaging
 
-**Implication**
-- Cohesion aligns naturally with domain boundaries (capabilities / bounded contexts).
-- Splitting by technical layers or tables often yields low cohesion and high coordination cost.
+Because API, Worker, SQL Server, and RabbitMQ are operationally connected in V1,
+the deployed backend behaves mostly as one product quantum. Inside that product
+quantum, modules preserve logical ownership and keep open the option to split
+later.
 
-**CommercialNews note**
-- Our module map (Content, SEO, Media, Public Query, Interaction, Identity, Authorization, Audit, Notifications)
-  is designed to preserve functional cohesion.
+## 3) Module Boundaries Are Still Real
 
----
+V1 modules are not independently deployed services yet, but they are important
+architecture boundaries:
 
-### 2.3 Synchronous connascence
-Synchronous calls create runtime coupling:
-- latency composes
-- availability composes
-- failures cascade
+- Content owns article lifecycle truth.
+- SEO owns slug routes and SEO metadata.
+- Media owns media assets and article-media attachment state.
+- Reading owns public serving projections.
+- Interaction owns engagement, comments, moderation signals, and counter snapshots.
+- Identity owns users, credentials, sessions, verification, and reset flows.
+- Authorization owns roles, permissions, and policy evaluation.
+- Audit owns audit evidence and ingestion tracking.
+- Notifications owns email delivery state.
+- Outbox owns reliable publication infrastructure.
 
-**Implication**
-- A chain of synchronous calls can behave like “one quantum” operationally.
-- To keep quanta independent, reduce synchronous wiring between them.
+The shared database does not mean shared ownership. Each schema is owned by one
+module and should not be treated as a common data bucket.
 
-**CommercialNews note**
-- Read path must remain bounded: avoid long synchronous dependency chains.
-- Side effects (audit, notifications, view aggregation, indexing) use async boundaries.
+## 4) Runtime Lanes
 
----
+CommercialNews uses three lanes.
 
-## 3) Why characteristics may be defined at quantum level
-Some characteristics are best measured and optimized at the quantum boundary, not system-wide.
-Examples:
-- a read-path quantum may prioritize performance and availability
-- a notification quantum may prioritize reliability and backlog visibility
+### Lane A: synchronous request/response
 
-**CommercialNews note**
-- System-level characteristics exist (security, read performance, availability, recoverability, etc.).
-- Module profiles identify which characteristics dominate each capability.
+Used for truth writes and immediate user/admin outcomes:
 
----
+- create, edit, publish, unpublish articles
+- login, refresh, verify, reset password
+- role and permission changes
+- public reads served from Reading projections
+- admin reads and investigations
 
-## 4) CommercialNews: candidate quanta (pragmatic view)
+### Lane B: async event-driven side effects
 
-### V1 (current)
-- Primary “product quantum”: **Content + SEO + Media + Public Query** (tight product cohesion)
-- Hot-path quantum: **Interaction** (operationally distinct; can scale independently)
-- Security/governance quantum: **Identity + Authorization + Audit**
-- Async side-effect quantum: **Notifications**
+Used for work that should not block the truth transaction:
 
-> Note: This is a conceptual grouping, not necessarily deployment units in V1.
+- audit ingestion
+- email delivery
+- Reading projection updates
+- SEO reactions to content lifecycle events
+- Interaction counter publication
+- notifications and alerting
 
-### V2+ (possible evolution)
-- Keep the read path bounded; introduce a **Read Model** quantum if burst traffic requires it.
-- Keep side effects asynchronous: indexing, notifications, audit ingestion.
+Standard shape:
 
----
+```text
+Owner module truth transaction
+  -> OutboxMessage
+  -> Worker publishes to RabbitMQ
+  -> Worker consumer handles message idempotently
+  -> Consumer-owned state changes
+```
 
-## 5) Checklist: deciding whether to split a module into its own deployable quantum
+### Lane C: batch, rebuild, and reconciliation
 
-A split is justified when:
-- the module has distinct operational needs (scale, latency, reliability)
-- deployment independence delivers real value
+Used for:
+
+- projection repair
+- aggregation
+- retention cleanup
+- rebuilding derived outputs
+- operational reconciliation
+
+Batch output must not redefine source truth.
+
+## 5) Candidate Quanta For Future Splits
+
+Current conceptual candidates:
+
+### Product authoring quantum
+
+- Content
+- SEO
+- Media
+
+This group has tight editorial cohesion, but still keeps module ownership.
+
+### Public serving quantum
+
+- Reading
+- selected cache/projection infrastructure
+
+Reading is the main candidate for independent scaling because public traffic is
+bursty and latency-sensitive.
+
+### Interaction quantum
+
+- Interaction
+- stats materialization
+- public counter publication
+
+Interaction can become operationally hot and abuse-prone.
+
+### Security and governance quantum
+
+- Identity
+- Authorization
+- Audit
+
+These modules share security and governance concerns, but Audit remains async
+and append-only where possible.
+
+### Notification quantum
+
+- Notifications
+- email delivery workers
+
+Notifications is naturally async and provider-dependent.
+
+## 6) Split Checklist
+
+Splitting a module into its own deployable quantum is justified when:
+
+- it has clearly different scale, latency, or reliability needs
+- it can own its data boundary without cross-schema joins
 - contracts can be versioned safely
-- data ownership is clear (no shared schema coupling)
+- sync calls to other modules are bounded or removed
+- operational metrics show real benefit
+- the split reduces change coupling rather than increasing it
 
-Avoid splitting if:
-- the module shares domain models heavily with others
-- it requires many synchronous calls to function
-- it cannot own its data boundary without coordination overhead
+Avoid splitting when:
 
----
+- the module still requires many synchronous calls to complete ordinary work
+- it shares domain models or DTOs with other modules
+- database ownership is unclear
+- consumers cannot tolerate event lag or duplicates
+- most features still change several modules together
 
-## 6) Related risks and guardrails
+## 7) Guardrails
 
-Common “distributed monolith” indicators:
-- shared domain DTO packages across services
-- shared DB schema with cross-service joins
-- long synchronous dependency chains on the read path
+Avoid distributed-monolith patterns:
 
-Guardrails:
-- see `docs/explanation/architecture/arc42/07-architecture-governance.md`
-- see `docs/reference/connascence-and-contract-coupling.md`
+- shared domain DTO packages across modules or services
+- direct cross-module table access
+- long synchronous dependency chains
+- treating RabbitMQ messages as permanent replay history
+- letting derived state become hidden source truth
 
----
+Keep:
+
+- module-owned schemas
+- stable public/cross-module IDs
+- explicit event contracts
+- idempotent consumers
+- observable backlog and lag
+- repair and rebuild paths for derived state
+
+## 8) Summary
+
+V1 is one deployable backend system with strong module boundaries. The goal is
+not to split early. The goal is to make future splits possible by controlling
+connascence now.

@@ -78,7 +78,7 @@ Public reading endpoints (list/detail) remain fast and predictable under normal 
 
 **Architectural tactics**
 - Protect read path from non-critical workflows (interaction aggregation, email sending, audit ingestion).
-- Public Query boundary isolates read concerns from write concerns.
+- Reading boundary isolates read concerns from write concerns.
 - Use caching policy where appropriate; keep V1 queries bounded.
 - Maintain an evolution path to projections/read models in V2.
 

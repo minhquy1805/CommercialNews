@@ -111,7 +111,7 @@ Examples:
   - dedupe by `MessageId`
   - and/or protect by business intent key where required
 - audit:
-  - unique `AuditEventId` or `MessageId`
+  - unique `MessageId`
 - aggregates:
   - commutative updates and/or durable dedupe keys
 - cache invalidation/update:

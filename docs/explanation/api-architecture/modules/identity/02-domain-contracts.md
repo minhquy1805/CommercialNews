@@ -796,7 +796,7 @@ Downstream consumers such as Audit, Notifications, cache invalidation handlers, 
 
 These downstream effects do not define Identity truth.
 
-Audit must dedupe by `MessageId` or equivalent `AuditEventId`.
+Audit must dedupe by canonical `MessageId`.
 
 Notifications must use durable delivery tracking and business-level idempotency where duplicate user-visible delivery is harmful.
 

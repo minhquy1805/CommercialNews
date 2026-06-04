@@ -86,7 +86,7 @@ Archived article restore is out of scope for V1 unless a later lifecycle policy 
 
 ### Duplicate-prevention indicators
 - dedupe hits / unique-key conflicts in:
-  - audit store (AuditEventId/MessageId unique)
+  - audit store (`MessageId` unique)
   - notifications delivery log (MessageKey unique)
   - downstream projection/version apply logic where tracked
 

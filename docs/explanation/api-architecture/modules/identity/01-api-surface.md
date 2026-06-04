@@ -1065,7 +1065,7 @@ Prevent duplicated side effects and ambiguous repeated client requests from prod
 - Identity Admin commands mutate only Identity-owned truth.
 - Identity Admin commands must not update Authorization, Audit, Notifications, Redis, or derived read-model truth in the same transaction.
 - Identity Admin mutations that require side effects must commit an `OutboxMessage` atomically with the Identity truth change.
-- Audit consumes Identity Admin events asynchronously and must dedupe by `MessageId` or equivalent `AuditEventId`.
+- Audit consumes Identity Admin events asynchronously and must dedupe by canonical `MessageId`.
 - Notifications may consume selected Identity Admin events, but user-visible delivery must be protected by message-level and business-level idempotency.
 - Client-side timeout after an admin mutation must be reconciled by reading Identity truth for the target user.
 - Admin command success does not imply outbox publish, RabbitMQ delivery, Audit ingestion, Notification delivery, cache invalidation, or projection refresh has completed.

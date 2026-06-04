@@ -135,7 +135,7 @@ This creates **runtime wiring** that couples:
 - each synchronous hop is another security boundary: auth propagation, token forwarding, SSRF risk, etc.
 
 **CommercialNews example**
-If Public Query calls Content, then SEO, then Media synchronously for every request:
+If Reading calls Content, then SEO, then Media synchronously for every request:
 - the read path becomes fragile under spikes
 - failure of any dependency can degrade the entire read experience
 
@@ -202,7 +202,7 @@ Ask:
 
 Examples:
 - Shared DTOs between Content and SEO → strong static connascence → same quantum.
-- Sync chain Public Query → Content → SEO → Media → fragile runtime coupling → effectively one quantum.
+- Sync chain Reading → Content → SEO → Media → fragile runtime coupling → effectively one quantum.
 - Event-driven Content → SEO with versioned contracts → looser coupling → separate quanta become possible.
 
 ### 4.2 Implication for CommercialNews evolution

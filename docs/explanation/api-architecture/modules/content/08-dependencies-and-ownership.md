@@ -283,7 +283,7 @@ If derived publication is uncertain, truth-safe fallback beats cutover confidenc
 
 ---
 
-## 8) Public Query rule (V1)
+## 8) Reading rule (V1)
 
 Reading module may perform read-only access by policy until richer V2 projections exist.
 

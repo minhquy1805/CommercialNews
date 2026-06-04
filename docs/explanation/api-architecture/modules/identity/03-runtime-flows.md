@@ -529,7 +529,7 @@ Identity emits one of:
 - duplicate request:
   - command converges to current target state
 - duplicate event delivery:
-  - Audit dedupes by `MessageId` or equivalent `AuditEventId`
+  - Audit dedupes by canonical `MessageId`
 
 ### Runtime rules
 
@@ -645,7 +645,7 @@ Identity emits:
 - client timeout:
   - reconcile from Identity session truth
 - duplicate event delivery:
-  - Audit dedupes by `MessageId` or equivalent `AuditEventId`
+  - Audit dedupes by canonical `MessageId`
 
 ### Runtime rules
 
@@ -699,7 +699,7 @@ Identity emits one of:
 - client timeout:
   - reconcile from Identity account/security truth
 - duplicate event delivery:
-  - Audit dedupes by `MessageId` or equivalent `AuditEventId`
+  - Audit dedupes by canonical `MessageId`
 
 ### Runtime rules
 

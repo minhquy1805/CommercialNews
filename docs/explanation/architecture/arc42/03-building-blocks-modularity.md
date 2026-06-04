@@ -35,11 +35,11 @@ CommercialNews applies modularity to:
 1) Content (Core Product)  
 2) SEO  
 3) Media  
-4) Public Query (V1) → Read Model (V2+)  
+4) Reading (V1) → Read Model / Projections (V2+)
 5) Interaction  
 6) Identity  
 7) Authorization & Audit (Governance)  
-8) Notification  
+8) Notifications
 
 ---
 
@@ -124,7 +124,7 @@ CommercialNews applies modularity to:
 
 ---
 
-### 3.4.4 Public Query Module (V1) → Read Model (V2+)
+### 3.4.4 Reading Module (V1) → Read Model / Projections (V2+)
 **Owner (V1):** public read use cases (list/detail/related) + caching policy.
 
 **Owns**
@@ -231,7 +231,7 @@ CommercialNews applies modularity to:
 
 ---
 
-### 3.4.8 Notification Module
+### 3.4.8 Notifications Module
 **Owner:** system notifications (email) + templates + retry policy.
 
 **Owns**
@@ -244,7 +244,7 @@ CommercialNews applies modularity to:
 - PasswordResetRequested → send reset
 - ArticlePublished → notify subscribers (optional)
 
-> Notification is a consumer; domain modules must not directly depend on Notification.
+> Notifications is a consumer; domain modules must not directly depend on Notifications.
 
 ---
 
@@ -253,15 +253,15 @@ CommercialNews applies modularity to:
 ### Allowed
 - Content: does not depend on other modules (core)
 - SEO/Media: depend on Content via events and `articleId` (no workflow joining)
-- Public Query (V1): calls read-only APIs from Content/SEO/Media by policy
+- Reading (V1): calls read-only APIs from Content/SEO/Media by policy
 - Interaction: uses `articleId`, `userId` (no join into User/Content for rendering)
 - Identity: independent
 - Authorization: independent, uses `userId`
-- Audit/Notification: consume events only
+- Audit/Notifications: consume events only
 
 ### Forbidden
 - Interaction querying Content tables directly to render details
-- Public Query writing/updating Content/SEO/Media tables directly
+- Reading writing/updating Content/SEO/Media tables directly
 - SEO changing publication status
 - Any module bypassing ownership by directly querying another module’s database schema (except explicitly allowed V1 read-only access)
 
@@ -295,10 +295,10 @@ Example minimal payloads:
 
 **V1**
 - Clear module boundaries + minimal event catalog
-- Public Query acts as a query facade/caching policy (no mandatory full projection yet)
+- Reading acts as a query facade/caching policy (no mandatory full projection yet)
 
 **V2+**
-- Upgrade Public Query into a true Read Model: subscribe to events and build denormalized projections
+- Upgrade Reading into a true Read Model: subscribe to events and build denormalized projections
 - Upgrade search capabilities (full-text)
 - SEO: slug alias/redirect + sitemap/robots
 - Interaction: advanced moderation and anti-abuse mechanisms

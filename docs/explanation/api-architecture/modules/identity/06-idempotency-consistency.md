@@ -515,7 +515,7 @@ Rules:
 - client timeout after an admin mutation must be reconciled from Identity truth
 - repeated admin commands must not create duplicate harmful downstream effects
 - required admin outbox events must use stable `MessageId`
-- downstream Audit must dedupe admin events by `MessageId` or equivalent `AuditEventId`
+- downstream Audit must dedupe admin events by canonical `MessageId`
 
 Examples:
 
@@ -617,7 +617,7 @@ Downstream consumers must tolerate:
 
 Audit consumers must:
 
-- dedupe by `MessageId` or equivalent `AuditEventId`
+- dedupe by canonical `MessageId`
 - never persist raw delivery-token fields
 - store only sanitized investigation metadata
 

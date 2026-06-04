@@ -46,7 +46,7 @@ Safe not-found (must not leak drafts/unpublished or distinguish “missing route
 * Must be fast and cache-friendly (policy defined in Reading/edge docs).
 * Must not require fetching full SEO metadata.
 * Route resolution is not the final authority for public exposure.
-* Reading/Public Query must still validate Content truth by public resource identity before returning public content.
+* Reading must still validate Content truth by public resource identity before returning public content.
 * Cache hit alone is not sufficient authority; stale routing must lose to truth-backed visibility checks.
 * If uncertainty exists, prefer safe not-found / safe deny behavior over stale routing confidence.
 * Public routing responses must expose stable public identifiers, not internal database primary keys.

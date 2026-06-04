@@ -12,13 +12,10 @@ The goal is to support:
 ## 1) High-level Layout
 
 src/
-├─ BuildingBlocks/
-│  ├─ SharedKernel/
-│  ├─ Messaging/
-│  ├─ Observability/          (optional)
-│  └─ Security/               (optional)
+├─ building-blocks/
+│  └─ CommercialNews.BuildingBlocks/
 │
-├─ Modules/
+├─ modules/
 │  ├─ Content/
 │  ├─ Seo/
 │  ├─ Media/
@@ -29,7 +26,7 @@ src/
 │  ├─ Audit/
 │  └─ Notifications/
 │
-├─ Hosts/
+├─ hosts/
 │  ├─ CommercialNews.Api/
 │  └─ CommercialNews.Worker/
 │
@@ -65,9 +62,14 @@ src/
 
 ---
 
-## 3) BuildingBlocks (shared foundations)
+Top-level folders use lowercase names in the repository. Project names and
+namespaces keep the `CommercialNews.*` / `{Module}.*` casing.
 
-### 3.1 `BuildingBlocks/SharedKernel`
+---
+
+## 3) Building blocks (shared foundations)
+
+### 3.1 `src/building-blocks/CommercialNews.BuildingBlocks`
 Purpose: stable primitives used across modules without importing business logic.
 
 Typical contents:
@@ -76,13 +78,15 @@ Typical contents:
 - Time abstraction: `IClock`
 - Pagination/filter primitives: `PageRequest`, `SortSpec` (generic)
 - Domain event envelope primitives (if shared): `EventEnvelope`
+- SQL persistence foundations
+- Outbox primitives and integration event envelopes
 
 Rules:
 - Must remain **small** and **stable**.
 - No module-specific rules (no `Content` logic here).
 
-### 3.2 `BuildingBlocks/Messaging`
-Purpose: abstractions for publishing/consuming events.
+### 3.2 Messaging and outbox foundations
+Purpose: shared abstractions/primitives for publishing and consuming events.
 
 Typical contents:
 - `IEventPublisher`
@@ -105,11 +109,10 @@ Rules:
 Each module has a consistent internal structure.
 
 Example:
-Modules/Content/
-Content.Domain/
-Content.Application/
-Content.Infrastructure/
-Content.Contracts/ (optional)
+src/modules/Content/
+├─ Content.Domain/
+├─ Content.Application/
+└─ Content.Infrastructure/
 
 
 ### 4.1 `*.Domain`
@@ -174,7 +177,7 @@ Rule:
 
 ## 5) Hosts (deployable components)
 
-### 5.1 `Hosts/CommercialNews.Api`
+### 5.1 `src/hosts/CommercialNews.Api`
 Purpose: HTTP entry point.
 
 Contains:
@@ -189,7 +192,7 @@ Rules:
 - Controllers call Application services/handlers only.
 - Use policies for authorization; do not scatter permission checks.
 
-### 5.2 `Hosts/CommercialNews.Worker`
+### 5.2 `src/hosts/CommercialNews.Worker`
 Purpose: background processing.
 
 Contains:
@@ -243,7 +246,7 @@ tests/
 
 ### V1 (recommended)
 - Keep two deployable components: API + Worker.
-- Grow modules inside `Modules/`.
+- Grow modules inside `src/modules/`.
 - Keep contracts explicit and avoid shared domain packages.
 
 ### V2+

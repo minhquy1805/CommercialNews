@@ -639,8 +639,8 @@ Return high-level audit dashboard summary.
     "auditEvents": 120,
     "highRiskEvents": 8,
     "criticalEvents": 2,
-    "failedIngestion": 1,
-    "duplicateIngestion": 4
+    "failedIngestions": 1,
+    "duplicateIngestions": 4
   },
   "byModule": [
     {

@@ -136,7 +136,7 @@ For important flows, operators should be able to trace:
 - Audit ingestion success/failure for `identity.*`
 - Audit ingestion success/failure for `identity.admin.*`
 - Audit consumer retry count
-- Audit dedupe hit count by `MessageId` / `AuditEventId`
+- Audit dedupe hit count by canonical `MessageId`
 - Audit ingestion lag:
   - `identity occurredAt -> audit appliedAt`
 - DLQ/dead-state count and age for audit consumer where enabled

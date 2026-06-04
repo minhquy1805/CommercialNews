@@ -1,6 +1,6 @@
 # Module Template (CommercialNews)
 
-This template defines a scalable internal structure for each module under `src/Modules/{ModuleName}/`.
+This template defines a scalable internal structure for each module under `src/modules/{ModuleName}/`.
 It is designed for a **Service-Based Modular Monolith** with **Clean Architecture** and optional **event-driven side effects**.
 
 Use this as a starting point and keep it consistent across modules to reduce cognitive load.
@@ -10,7 +10,7 @@ Use this as a starting point and keep it consistent across modules to reduce cog
 ## 1) Folder Template
 
 src/
-└─ Modules/
+└─ modules/
    └─ {ModuleName}/
 
       ├─ {ModuleName}.Domain/
@@ -43,7 +43,6 @@ src/
       │  │  ├─ Validation/
       │  │  └─ Errors/
       │  │
-      │  ├─ Contracts/                 (request/response contracts if not in *.Contracts)
       │  ├─ Events/
       │  ├─ Outbox/                    (optional)
       │  ├─ Handlers/                  (application-level event handlers, not broker consumers)

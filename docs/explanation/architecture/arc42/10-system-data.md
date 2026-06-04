@@ -475,16 +475,30 @@ Table Auth_RolePermission {
 
 // Audit
 Table Audit_AuditLog {
-  AuditId bigint [pk]
-  AuditEventId uuid
-  ActorUserId bigint
+  AuditLogId bigint [pk]
+  PublicId char(26) [unique]
+  MessageId char(26) [unique]
+  EventType nvarchar
+  SourceModule nvarchar
   Action nvarchar
+  ActionCategory nvarchar
+  ActorInternalId bigint
+  ActorUserId char(26)
   ResourceType nvarchar
   ResourceId nvarchar
-  OccurredAt datetime
+  Outcome varchar
+  Severity varchar
+  RiskLevel varchar
+  Summary nvarchar
+  CorrelationId nvarchar
+  OccurredAtUtc datetime
+  IngestedAtUtc datetime
+  CreatedAtUtc datetime
+  SanitizedPayloadJson nvarchar
 
   Indexes {
-    (AuditEventId) [unique]
+    (PublicId) [unique]
+    (MessageId) [unique]
   }
 }
 

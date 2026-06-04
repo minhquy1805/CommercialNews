@@ -211,7 +211,7 @@ Remove content from public view immediately, with governance and traceability.
 Provide fast and available reading under burst traffic while enforcing visibility correctness.
 
 ### Modules involved
-- Reading Experience (Public Query)
+- Reading Experience
 - SEO (slug routing)
 - Content Management (publication state)
 - Media (primary media/attachments)
@@ -219,10 +219,10 @@ Provide fast and available reading under burst traffic while enforcing visibilit
 
 ### Flow (sync path)
 1. User requests article listing with paging/filter/sort.
-2. **Public Query** returns only public (Published) content, applying filter/sort semantics.
+2. **Reading** returns only public (Published) content, applying filter/sort semantics.
 3. User opens an article by slug.
 4. **SEO** resolves slug → articleId (fast routing path; cache-first by policy).
-5. **Public Query** fetches article detail (content + seo + media by policy) and renders response.
+5. **Reading** fetches article detail (content + seo + media by policy) and renders response.
 
 ### Side effects (async / non-blocking)
 6. **Interaction** receives a view tracking signal (must not block the response).

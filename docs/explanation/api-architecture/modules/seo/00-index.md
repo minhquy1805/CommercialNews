@@ -17,7 +17,7 @@
 - SEO route and metadata changes may propagate asynchronously, so duplicate delivery, stale delivery, replay, and rebuild must be handled safely.
 
 **Primary consumers**
-- Public Query/Reading module (slug resolution + metadata retrieval)
+- Reading module (slug resolution + metadata retrieval)
 - Content module (indirectly via events; Content is source of truth for publication state)
 - Admin UI (edit SEO metadata)
 - Edge/caching layers (optional)

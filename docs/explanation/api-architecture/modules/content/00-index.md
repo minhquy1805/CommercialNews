@@ -19,7 +19,7 @@
 
 **Primary consumers**
 - Admin UI (write workflows: create/edit/publish/unpublish)
-- Public Query/Reading module (read-only by policy in V1; projections in V2)
+- Reading module (read-only by policy in V1; projections in V2)
 - SEO module (reacts to publication state via events)
 - Audit module (ingests governance events asynchronously)
 - Notifications module (optional: new-article notifications)

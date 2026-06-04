@@ -42,7 +42,7 @@ It does **not** own:
 
 Therefore:
 - SEO may resolve a route
-- but Reading/Public Query must still validate Content truth before returning public content
+- but Reading must still validate Content truth before returning public content
 
 **Rule:** SEO may accelerate routing, but it must not become the final authority for public visibility.
 
@@ -133,7 +133,7 @@ Examples:
 
 Therefore:
 - resolving `slug -> ResourcePublicId` is only one part of public correctness
-- Reading/Public Query must still validate:
+- Reading must still validate:
   - the article exists
   - the article is `Published`
   - the article is allowed to be returned on the public path
@@ -380,7 +380,7 @@ On `/resolve` or equivalent routing flow:
 1. cache-first lookup (Redis), if enabled  
 2. on miss or suspicion of staleness, DB lookup from SEO truth  
 3. return `ResourcePublicId` as a routing target only
-4. caller (Reading/Public Query) must still enforce `Published` visibility from Content truth
+4. caller (Reading) must still enforce `Published` visibility from Content truth
 
 On public detail:
 - if slug resolves but detail/projection is stale, Reading falls back to Content truth and re-checks visibility
@@ -565,7 +565,7 @@ It does not mean:
 - the target is safe to return
 - the target has not since become non-public
 
-Reading/Public Query must still apply truth-backed visibility enforcement.
+Reading must still apply truth-backed visibility enforcement.
 
 ### 8.2 Derived serving artifacts remain subordinate
 Any SEO-serving artifact, cache, or rebuilt dataset remains:

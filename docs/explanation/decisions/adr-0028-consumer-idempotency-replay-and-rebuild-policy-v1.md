@@ -423,7 +423,7 @@ For harmful outward effects, document:
 
 Approved:
 
-- unique `MessageId` or `AuditEventId`
+- unique `MessageId`
 - append only if not already present
 - replay-safe append behavior
 

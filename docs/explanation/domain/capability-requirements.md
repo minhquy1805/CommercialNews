@@ -1,195 +1,274 @@
-# Capability Requirements — CommercialNews (V1)
+# Capability Requirements - CommercialNews V1
 
-This document captures **capability-level requirements** for CommercialNews using:
-- **Explicit requirements**: stated directly
-- **Inferred requirements**: derived from domain behavior and workload shape
-- **Additional context**: constraints and realities not typically written as “requirements”
+This document captures capability-level requirements for CommercialNews.
 
-These requirements are used to derive:
-- architecture characteristics and module profiles
-- runtime scenarios (arc42/04)
-- API/event contracts and ADRs
+The requirements are used to derive:
 
----
+- module boundaries
+- architecture characteristics
+- runtime scenarios
+- API contracts
+- event contracts
+- DB ownership
+- ADRs
 
-## A) Content Management (Product Core)
-
-### Explicit requirements
-- Authors/Admins can create, edit, publish, unpublish, and archive articles.
-- Article lifecycle states must be supported: Draft / Published / Archived.
-- Unpublish must record a reason for governance.
-- Edit history must be preserved (who/when/what changed).
-- Categories and tags must be manageable and attachable to articles.
-
-### Inferred requirements (domain-driven)
-- Lifecycle transitions must be validated (prevent illegal state transitions).
-- “Publish” is a governance boundary: it must be traceable and protected by authorization.
-- Content operations are write-heavy compared to reads but must not be fragile (publish should not depend on email/audit completion).
-
-### Additional context (workload/ops)
-- Writes are relatively low volume, but errors are high impact (bad publish/unpublish).
-- Admin operations require clear audit trails to support incident response.
-
-### Non-functional targets (policy-level)
-- Correctness and auditability take priority over raw throughput for write operations.
-
----
-
-## B) SEO & Discoverability
+## A) Content Management
 
 ### Explicit requirements
-- Generate slugs from titles and ensure slug uniqueness.
-- Support canonical URL per article.
-- Support meta title/description with sensible defaults.
-- Support social sharing preview fields (title/description/thumbnail).
-- (V2) Provide mechanisms for sitemap/robots integration.
 
-### Inferred requirements (domain-driven)
-- Slug is a public entry point: lookup by slug must be fast and reliable.
-- Slug stability policy is required (title changes do not automatically imply slug changes).
-- SEO state must follow publication state (unpublished/archived content should not be indexable by policy).
-- Canonical rules must avoid duplicate indexing and SEO fragmentation.
+- Admins can create, edit, publish, unpublish, archive, and soft delete articles.
+- Article lifecycle states must be validated.
+- Unpublish must record a reason.
+- Article revision and lifecycle history must be preserved.
+- Categories and tags must be manageable.
+- Content changes that affect other modules must emit outbox events.
 
-### Additional context (workload/ops)
-- SEO regressions have long-lived negative impact (traffic loss persists after the incident).
-- Editors may rename titles frequently; the system must avoid breaking external links.
+### Inferred requirements
 
-### Non-functional targets (policy-level)
-- Slug uniqueness: zero tolerance for collisions.
-- Slug routing must remain responsive under peak read traffic (since slug is used in read path).
+- Content is source truth for article visibility.
+- Publish and unpublish are governance boundaries and must be authorized.
+- Content writes must not depend on Audit, SEO, Reading, Notifications, or Interaction completing immediately.
+- Article public identity must remain stable across module boundaries.
 
----
+### Operational requirements
 
-## C) Media (Images / Videos / Files)
+- Write volume is moderate, but mistakes are high impact.
+- Lifecycle transitions need clear logs, correlation IDs, and auditability.
+- Failed async side effects must be recoverable from outbox/backlog.
 
-### Explicit requirements
-- Store media metadata: URL/path, alt text, media type.
-- Attach media to articles, choose a primary image, and reorder attachments.
-- Support delete/restore by operational policy (soft delete in V1).
-
-### Inferred requirements (domain-driven)
-- Primary media rules must be deterministic (0 or 1 primary per article by policy).
-- Attachment integrity must be enforced (no broken references).
-- Media lifecycle must not break reading experience (missing cover should degrade gracefully).
-
-### Additional context (workload/ops)
-- Media upload is an abuse surface (malicious files, oversized payloads, metadata risks).
-- Media availability strongly affects perceived quality of the platform.
-
-### Non-functional targets (policy-level)
-- Safety: media handling must follow secure operational practices (validation and safe processing).
-- Recoverability: restore should be possible within the retention window.
-
----
-
-## D) Reading Experience (Public)
+## B) SEO and Discoverability
 
 ### Explicit requirements
-- Public listing with pagination, filtering by category/tag, and sorting.
-- Public article detail view with content + metadata + media + related articles.
-- Keyword-based search (V1 basic; V2 advanced).
 
-### Inferred requirements (domain-driven)
-- Read path must strictly respect publication state (no draft/unpublished content visible).
-- Sorting/filter semantics must be consistent and predictable.
-- Related articles must have deterministic fallback behavior.
+- Slugs must be unique.
+- Canonical URLs must be supported.
+- Meta title and description must be supported.
+- Social preview fields must be supported.
+- SEO should react to article lifecycle changes.
 
-### Additional context (workload/ops)
-- Read traffic is bursty: “hot articles” can cause sudden spikes.
-- Users expect fast page loads; slow reads reduce retention immediately.
+### Inferred requirements
 
-### Non-functional targets (policy-level)
-- Read path is prioritized for performance and availability.
-- Degrade gracefully if non-critical subsystems fail (e.g., interaction counters delayed).
+- Slug routing is public-facing and must be fast.
+- SEO must respect publication state.
+- Title changes must not automatically break existing public routes unless policy says so.
+- SEO derived state may lag, but it must not expose non-public content.
 
----
+### Operational requirements
 
-## E) Interaction (Views / Likes / Comments)
+- SEO regressions can hurt traffic long after the incident.
+- Route repair and reconciliation should be possible.
 
-### Explicit requirements
-- Record views on read.
-- Support like/unlike and track totals.
-- Support comments create/edit/delete.
-- (V2) Provide moderation and anti-spam controls.
-
-### Inferred requirements (domain-driven)
-- Views/likes are high-volume and must not slow the read path.
-- Like/unlike must be idempotent; totals must remain consistent.
-- Comment lifecycle must support governance (ability to remove/hide abusive content).
-
-### Additional context (workload/ops)
-- Interaction is abuse-prone (spam/bots) and becomes hot during traffic spikes.
-- Peaks drive retries and duplicate submissions unless controlled.
-
-### Non-functional targets (policy-level)
-- Non-blocking interaction processing is required for read endpoints.
-- Abuse controls must exist (at least rate limiting hooks, expanded in V2).
-
----
-
-## F) Identity & Access
+## C) Media
 
 ### Explicit requirements
-- Sign up/sign in with email/password; optional third-party later.
-- Email verification with resend (rate-limited).
-- Session management via refresh tokens and logout.
-- Forgot/reset password flow.
-- Profile update and password change.
 
-### Inferred requirements (domain-driven)
-- Verification and reset flows must be secure and reliable; they are common attack targets.
-- Session/token rules must be explicit (rotation/revocation policy).
-- Sensitive data must be protected in logs/events/audit.
+- Media assets must store metadata and storage references.
+- Media can be attached to articles.
+- Article media can be reordered.
+- One primary media item can be selected.
+- Media supports soft delete and restore.
 
-### Additional context (workload/ops)
-- Login spikes may occur during major events.
-- Attackers target auth endpoints during peak times.
+### Inferred requirements
 
-### Non-functional targets (policy-level)
-- Strong security posture for auth flows (abuse protection, safe token handling).
-- Reliability: auth endpoints should remain stable under burst.
+- Article media ordering must be deterministic.
+- Broken media references should degrade gracefully in public reads.
+- Media lifecycle events should update Reading projections where needed.
 
----
+### Operational requirements
 
-## G) Admin Governance & Authorization
+- Upload and metadata handling are abuse surfaces.
+- Storage failures should not corrupt article truth.
+
+## D) Reading Experience
 
 ### Explicit requirements
-- Manage roles and permissions; assign/revoke access.
-- Provide admin capabilities for content and user management.
-- Maintain audit trail for sensitive actions.
 
-### Inferred requirements (domain-driven)
-- Least privilege must be enforceable and verifiable.
-- Policy coverage must be systematic (no “forgotten” admin endpoint).
-- Role/permission changes are sensitive and must always be auditable.
+- Public users can list articles.
+- Public users can open article details.
+- Public reads support pagination, filtering, sorting, and route lookup.
+- Reading exposes public-safe data only.
 
-### Additional context (workload/ops)
-- Governance failures are high impact (security incidents, content integrity loss).
-- Debugging incidents requires consistent audit correlation.
+### Inferred requirements
 
-### Non-functional targets (policy-level)
-- Correctness and auditability are prioritized for governance operations.
+- Reading must enforce publication visibility.
+- Reading should serve ordinary public requests from Reading-owned projections in V1.
+- Reading must not synchronously call every source module on normal public requests.
+- Derived state may lag but must be safe.
 
----
+### Operational requirements
 
-## H) Notifications
+- Read traffic is bursty.
+- P95/P99 latency matters.
+- Stale counters or delayed enrichments are acceptable; leaking drafts is not.
+
+## E) Interaction
 
 ### Explicit requirements
-- System emails: verification and reset password.
-- Optional: notify users when a new article is published.
-- Rate-limit sending for sensitive flows.
 
-### Inferred requirements (domain-driven)
+- Track article views.
+- Support like and unlike.
+- Support comments.
+- Support moderation actions such as hide, restore, delete by author, report, and dismiss reports.
+- Publish public counter snapshots to Reading.
+
+### Inferred requirements
+
+- Interaction is high-volume and abuse-prone.
+- View tracking must not slow the public read path.
+- Like/unlike must be idempotent.
+- Moderation actions must be auditable.
+
+### Operational requirements
+
+- Counters may be eventually consistent.
+- Batch materialization and projection repair must be possible.
+- Consumers must tolerate duplicate messages.
+
+## F) Identity
+
+### Explicit requirements
+
+- Users can register and sign in.
+- Email verification is supported.
+- Password reset is supported.
+- Refresh tokens and logout are supported.
+- Password change is supported.
+- Public profile update is supported.
+
+### Inferred requirements
+
+- Identity is security-critical.
+- Tokens must be protected and time-limited.
+- Identity events must not leak secrets.
+- Other modules should reference users by IDs and snapshots, not by loading Identity aggregates.
+
+### Operational requirements
+
+- Auth endpoints are abuse targets.
+- Email delivery must not block registration or password reset request success.
+- Session revocation and token rotation must be observable.
+
+## G) Authorization
+
+### Explicit requirements
+
+- Roles can be created, updated, activated, and deactivated.
+- Permissions can be created, updated, activated, and deactivated.
+- Roles can be assigned and revoked from users.
+- Permissions can be granted and revoked from roles.
+- API endpoints must be protected by explicit authorization policies.
+
+### Inferred requirements
+
+- Least privilege must be enforceable.
+- Permission keys are part of the admin API contract.
+- Governance changes must be audited.
+- Role/permission writes must not depend on Audit ingestion completing immediately.
+
+### Operational requirements
+
+- Missing policy coverage is a security defect.
+- Role and permission changes need strong traceability.
+
+## H) Audit and Compliance
+
+### Explicit requirements
+
+- Audit stores append-only evidence for sensitive actions.
+- Audit uses `MessageId` as canonical idempotency key.
+- Audit exposes admin investigation endpoints.
+- Audit tracks ingestion processing, failure, duplicate, ignored, and dead-letter states.
+- Audit payload exposed to APIs must be sanitized, not raw sensitive input.
+
+### Inferred requirements
+
+- Audit is a consumer-side module and must tolerate outbox redelivery.
+- AuditLog identity is internal; public ID is admin/API-facing.
+- Unsupported events should be tracked as ingestion outcomes, not crash the system.
+- Audit writes should be consistent through Application transaction behavior.
+
+### Operational requirements
+
+- Audit backlog, ingestion failures, duplicate count, and dead-letter count must be observable.
+- Audit evidence must preserve enough context for investigation without exposing unnecessary PII.
+
+## I) Notifications
+
+### Explicit requirements
+
+- Send verification emails.
+- Send password reset emails.
+- Send password changed and email verified notifications.
+- Send moderation alert emails.
+- Track delivery attempts and failures.
+
+### Inferred requirements
+
 - Notifications must not block core flows.
-- Retries must not cause duplicate emails (idempotency).
-- Templates must avoid leaking tokens/PII.
+- Retries must not create duplicate harmful sends.
+- Templates must avoid leaking secrets.
+- Provider failures are expected and must be handled.
 
-### Additional context (workload/ops)
-- Email provider issues happen; the system must handle partial failure.
-- Burst sending can occur (e.g., new-article notifications).
+### Operational requirements
 
-### Non-functional targets (policy-level)
-- Reliability and observability for email workflows (success/failure/backlog visibility).
-- Non-blocking requirement for core product workflows.
+- Delivery backlog and oldest pending age must be visible.
+- Retry policy must distinguish transient and terminal failures.
 
----
+## J) Outbox and Integration Runtime
+
+### Explicit requirements
+
+- Owner modules write outbox messages atomically with truth changes when side effects are required.
+- Worker publishes pending outbox messages to RabbitMQ.
+- RabbitMQ consumers process at least once.
+- Consumers must be idempotent.
+- Envelope metadata includes event identity, aggregate identity, priority, occurred time, and published time.
+
+### Inferred requirements
+
+- Outbox is infrastructure, not business truth.
+- RabbitMQ is transport, not permanent replay storage.
+- Derived state must be repairable if messages lag, duplicate, or fail.
+- Command success must not require broker publish success in the same request.
+
+### Operational requirements
+
+- Track pending outbox count.
+- Track oldest pending outbox age.
+- Track retry attempts and terminal failures.
+- Track queue ready/unacked counts.
+- Track consumer error classes.
+
+## Cross-Capability Requirements
+
+### Identifier policy
+
+- Internal DB identity columns remain internal.
+- Public IDs are used for API/admin-facing identifiers.
+- Cross-module contracts should prefer stable public IDs when available.
+- Message IDs are used for idempotency in event consumers.
+
+### Transaction policy
+
+- Handlers do not open transactions manually.
+- Application transaction behavior wraps commands that require writes.
+- Queries do not require write transactions.
+- Truth change plus outbox insert must be atomic when side effects are required.
+
+### Privacy policy
+
+- Raw sensitive payloads must not be exposed through admin APIs.
+- Audit detail payloads should be sanitized.
+- Logs should not contain secrets.
+- Email, token, password, and credential fields require explicit redaction policy.
+
+### Observability policy
+
+- Every cross-module event should carry correlation information.
+- API and Worker logs should include message IDs, event types, and correlation IDs where available.
+- Backlog and lag are first-class health indicators for async modules.
+
+### Evolution policy
+
+- A module can be considered for independent deployment only when data ownership,
+  contracts, observability, and idempotency are mature enough.
