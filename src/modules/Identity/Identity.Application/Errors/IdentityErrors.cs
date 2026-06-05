@@ -315,6 +315,26 @@ public static class IdentityErrors
                 code: "IDENTITY.PROFILE_AVATAR_URL_TOO_LONG",
                 message: "Avatar URL must not exceed 800 characters.");
 
+        public static readonly Error AvatarFileRequired =
+            Error.Validation(
+                code: "IDENTITY.PROFILE_AVATAR_FILE_REQUIRED",
+                message: "Avatar file is required.");
+
+        public static readonly Error AvatarFileTooLarge =
+            Error.Validation(
+                code: "IDENTITY.PROFILE_AVATAR_FILE_TOO_LARGE",
+                message: "Avatar file must not exceed 5 MB.");
+
+        public static readonly Error AvatarFileTypeNotAllowed =
+            Error.Validation(
+                code: "IDENTITY.PROFILE_AVATAR_FILE_TYPE_NOT_ALLOWED",
+                message: "Avatar file type is not allowed.");
+
+        public static readonly Error AvatarUploadFailed =
+            Error.Failure(
+                code: "IDENTITY.PROFILE_AVATAR_UPLOAD_FAILED",
+                message: "Avatar upload could not be completed.");
+
         public static readonly Error UpdateFailed =
             Error.Failure(
                 code: "IDENTITY.PROFILE_UPDATE_FAILED",

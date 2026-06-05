@@ -11,6 +11,7 @@ using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResendVerificationEmail;
 using Identity.Application.UseCases.ResetPassword;
+using Identity.Application.UseCases.UpdateMyAvatar;
 using Identity.Application.UseCases.UpdateMyProfile;
 using Identity.Application.UseCases.Users.ActivateUser;
 using Identity.Application.UseCases.Users.DisableUser;
@@ -51,6 +52,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IChangePasswordUseCase, ChangePasswordUseCase>();
         services.AddScoped<IGetMyProfileUseCase, GetMyProfileUseCase>();
         services.AddScoped<IUpdateMyProfileUseCase, UpdateMyProfileUseCase>();
+        services.AddScoped<IUpdateMyAvatarUseCase, UpdateMyAvatarUseCase>();
         services.AddScoped<IResendVerificationEmailUseCase, ResendVerificationEmailUseCase>();
 
         services.AddScoped<IListUsersUseCase, ListUsersUseCase>();

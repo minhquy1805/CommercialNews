@@ -14,6 +14,7 @@ using Identity.Application.Contracts.RefreshToken;
 using Identity.Application.Contracts.RegisterUser;
 using Identity.Application.Contracts.ResendVerificationEmail;
 using Identity.Application.Contracts.ResetPassword;
+using Identity.Application.Contracts.UpdateMyAvatar;
 using Identity.Application.Contracts.UpdateMyProfile;
 using Identity.Application.Contracts.VerifyEmail;
 using Identity.Application.UseCases.ChangePassword;
@@ -27,6 +28,7 @@ using Identity.Application.UseCases.RefreshToken;
 using Identity.Application.UseCases.RegisterUser;
 using Identity.Application.UseCases.ResendVerificationEmail;
 using Identity.Application.UseCases.ResetPassword;
+using Identity.Application.UseCases.UpdateMyAvatar;
 using Identity.Application.UseCases.UpdateMyProfile;
 using Identity.Application.UseCases.VerifyEmail;
 using Microsoft.AspNetCore.Authorization;
@@ -470,8 +472,7 @@ public sealed class IdentityController : ControllerBase
     {
         var applicationRequest = new UpdateMyProfileRequestDto
         {
-            FullName = request.FullName,
-            AvatarUrl = request.AvatarUrl
+            FullName = request.FullName
         };
 
         var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
@@ -480,6 +481,61 @@ public sealed class IdentityController : ControllerBase
         {
             var value = result.Value!;
             return Ok(new UpdateMyProfileResponse
+            {
+                UserId = value.UserId,
+                PublicId = value.PublicId,
+                Email = value.Email,
+                FullName = value.FullName,
+                AvatarUrl = value.AvatarUrl,
+                IsEmailVerified = value.IsEmailVerified,
+                Status = value.Status,
+                UpdatedAt = value.UpdatedAt
+            });
+        }
+
+        return this.ToActionResult(result);
+    }
+
+    [Authorize]
+    [HttpPut("me/avatar")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(UpdateMyAvatarResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateMyAvatar(
+        [FromForm] UpdateMyAvatarRequest request,
+        [FromServices] IUpdateMyAvatarUseCase useCase,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.File is null)
+        {
+            var missingFileResult = await useCase.ExecuteAsync(
+                new UpdateMyAvatarRequestDto(),
+                cancellationToken);
+
+            return this.ToActionResult(missingFileResult);
+        }
+
+        await using Stream stream = request.File.OpenReadStream();
+
+        var applicationRequest = new UpdateMyAvatarRequestDto
+        {
+            Content = stream,
+            OriginalFileName = request.File.FileName,
+            ContentType = request.File.ContentType,
+            Length = request.File.Length
+        };
+
+        var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
+
+        if (result.IsSuccess)
+        {
+            var value = result.Value!;
+            return Ok(new UpdateMyAvatarResponse
             {
                 UserId = value.UserId,
                 PublicId = value.PublicId,

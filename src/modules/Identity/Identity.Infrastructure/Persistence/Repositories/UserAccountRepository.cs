@@ -18,6 +18,7 @@ public sealed class UserAccountRepository : IUserAccountRepository
     private const string UserAccountSelectSkipAndTakeWhereDynamicProc = "[identity].[UserAccount_SelectSkipAndTakeWhereDynamic]";
     private const string UserAccountGetRecordCountWhereDynamicProc = "[identity].[UserAccount_GetRecordCountWhereDynamic]";
     private const string UserAccountUpdateProfileProc = "[identity].[UserAccount_UpdateProfile]";
+    private const string UserAccountUpdateAvatarProc = "[identity].[UserAccount_UpdateAvatar]";
     private const string UserAccountUpdatePasswordProc = "[identity].[UserAccount_UpdatePassword]";
     private const string UserAccountUpdateLastLoginProc = "[identity].[UserAccount_UpdateLastLogin]";
     private const string UserAccountSetEmailVerifiedProc = "[identity].[UserAccount_SetEmailVerified]";
@@ -417,7 +418,6 @@ public sealed class UserAccountRepository : IUserAccountRepository
     public async Task<bool> UpdateProfileAsync(
         long userId,
         string? fullName,
-        string? avatarUrl,
         CancellationToken cancellationToken = default)
     {
         if (userId <= 0)
@@ -444,6 +444,46 @@ public sealed class UserAccountRepository : IUserAccountRepository
                     {
                         Value = ToTrimmedDbValue(fullName)
                     });
+
+                return await ExecuteAffectedRowsAsync(command, cancellationToken);
+            }
+        }
+        catch (SqlException exception)
+        {
+            throw _sqlExceptionTranslator.Translate(exception);
+        }
+        finally
+        {
+            if (ownedConnection is not null)
+            {
+                await ownedConnection.DisposeAsync();
+            }
+        }
+    }
+
+    public async Task<bool> UpdateAvatarAsync(
+        long userId,
+        string? avatarUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (userId <= 0)
+        {
+            return false;
+        }
+
+        SqlConnection? ownedConnection = null;
+
+        try
+        {
+            (SqlCommand command, SqlConnection? connection) =
+                await CreateCommandAsync(UserAccountUpdateAvatarProc, cancellationToken);
+
+            ownedConnection = connection;
+
+            using (command)
+            {
+                command.Parameters.Add(
+                    new SqlParameter("@UserId", SqlDbType.BigInt) { Value = userId });
 
                 command.Parameters.Add(
                     new SqlParameter("@AvatarUrl", SqlDbType.NVarChar, 800)

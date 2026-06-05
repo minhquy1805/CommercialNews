@@ -7,7 +7,6 @@ namespace Identity.Application.Validation.UpdateMyProfile;
 public static class UpdateMyProfileValidator
 {
     private const int FullNameMaxLength = 200;
-    private const int AvatarUrlMaxLength = 800;
 
     public static Error? Validate(UpdateMyProfileRequestDto? request)
     {
@@ -20,12 +19,6 @@ public static class UpdateMyProfileValidator
             request.FullName.Trim().Length > FullNameMaxLength)
         {
             return IdentityErrors.Profile.FullNameTooLong;
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.AvatarUrl) &&
-            request.AvatarUrl.Trim().Length > AvatarUrlMaxLength)
-        {
-            return IdentityErrors.Profile.AvatarUrlTooLong;
         }
 
         return null;

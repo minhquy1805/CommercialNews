@@ -354,6 +354,28 @@ GO
 CREATE OR ALTER PROCEDURE [identity].[UserAccount_UpdateProfile]
     @UserId          BIGINT,
     @FullName        NVARCHAR(200) = NULL,
+    @AffectedRows    INT OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF @FullName IS NOT NULL
+        SET @FullName = NULLIF(LTRIM(RTRIM(@FullName)), N'');
+
+    UPDATE [identity].[UserAccount]
+    SET
+        [FullName] = @FullName,
+        [UpdatedAt] = SYSUTCDATETIME(),
+        [Version] = [Version] + 1
+    WHERE [UserId] = @UserId;
+
+    SET @AffectedRows = @@ROWCOUNT;
+END;
+GO
+
+CREATE OR ALTER PROCEDURE [identity].[UserAccount_UpdateAvatar]
+    @UserId          BIGINT,
     @AvatarUrl       NVARCHAR(800) = NULL,
     @AffectedRows    INT OUTPUT
 AS
@@ -361,9 +383,11 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
+    IF @AvatarUrl IS NOT NULL
+        SET @AvatarUrl = NULLIF(LTRIM(RTRIM(@AvatarUrl)), N'');
+
     UPDATE [identity].[UserAccount]
     SET
-        [FullName] = @FullName,
         [AvatarUrl] = @AvatarUrl,
         [UpdatedAt] = SYSUTCDATETIME(),
         [Version] = [Version] + 1

@@ -37,6 +37,10 @@ public interface IUserAccountRepository
     Task<bool> UpdateProfileAsync(
         long userId,
         string? fullName,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> UpdateAvatarAsync(
+        long userId,
         string? avatarUrl,
         CancellationToken cancellationToken = default);
 

@@ -51,7 +51,6 @@ public sealed class UpdateMyProfileUseCase : IUpdateMyProfileUseCase
         }
 
         string? normalizedFullName = UpdateMyProfileValidator.Normalize(request.FullName);
-        string? normalizedAvatarUrl = UpdateMyProfileValidator.Normalize(request.AvatarUrl);
 
         try
         {
@@ -78,10 +77,6 @@ public sealed class UpdateMyProfileUseCase : IUpdateMyProfileUseCase
                 string.Equals(
                     user.FullName,
                     normalizedFullName,
-                    StringComparison.Ordinal)
-                && string.Equals(
-                    user.AvatarUrl,
-                    normalizedAvatarUrl,
                     StringComparison.Ordinal);
 
             if (profileUnchanged)
@@ -109,7 +104,6 @@ public sealed class UpdateMyProfileUseCase : IUpdateMyProfileUseCase
                 bool updated = await _userAccountRepository.UpdateProfileAsync(
                     user.UserId,
                     normalizedFullName,
-                    normalizedAvatarUrl,
                     cancellationToken);
 
                 if (!updated)
