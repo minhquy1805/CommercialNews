@@ -143,26 +143,37 @@ public sealed class LoginUserUseCase : ILoginUserUseCase
 
             AccessTokenResult accessToken = _accessTokenGenerator.Generate(user);
 
-            string rawRefreshToken = _rawTokenGenerator.Generate();
-            byte[] refreshTokenHash = _tokenHashProvider.Hash(rawRefreshToken);
-            DateTime refreshTokenExpiresAtUtc = nowUtc.AddDays(_tokenOptions.RefreshTokenLifetimeDays);
+            string? rawRefreshToken = null;
+            DateTime? refreshTokenExpiresAtUtc = null;
+            RefreshTokenEntity? refreshToken = null;
 
-            RefreshTokenEntity refreshToken = RefreshTokenEntity.Create(
-                userId: user.UserId,
-                tokenHash: refreshTokenHash,
-                createdAt: nowUtc,
-                expiresAt: refreshTokenExpiresAtUtc,
-                createdIp: _requestContext.IpAddress,
-                userAgent: _requestContext.UserAgent,
-                correlationId: _requestContext.CorrelationId);
+            if (request.RememberMe)
+            {
+                rawRefreshToken = _rawTokenGenerator.Generate();
+                byte[] refreshTokenHash = _tokenHashProvider.Hash(rawRefreshToken);
+                DateTime expiresAtUtc = nowUtc.AddDays(_tokenOptions.RefreshTokenLifetimeDays);
+                refreshTokenExpiresAtUtc = expiresAtUtc;
+
+                refreshToken = RefreshTokenEntity.Create(
+                    userId: user.UserId,
+                    tokenHash: refreshTokenHash,
+                    createdAt: nowUtc,
+                    expiresAt: expiresAtUtc,
+                    createdIp: _requestContext.IpAddress,
+                    userAgent: _requestContext.UserAgent,
+                    correlationId: _requestContext.CorrelationId);
+            }
 
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                await _refreshTokenRepository.InsertAsync(
-                    refreshToken,
-                    cancellationToken);
+                if (refreshToken is not null)
+                {
+                    await _refreshTokenRepository.InsertAsync(
+                        refreshToken,
+                        cancellationToken);
+                }
 
                 await _userAccountRepository.UpdateLastLoginAsync(
                     user.UserId,

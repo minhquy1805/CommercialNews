@@ -128,7 +128,8 @@ public sealed class IdentityController : ControllerBase
         var applicationRequest = new LoginUserRequestDto
         {
             Email = request.Email,
-            Password = request.Password
+            Password = request.Password,
+            RememberMe = request.RememberMe
         };
 
         var result = await useCase.ExecuteAsync(applicationRequest, cancellationToken);
@@ -137,10 +138,18 @@ public sealed class IdentityController : ControllerBase
         {
             var value = result.Value!;
 
-            Response.SetRefreshTokenCookie(
-                value.RefreshToken,
-                value.RefreshTokenExpiresAtUtc,
-                _environment.IsProduction());
+            if (!string.IsNullOrWhiteSpace(value.RefreshToken) &&
+                value.RefreshTokenExpiresAtUtc.HasValue)
+            {
+                Response.SetRefreshTokenCookie(
+                    value.RefreshToken,
+                    value.RefreshTokenExpiresAtUtc.Value,
+                    _environment.IsProduction());
+            }
+            else
+            {
+                Response.ClearRefreshTokenCookie(_environment.IsProduction());
+            }
 
             return Ok(new LoginResponse
             {

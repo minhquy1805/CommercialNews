@@ -12,4 +12,6 @@ public sealed class LoginUserRequestDto
     [Required]
     [MaxLength(200)]
     public string Password { get; init; } = string.Empty;
+
+    public bool RememberMe { get; init; }
 }
