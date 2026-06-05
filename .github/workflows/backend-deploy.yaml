@@ -1,0 +1,100 @@
+name: Backend - Deploy to VM
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_version:
+        description: "Backend image version to deploy, example: v1.0.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-backend:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate backend version
+        shell: bash
+        run: |
+          VERSION="${{ inputs.backend_version }}"
+
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid backend_version: $VERSION"
+            echo "Expected format: vX.Y.Z, example: v1.0.1"
+            exit 1
+          fi
+
+          echo "Deploying backend version: $VERSION"
+
+      - name: Prepare SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+
+          echo "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/commercialnews_vm_key
+          chmod 600 ~/.ssh/commercialnews_vm_key
+
+          ssh-keyscan -H "${{ secrets.VM_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy backend services to VM
+        shell: bash
+        run: |
+          BACKEND_VERSION="${{ inputs.backend_version }}"
+
+          ssh -i ~/.ssh/commercialnews_vm_key "${{ secrets.VM_USER }}@${{ secrets.VM_HOST }}" \
+            "BACKEND_VERSION='$BACKEND_VERSION' VM_DEPLOY_PATH='${{ secrets.VM_DEPLOY_PATH }}' bash -s" << 'EOF'
+          set -e
+
+          cd "$VM_DEPLOY_PATH"
+
+          echo "Pulling latest deploy repo..."
+          git fetch origin
+          git reset --hard origin/main
+
+          echo "Updating BACKEND_IMAGE_VERSION=$BACKEND_VERSION in .env.prod..."
+          if grep -q '^BACKEND_IMAGE_VERSION=' .env.prod; then
+            sed -i "s/^BACKEND_IMAGE_VERSION=.*/BACKEND_IMAGE_VERSION=$BACKEND_VERSION/" .env.prod
+          else
+            echo "BACKEND_IMAGE_VERSION=$BACKEND_VERSION" >> .env.prod
+          fi
+
+          echo "Validating docker compose config..."
+          docker compose --env-file .env.prod -f docker-compose.prod.yaml config > /tmp/commercialnews-compose-check.yaml
+
+          echo "Pulling backend images..."
+          docker compose --env-file .env.prod -f docker-compose.prod.yaml pull \
+            commercialnews-api \
+            commercialnews-worker
+
+          echo "Recreating backend services..."
+          docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d \
+            commercialnews-api \
+            commercialnews-worker
+
+          echo "Restarting nginx..."
+          docker compose --env-file .env.prod -f docker-compose.prod.yaml restart nginx
+
+          echo "Checking backend readiness..."
+          sleep 5
+          curl -fsS https://api.minhquy.dev/health/ready
+
+          echo "Current backend services:"
+          docker compose --env-file .env.prod -f docker-compose.prod.yaml ps \
+            commercialnews-api \
+            commercialnews-worker \
+            nginx
+
+          echo "Pruning unused Docker images..."
+          docker image prune -f
+
+          echo "Backend deployment completed."
+          EOF
