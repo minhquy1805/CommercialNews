@@ -68,9 +68,11 @@ jobs:
             echo "Start backend services"
             docker compose --env-file .env.prod -f docker-compose.prod.yaml up -d commercialnews-api commercialnews-worker
 
-            echo "Check backend health"
+            echo "Check backend health inside Docker network"
             sleep 5
-            curl -fsS https://api.minhquy.dev/health/ready
+            docker exec commercialnews-nginx \
+              wget --header="Host: api.minhquy.dev" \
+              -q -O- http://commercialnews-api:8080/health/ready
 
             echo "Backend deployment completed"
           EOF
