@@ -333,7 +333,7 @@ BEGIN
     IF @Take <= 0 SET @Take = 20;
     IF @Take > 200 SET @Take = 200;
 
-    IF @SortBy <> N'PublishedAt'
+    IF @SortBy NOT IN (N'PublishedAt', N'ViewCount', N'LikeCount')
         SET @SortBy = N'PublishedAt';
 
     IF UPPER(@SortDirection) NOT IN (N'ASC', N'DESC')
@@ -425,8 +425,37 @@ BEGIN
         [TotalCount]
     FROM [Filtered]
     ORDER BY
-        CASE WHEN UPPER(@SortDirection) = N'ASC'  THEN [PublishedAtUtc] END ASC,
-        CASE WHEN UPPER(@SortDirection) = N'DESC' THEN [PublishedAtUtc] END DESC,
+        CASE
+            WHEN @SortBy = N'PublishedAt'
+             AND UPPER(@SortDirection) = N'ASC'
+            THEN [PublishedAtUtc]
+        END ASC,
+        CASE
+            WHEN @SortBy = N'PublishedAt'
+             AND UPPER(@SortDirection) = N'DESC'
+            THEN [PublishedAtUtc]
+        END DESC,
+        CASE
+            WHEN @SortBy = N'ViewCount'
+             AND UPPER(@SortDirection) = N'ASC'
+            THEN [ViewCount]
+        END ASC,
+        CASE
+            WHEN @SortBy = N'ViewCount'
+             AND UPPER(@SortDirection) = N'DESC'
+            THEN [ViewCount]
+        END DESC,
+        CASE
+            WHEN @SortBy = N'LikeCount'
+             AND UPPER(@SortDirection) = N'ASC'
+            THEN [LikeCount]
+        END ASC,
+        CASE
+            WHEN @SortBy = N'LikeCount'
+             AND UPPER(@SortDirection) = N'DESC'
+            THEN [LikeCount]
+        END DESC,
+        [PublishedAtUtc] DESC,
         [ArticleId] DESC
     OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
 END
@@ -501,35 +530,7 @@ BEGIN
       AND [Status] = N'Published';
 
     IF @ArticleId IS NULL
-    BEGIN
-        SELECT
-            CAST(NULL AS BIGINT) AS [ArticleId],
-            CAST(NULL AS CHAR(26)) AS [ArticlePublicId],
-            CAST(NULL AS NVARCHAR(200)) AS [Slug],
-            CAST(NULL AS NVARCHAR(300)) AS [Title],
-            CAST(NULL AS NVARCHAR(1000)) AS [Summary],
-
-            CAST(NULL AS BIGINT) AS [CategoryId],
-            CAST(NULL AS NVARCHAR(200)) AS [CategoryName],
-
-            CAST(NULL AS BIGINT) AS [AuthorUserId],
-            CAST(NULL AS NVARCHAR(200)) AS [AuthorDisplayName],
-
-            CAST(NULL AS BIGINT) AS [CoverMediaId],
-            CAST(NULL AS NVARCHAR(1000)) AS [CoverMediaUrl],
-            CAST(NULL AS NVARCHAR(300)) AS [CoverAlt],
-
-            CAST(NULL AS DATETIME2(3)) AS [PublishedAtUtc],
-            CAST(NULL AS DATETIME2(3)) AS [UpdatedAtUtc],
-
-            CAST(NULL AS BIGINT) AS [ViewCount],
-            CAST(NULL AS BIGINT) AS [LikeCount],
-            CAST(NULL AS BIGINT) AS [VisibleCommentCount],
-            CAST(NULL AS BIT) AS [CountersPartial]
-        WHERE 1 = 0;
-
-        RETURN;
-    END
+        THROW 58241, 'Public article was not found.', 1;
 
     ;WITH [Candidate] AS
     (

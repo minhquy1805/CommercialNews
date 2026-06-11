@@ -54,6 +54,11 @@ public sealed class ReadingSqlExceptionTranslator : SqlExceptionTranslatorBase
                 "Keyword is required.",
                 exception),
 
+            58241 => Reading(
+                "READING.ARTICLE_NOT_FOUND",
+                "Article was not found.",
+                exception),
+
             /*
               =========================================================
               Content projection validation

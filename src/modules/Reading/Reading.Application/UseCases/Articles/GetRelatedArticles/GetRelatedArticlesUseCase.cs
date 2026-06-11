@@ -1,6 +1,8 @@
+using CommercialNews.BuildingBlocks.Persistence.Sql.Exceptions;
 using CommercialNews.BuildingBlocks.SharedKernel.Results;
 using Reading.Application.Contracts.Articles.Requests;
 using Reading.Application.Contracts.Articles.Responses;
+using Reading.Application.Errors;
 using Reading.Application.Models.Queries;
 using Reading.Application.Models.Results;
 using Reading.Application.Ports.Persistence;
@@ -42,10 +44,24 @@ public sealed class GetRelatedArticlesUseCase : IGetRelatedArticlesUseCase
             ArticlePublicId: articlePublicId,
             Limit: request.Limit);
 
-        IReadOnlyList<ArticleListItemResult> relatedArticles =
-            await _articleReadModelRepository.SelectRelatedAsync(
-                query,
-                cancellationToken);
+        IReadOnlyList<ArticleListItemResult> relatedArticles;
+
+        try
+        {
+            relatedArticles =
+                await _articleReadModelRepository.SelectRelatedAsync(
+                    query,
+                    cancellationToken);
+        }
+        catch (PersistenceException exception)
+            when (string.Equals(
+                exception.Code,
+                "READING.ARTICLE_NOT_FOUND",
+                StringComparison.Ordinal))
+        {
+            return Result<IReadOnlyList<ArticleListItemResponse>>.Failure(
+                ReadingErrors.Article.NotFound);
+        }
 
         IReadOnlyList<ArticleListItemResponse> response =
             relatedArticles

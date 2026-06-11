@@ -4,6 +4,10 @@ public static class ReadingSortValues
 {
     public const string PublishedAtAscending = "publishedAt";
     public const string PublishedAtDescending = "-publishedAt";
+    public const string ViewCountAscending = "viewCount";
+    public const string ViewCountDescending = "-viewCount";
+    public const string LikeCountAscending = "likeCount";
+    public const string LikeCountDescending = "-likeCount";
 
     public const string Default = PublishedAtDescending;
 
@@ -11,7 +15,11 @@ public static class ReadingSortValues
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             PublishedAtAscending,
-            PublishedAtDescending
+            PublishedAtDescending,
+            ViewCountAscending,
+            ViewCountDescending,
+            LikeCountAscending,
+            LikeCountDescending
         };
 
     public static bool IsValid(string? value)
@@ -29,28 +37,24 @@ public static class ReadingSortValues
 
         string trimmed = value.Trim();
 
-        if (string.Equals(
-            trimmed,
-            PublishedAtAscending,
-            StringComparison.OrdinalIgnoreCase))
-        {
-            return PublishedAtAscending;
-        }
-
-        if (string.Equals(
-            trimmed,
-            PublishedAtDescending,
-            StringComparison.OrdinalIgnoreCase))
-        {
-            return PublishedAtDescending;
-        }
-
-        return Default;
+        return All.FirstOrDefault(
+                allowed => string.Equals(
+                    allowed,
+                    trimmed,
+                    StringComparison.OrdinalIgnoreCase))
+            ?? Default;
     }
 
     public static string ToSortBy(string? value)
     {
-        return "PublishedAt";
+        string normalized = NormalizeOrDefault(value);
+
+        return normalized.TrimStart('-') switch
+        {
+            "viewCount" => "ViewCount",
+            "likeCount" => "LikeCount",
+            _ => "PublishedAt"
+        };
     }
 
     public static string ToSortDirection(string? value)
