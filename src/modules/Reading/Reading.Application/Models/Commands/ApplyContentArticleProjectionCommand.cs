@@ -11,6 +11,7 @@ public sealed record ApplyContentArticleProjectionCommand(
     long? AuthorUserId,
     string? AuthorDisplayName,
     long? CoverMediaId,
+    IReadOnlyCollection<ArticleTagProjectionItem>? Tags,
     string Status,
     bool IsPublic,
     DateTime? PublishedAtUtc,

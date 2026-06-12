@@ -18,6 +18,7 @@ public sealed record ArticleUpdatedIntegrationEventPayload(
     long? CoverMediaId,
     string? CoverImageUrl,
     IReadOnlyCollection<long> TagIds,
+    IReadOnlyCollection<ArticleTagIntegrationEventPayload> Tags,
     long Version,
     DateTime UpdatedAtUtc,
     string BusinessDedupeKey);

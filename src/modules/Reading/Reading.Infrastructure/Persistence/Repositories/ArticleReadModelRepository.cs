@@ -410,6 +410,15 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
                 {
                     Value = ToDbValue(commandModel.CoverMediaId)
                 },
+                new SqlParameter("@Tags", SqlDbType.Structured)
+                {
+                    TypeName = "reading.ArticleTagListType",
+                    Value = BuildArticleTagDataTable(commandModel.Tags)
+                },
+                new SqlParameter("@SyncTags", SqlDbType.Bit)
+                {
+                    Value = commandModel.Tags is not null
+                },
                 new SqlParameter("@Status", SqlDbType.NVarChar, 30)
                 {
                     Value = commandModel.Status
@@ -1126,6 +1135,32 @@ public sealed class ArticleReadModelRepository : IArticleReadModelRepository
             Scale = 3,
             Value = ToDbValue(value)
         };
+    }
+
+    private static DataTable BuildArticleTagDataTable(
+        IReadOnlyCollection<ArticleTagProjectionItem>? tags)
+    {
+        DataTable table = new();
+        table.Columns.Add("TagId", typeof(long));
+        table.Columns.Add("TagPublicId", typeof(string));
+        table.Columns.Add("Name", typeof(string));
+        table.Columns.Add("Slug", typeof(string));
+
+        if (tags is null)
+        {
+            return table;
+        }
+
+        foreach (ArticleTagProjectionItem tag in tags)
+        {
+            table.Rows.Add(
+                tag.TagId,
+                ToDbValue(tag.TagPublicId),
+                tag.Name,
+                ToDbValue(tag.Slug));
+        }
+
+        return table;
     }
 
     private static DataTable BuildArticleMediaOrderDataTable(

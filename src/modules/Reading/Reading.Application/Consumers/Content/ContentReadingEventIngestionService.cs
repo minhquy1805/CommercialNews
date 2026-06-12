@@ -63,6 +63,7 @@ public sealed class ContentReadingEventIngestionService
                 : null,
             AuthorDisplayName: null,
             CoverMediaId: payload.CoverMediaId,
+            Tags: MapTags(payload.Tags),
             Status: payload.ToStatus,
             IsPublic: IsPublished(payload.ToStatus),
             PublishedAtUtc: payload.PublishedAtUtc,
@@ -111,6 +112,7 @@ public sealed class ContentReadingEventIngestionService
                 : null,
             AuthorDisplayName: null,
             CoverMediaId: payload.CoverMediaId,
+            Tags: MapTags(payload.Tags),
             Status: payload.Status,
             IsPublic: IsPublished(payload.Status),
             PublishedAtUtc: null,
@@ -233,5 +235,22 @@ public sealed class ContentReadingEventIngestionService
         return string.IsNullOrWhiteSpace(value)
             ? null
             : value.Trim();
+    }
+
+    private static IReadOnlyCollection<ArticleTagProjectionItem>? MapTags(
+        IReadOnlyCollection<ArticleTagReadingPayload>? tags)
+    {
+        if (tags is null)
+        {
+            return null;
+        }
+
+        return tags
+            .Select(tag => new ArticleTagProjectionItem(
+                TagId: tag.TagId,
+                TagPublicId: tag.TagPublicId,
+                Name: tag.Name,
+                Slug: null))
+            .ToArray();
     }
 }

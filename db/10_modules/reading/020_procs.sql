@@ -625,6 +625,20 @@ GO
    6) PROJECTION APPLY FROM CONTENT
    ========================================================= */
 
+IF TYPE_ID(N'[reading].[ArticleTagListType]') IS NULL
+BEGIN
+    EXEC(N'
+        CREATE TYPE [reading].[ArticleTagListType] AS TABLE
+        (
+            [TagId] BIGINT NOT NULL,
+            [TagPublicId] CHAR(26) NULL,
+            [Name] NVARCHAR(150) NOT NULL,
+            [Slug] NVARCHAR(200) NULL
+        );
+    ');
+END
+GO
+
 SET ANSI_NULLS ON;
 GO
 SET QUOTED_IDENTIFIER ON;
@@ -644,6 +658,8 @@ CREATE OR ALTER PROCEDURE [reading].[Reading_ArticleReadModel_UpsertFromContent]
     @AuthorUserId              BIGINT = NULL,
     @AuthorDisplayName         NVARCHAR(200) = NULL,
     @CoverMediaId              BIGINT = NULL,
+    @Tags                      [reading].[ArticleTagListType] READONLY,
+    @SyncTags                  BIT = 0,
 
     @Status                    NVARCHAR(30),
     @IsPublic                  BIT,
@@ -684,6 +700,27 @@ BEGIN
 
     IF @AuthorUserId IS NOT NULL AND @AuthorUserId <= 0
         THROW 58258, 'AuthorUserId must be > 0 when provided.', 1;
+
+    IF @SyncTags = 1
+       AND EXISTS
+       (
+           SELECT 1
+           FROM @Tags
+           WHERE [TagId] <= 0
+              OR LEN(LTRIM(RTRIM([Name]))) = 0
+              OR ([TagPublicId] IS NOT NULL AND LEN([TagPublicId]) <> 26)
+       )
+        THROW 58259, 'Tags contain invalid values.', 1;
+
+    IF @SyncTags = 1
+       AND EXISTS
+       (
+           SELECT 1
+           FROM @Tags
+           GROUP BY [TagId]
+           HAVING COUNT(1) > 1
+       )
+        THROW 58249, 'Tags contain duplicate tag ids.', 1;
 
     IF @UpdatedAtUtc IS NULL
         SET @UpdatedAtUtc = SYSUTCDATETIME();
@@ -963,6 +1000,58 @@ BEGIN
           AND [SourceVersion] < @SourceVersion;
 
         SET @Applied = CASE WHEN @@ROWCOUNT = 1 THEN 1 ELSE 0 END;
+    END
+
+    IF @Applied = 1 AND @SyncTags = 1
+    BEGIN
+        DELETE [target]
+        FROM [reading].[ArticleReadModelTag] AS [target]
+        WHERE [target].[ArticleId] = @ArticleId
+          AND NOT EXISTS
+          (
+              SELECT 1
+              FROM @Tags AS [source]
+              WHERE [source].[TagId] = [target].[TagId]
+          );
+
+        UPDATE [target]
+        SET
+            [TagPublicId] = [source].[TagPublicId],
+            [Name] = [source].[Name],
+            [Slug] = [source].[Slug],
+            [SourceVersion] = @SourceVersion,
+            [LastSyncedAtUtc] = @Now
+        FROM [reading].[ArticleReadModelTag] AS [target]
+        INNER JOIN @Tags AS [source]
+            ON [source].[TagId] = [target].[TagId]
+        WHERE [target].[ArticleId] = @ArticleId;
+
+        INSERT INTO [reading].[ArticleReadModelTag]
+        (
+            [ArticleId],
+            [TagId],
+            [TagPublicId],
+            [Name],
+            [Slug],
+            [SourceVersion],
+            [LastSyncedAtUtc]
+        )
+        SELECT
+            @ArticleId,
+            [source].[TagId],
+            [source].[TagPublicId],
+            [source].[Name],
+            [source].[Slug],
+            @SourceVersion,
+            @Now
+        FROM @Tags AS [source]
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM [reading].[ArticleReadModelTag] AS [target]
+            WHERE [target].[ArticleId] = @ArticleId
+              AND [target].[TagId] = [source].[TagId]
+        );
     END
 
     COMMIT TRANSACTION;

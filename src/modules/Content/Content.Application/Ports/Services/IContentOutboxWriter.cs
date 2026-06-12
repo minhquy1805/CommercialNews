@@ -1,4 +1,5 @@
 using Content.Application.Ports.Persistence;
+using Content.Application.Outbox.Payloads;
 
 namespace Content.Application.Ports.Services;
 
@@ -45,6 +46,7 @@ public interface IContentOutboxWriter
         long? coverMediaId,
         string? coverImageUrl,
         IReadOnlyCollection<long> tagIds,
+        IReadOnlyCollection<ArticleTagIntegrationEventPayload> tags,
         long version,
         DateTime updatedAtUtc,
         string? correlationId,
@@ -67,6 +69,7 @@ public interface IContentOutboxWriter
         long? coverMediaId,
         string? coverImageUrl,
         IReadOnlyCollection<long> tagIds,
+        IReadOnlyCollection<ArticleTagIntegrationEventPayload> tags,
         long actorUserId,
         long version,
         DateTime publishedAtUtc,

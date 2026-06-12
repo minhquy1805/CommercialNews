@@ -16,6 +16,7 @@ public sealed record ArticlePublishedIntegrationEventPayload(
     long? CoverMediaId,
     string? CoverImageUrl,
     IReadOnlyCollection<long> TagIds,
+    IReadOnlyCollection<ArticleTagIntegrationEventPayload> Tags,
     long ActorUserId,
     long Version,
     DateTime PublishedAtUtc,

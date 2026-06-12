@@ -5,6 +5,7 @@ using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
+using Content.Application.Outbox.Payloads;
 using Content.Application.Ports.Persistence;
 using Content.Application.Ports.Services;
 using Content.Domain.Constants;
@@ -19,6 +20,7 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
     private readonly IArticleLifecycleEventRepository _articleLifecycleEventRepository;
     private readonly IArticleTagRepository _articleTagRepository;
     private readonly ICategoryRepository _categoryRepository;
+    private readonly ITagRepository _tagRepository;
     private readonly IContentUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _dateTimeProvider;
     private readonly IRequestContext _requestContext;
@@ -29,6 +31,7 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
         IArticleLifecycleEventRepository articleLifecycleEventRepository,
         IArticleTagRepository articleTagRepository,
         ICategoryRepository categoryRepository,
+        ITagRepository tagRepository,
         IContentUnitOfWork unitOfWork,
         IDateTimeProvider dateTimeProvider,
         IRequestContext requestContext,
@@ -41,6 +44,8 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
             ?? throw new ArgumentNullException(nameof(articleTagRepository));
         _categoryRepository = categoryRepository
             ?? throw new ArgumentNullException(nameof(categoryRepository));
+        _tagRepository = tagRepository
+            ?? throw new ArgumentNullException(nameof(tagRepository));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _dateTimeProvider = dateTimeProvider ?? throw new ArgumentNullException(nameof(dateTimeProvider));
         _requestContext = requestContext ?? throw new ArgumentNullException(nameof(requestContext));
@@ -157,6 +162,29 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
                     .Distinct()
                     .ToArray();
 
+                List<ArticleTagIntegrationEventPayload> tagSnapshots = [];
+
+                foreach (long tagId in tagIds)
+                {
+                    Tag? tag = await _tagRepository.GetByIdAsync(
+                        tagId,
+                        cancellationToken);
+
+                    if (tag is null || tag.IsDeleted)
+                    {
+                        await RollbackIfNeededAsync(cancellationToken);
+
+                        return Result<PublishArticleResponseDto>.Failure(
+                            ContentErrors.ArticleTag.TagNotAttachable);
+                    }
+
+                    tagSnapshots.Add(
+                        new ArticleTagIntegrationEventPayload(
+                            TagId: tag.TagId,
+                            TagPublicId: tag.PublicId,
+                            Name: tag.Name));
+                }
+
                 await _contentOutboxWriter.EnqueueArticlePublishedAsync(
                     unitOfWork: _unitOfWork,
                     articleId: publishedArticle.ArticleId,
@@ -174,6 +202,7 @@ public sealed class PublishArticleUseCase : IPublishArticleUseCase
                     coverMediaId: publishedArticle.CoverMediaId,
                     coverImageUrl: null,
                     tagIds: tagIds,
+                    tags: tagSnapshots,
                     actorUserId: actorUserId,
                     version: publishedArticle.Version,
                     publishedAtUtc: publishedArticle.PublishedAt ?? nowUtc,

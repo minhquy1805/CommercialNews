@@ -36,6 +36,8 @@ public sealed class ArticleUpdatedReadingPayload
 
     public IReadOnlyCollection<long> TagIds { get; init; } = Array.Empty<long>();
 
+    public IReadOnlyCollection<ArticleTagReadingPayload>? Tags { get; init; }
+
     public long Version { get; init; }
 
     public DateTime UpdatedAtUtc { get; init; }

@@ -32,6 +32,8 @@ public sealed class ArticlePublishedReadingPayload
 
     public IReadOnlyCollection<long> TagIds { get; init; } = Array.Empty<long>();
 
+    public IReadOnlyCollection<ArticleTagReadingPayload>? Tags { get; init; }
+
     public long ActorUserId { get; init; }
 
     public long Version { get; init; }

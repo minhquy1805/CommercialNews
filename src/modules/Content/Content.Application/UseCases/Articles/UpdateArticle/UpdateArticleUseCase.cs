@@ -5,6 +5,7 @@ using CommercialNews.BuildingBlocks.SharedKernel.Time;
 using Content.Application.Contracts.Requests;
 using Content.Application.Contracts.Responses;
 using Content.Application.Errors;
+using Content.Application.Outbox.Payloads;
 using Content.Application.Ports.Persistence;
 using Content.Application.Ports.Services;
 using Content.Domain.Entities;
@@ -106,17 +107,25 @@ public sealed class UpdateArticleUseCase : IUpdateArticleUseCase
                     ContentErrors.Category.InactiveOrDeleted);
             }
 
+            List<ArticleTagIntegrationEventPayload> tagSnapshots = [];
+
             foreach (long tagId in distinctTagIds)
             {
-                bool tagUsable = await _tagRepository.ExistsActiveByIdAsync(
+                Tag? tag = await _tagRepository.GetByIdAsync(
                     tagId,
                     cancellationToken);
 
-                if (!tagUsable)
+                if (tag is null || !tag.CanBeAttachedToArticle)
                 {
                     return Result<UpdateArticleResponseDto>.Failure(
                         ContentErrors.ArticleTag.TagNotAttachable);
                 }
+
+                tagSnapshots.Add(
+                    new ArticleTagIntegrationEventPayload(
+                        TagId: tag.TagId,
+                        TagPublicId: tag.PublicId,
+                        Name: tag.Name));
             }
 
             DateTime nowUtc = _dateTimeProvider.UtcNow;
@@ -223,6 +232,7 @@ public sealed class UpdateArticleUseCase : IUpdateArticleUseCase
                     coverMediaId: updatedArticle.CoverMediaId,
                     coverImageUrl: null,
                     tagIds: distinctTagIds,
+                    tags: tagSnapshots,
                     version: updatedArticle.Version,
                     updatedAtUtc: updatedArticle.UpdatedAt,
                     correlationId: _requestContext.CorrelationId,

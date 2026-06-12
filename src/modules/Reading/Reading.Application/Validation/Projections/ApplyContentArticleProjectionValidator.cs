@@ -14,6 +14,8 @@ public static class ApplyContentArticleProjectionValidator
     private const int SummaryMaxLength = 1000;
     private const int CategoryNameMaxLength = 200;
     private const int AuthorDisplayNameMaxLength = 200;
+    private const int TagNameMaxLength = 150;
+    private const int TagSlugMaxLength = 200;
 
     public static Error? Validate(
         ApplyContentArticleProjectionCommand? command)
@@ -82,6 +84,11 @@ public static class ApplyContentArticleProjectionValidator
             return ReadingErrors.ValidationFailed;
         }
 
+        if (!HasValidTags(command.Tags))
+        {
+            return ReadingErrors.ValidationFailed;
+        }
+
         if (!SourceArticleStatuses.IsValid(command.Status))
         {
             return ReadingErrors.Projection.InvalidSourceStatus;
@@ -134,6 +141,14 @@ public static class ApplyContentArticleProjectionValidator
 
             CategoryName = NormalizeNullable(command.CategoryName),
             AuthorDisplayName = NormalizeNullable(command.AuthorDisplayName),
+            Tags = command.Tags?
+                .Select(tag => tag with
+                {
+                    TagPublicId = NormalizeNullable(tag.TagPublicId),
+                    Name = tag.Name.Trim(),
+                    Slug = NormalizeNullable(tag.Slug)
+                })
+                .ToArray(),
             Status = normalizedStatus,
             MessageId = NormalizeNullable(command.MessageId)
         };
@@ -177,6 +192,37 @@ public static class ApplyContentArticleProjectionValidator
 
         return SourceArticleStatuses.IsPublished(command.Status)
             && command.PublishedAtUtc.HasValue;
+    }
+
+    private static bool HasValidTags(
+        IReadOnlyCollection<ArticleTagProjectionItem>? tags)
+    {
+        if (tags is null)
+        {
+            return true;
+        }
+
+        HashSet<long> tagIds = [];
+
+        foreach (ArticleTagProjectionItem tag in tags)
+        {
+            if (tag.TagId <= 0
+                || !HasValidOptionalPublicId(tag.TagPublicId)
+                || !HasValidRequiredText(tag.Name, TagNameMaxLength)
+                || !HasValidOptionalText(tag.Slug, TagSlugMaxLength)
+                || !tagIds.Add(tag.TagId))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool HasValidOptionalPublicId(string? publicId)
+    {
+        return string.IsNullOrWhiteSpace(publicId)
+            || publicId.Trim().Length == PublicIdLength;
     }
 
     private static string? NormalizeNullable(string? value)

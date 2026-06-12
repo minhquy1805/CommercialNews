@@ -130,6 +130,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         long? coverMediaId,
         string? coverImageUrl,
         IReadOnlyCollection<long> tagIds,
+        IReadOnlyCollection<ArticleTagIntegrationEventPayload> tags,
         long version,
         DateTime updatedAtUtc,
         string? correlationId,
@@ -137,6 +138,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(tagIds);
+        ArgumentNullException.ThrowIfNull(tags);
 
         ValidateArticleEnvelope(articleId, articlePublicId, version, updatedAtUtc);
         ValidateRequired(status, nameof(status));
@@ -178,6 +180,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             CoverMediaId: coverMediaId,
             CoverImageUrl: normalizedCoverImageUrl,
             TagIds: tagIds.ToArray(),
+            Tags: NormalizeTags(tags),
             Version: version,
             UpdatedAtUtc: updatedAtUtc,
             BusinessDedupeKey: businessDedupeKey);
@@ -214,6 +217,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         long? coverMediaId,
         string? coverImageUrl,
         IReadOnlyCollection<long> tagIds,
+        IReadOnlyCollection<ArticleTagIntegrationEventPayload> tags,
         long actorUserId,
         long version,
         DateTime publishedAtUtc,
@@ -222,6 +226,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
     {
         ArgumentNullException.ThrowIfNull(unitOfWork);
         ArgumentNullException.ThrowIfNull(tagIds);
+        ArgumentNullException.ThrowIfNull(tags);
 
         ValidateArticleLifecycleEnvelope(
             articleId,
@@ -266,6 +271,7 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
             CoverMediaId: coverMediaId,
             CoverImageUrl: normalizedCoverImageUrl,
             TagIds: tagIds.ToArray(),
+            Tags: NormalizeTags(tags),
             ActorUserId: actorUserId,
             Version: version,
             PublishedAtUtc: publishedAtUtc,
@@ -584,6 +590,25 @@ public sealed class ContentOutboxWriter : IContentOutboxWriter
         return string.IsNullOrWhiteSpace(value)
             ? null
             : value.Trim();
+    }
+
+    private static IReadOnlyCollection<ArticleTagIntegrationEventPayload> NormalizeTags(
+        IReadOnlyCollection<ArticleTagIntegrationEventPayload> tags)
+    {
+        return tags
+            .Select(tag =>
+            {
+                ValidatePositiveId(tag.TagId, nameof(tag.TagId));
+                ValidateRequired(tag.TagPublicId, nameof(tag.TagPublicId));
+                ValidateRequired(tag.Name, nameof(tag.Name));
+
+                return tag with
+                {
+                    TagPublicId = tag.TagPublicId.Trim(),
+                    Name = tag.Name.Trim()
+                };
+            })
+            .ToArray();
     }
 
     private static void ValidateOptionalPositiveId(
